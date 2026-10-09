@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { ArrowDownToLine, ArrowRight, ArrowUpRight, Barcode, Check, CheckCheck, ChevronRight, CircleCheck, Clock3, FileCheck2, FileText, Inbox, Layers, Plus, Search, ScanLine, ShieldCheck, Trash2, Truck, Undo2, X, TriangleAlert } from 'lucide-react';
+import { ArrowDownToLine, ArrowRight, Barcode, Check, CheckCheck, ChevronRight, CircleCheck, Clock3, FileCheck2, FileText, Inbox, Layers, Plus, Search, ScanLine, ShieldCheck, Trash2, Undo2, TriangleAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { demoManifests, findMatches, parseReading, setReceived, type Manifest } from '@/lib/conference';
@@ -65,7 +65,9 @@ export function ConferenceWorkspace() {
     const matches = findMatches(current.current, reading);
     if (!matches.length) { setBlocked(`O CT-e ${reading.number} não está em nenhum pré-manifesto cadastrado.`); log('CT-e sem pré-manifesto', `CT-e ${reading.number}`, true); return; }
     if (matches.length > 1) { setBlocked(`O CT-e ${reading.number} aparece em mais de um pré. Cadastre a chave completa para identificar o documento com segurança.`); log('CT-e com vínculo ambíguo', `CT-e ${reading.number}`, true); return; }
-    const { manifest, doc } = matches[0];
+    const match = matches[0];
+    if (!match) return;
+    const { manifest, doc } = match;
     if (doc.received) { notify(`CT-e ${reading.number} já foi bipado${doc.receivedAt ? ` às ${new Date(doc.receivedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` : ''}.`, true); log('CT-e já conferido', `CT-e ${reading.number} · ${manifest.driver.split(' ')[0]}`, true); return; }
     const changed = setReceived(manifest, doc.id, true, new Date().toISOString());
     update(current.current.map(item => item.id === manifest.id ? changed : item));
@@ -106,7 +108,7 @@ export function ConferenceWorkspace() {
 
   return <div className="workspace">
     <aside className="sidebar">
-      <div className="brand"><Layers className="brand-symbol" size={30} strokeWidth={2.6} /> confere<span className="text-sidebar-primary">.</span></div>
+      <div className="brand"><Layers className="brand-symbol" size={30} strokeWidth={2.6} /> <span>confere<span className="text-sidebar-primary">.</span></span></div>
       <p className="brand-subtitle text-sidebar-muted text-[10px] mt-2 ml-10">Cada documento no seu lugar.</p>
       <div className="sidebar-label">Operação</div>
       <nav aria-label="Navegação principal">

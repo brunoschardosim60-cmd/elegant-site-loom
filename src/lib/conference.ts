@@ -1,6 +1,6 @@
-export type DocumentItem = { id: string; cte: string; nf: string; volumes: number; received: boolean; receivedAt?: string };
-export type Manifest = { id: string; driver: string; plate: string; date: string; documents: DocumentItem[]; finishedAt?: string };
-export type Reading = { kind: 'cte'; number: string; key?: string } | { kind: 'nfe' | 'invalid' };
+export type DocumentItem = { id: string; cte: string; nf: string; volumes: number; received: boolean; receivedAt?: string | undefined };
+export type Manifest = { id: string; driver: string; plate: string; date: string; documents: DocumentItem[]; finishedAt?: string | undefined };
+export type Reading = { kind: 'cte'; number: string; key?: string } | { kind: 'nfe' } | { kind: 'invalid' };
 
 export function parseReading(value: string): Reading {
   const code = value.trim().replace(/\s/g, '');

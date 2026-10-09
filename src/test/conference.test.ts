@@ -16,12 +16,12 @@ describe('Conferência somente CT-e', () => {
   it('rejects NF-e model 55', () => expect(parseReading(key('55', '1127276')).kind).toBe('nfe'));
   it('reads CT-e number from the model 57 key', () => expect(parseReading(key('57', '365569'))).toEqual({ kind: 'cte', number: '365569', key: key('57', '365569') }));
   it('rejects a corrupted CT-e checksum', () => { const value = key('57', '365569'); expect(parseReading(value.slice(0, 43) + ((Number(value[43]) + 1) % 10)).kind).toBe('invalid'); });
-  it('marks the matched document as received automatically', () => expect(setReceived(manifest, '1', true, '2026-10-09T09:00:00').documents[0].received).toBe(true));
+  it('marks the matched document as received automatically', () => expect(setReceived(manifest, '1', true, '2026-10-09T09:00:00').documents[0]?.received).toBe(true));
   it('does not finalize while any document is pending', () => expect(setReceived(manifest, '1', true, 'now').finishedAt).toBeUndefined());
   it('finalizes automatically after all documents arrive', () => { const first = setReceived(manifest, '1', true, 'first'); expect(setReceived(first, '2', true, 'finished').finishedAt).toBe('finished'); });
-  it('keeps a duplicate recognizable after completion', () => { const done = setReceived(manifest, '1', true, 'now'); expect(findMatches([done], { kind: 'cte', number: '365569' })[0].doc.received).toBe(true); });
+  it('keeps a duplicate recognizable after completion', () => { const done = setReceived(manifest, '1', true, 'now'); expect(findMatches([done], { kind: 'cte', number: '365569' })[0]?.doc.received).toBe(true); });
   it('reports no match for an unknown CT-e', () => expect(findMatches([manifest], { kind: 'cte', number: '999999' })).toEqual([]));
   it('does not infer CT-e from an internal CTC', () => expect(parseReading('4400365569').kind).toBe('invalid'));
   it('reopens a finalized manifest when a receipt is undone', () => { const done = setReceived(setReceived(manifest, '1', true, 'now'), '2', true, 'now'); expect(setReceived(done, '1', false, 'later').finishedAt).toBeUndefined(); });
-  it('does not match different full keys sharing a document number', () => { const full = { ...manifest, documents: [{ ...manifest.documents[0], cte: key('57', '365569') }] }; expect(findMatches([full], { kind: 'cte', number: '365569', key: 'different' })).toEqual([]); });
+  it('does not match different full keys sharing a document number', () => { const full: Manifest = { ...manifest, documents: [{ id: 'full', nf: '1127276-1', volumes: 27, received: false, cte: key('57', '365569') }] }; expect(findMatches([full], { kind: 'cte', number: '365569', key: 'different' })).toEqual([]); });
 });
