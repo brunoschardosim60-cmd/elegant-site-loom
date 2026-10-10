@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ recognize: vi.fn(), terminate: vi.fn(), setParameters: vi.fn() }));
 vi.mock('tesseract.js', () => ({
-  PSM: { AUTO: '3', SPARSE_TEXT: '11' },
+  PSM: { AUTO: '3', SPARSE_TEXT: '11', SINGLE_LINE: '7' },
   createWorker: vi.fn(async () => mocks),
 }));
-vi.mock('@/lib/image-prep', () => ({ prepareForOcr: vi.fn(async (file: File) => file) }));
+vi.mock('@/lib/image-prep', () => ({ prepareForOcr: vi.fn(async (file: File) => file), preparePrintedField: vi.fn(async (file: File) => file) }));
 import { prepareForOcr } from '@/lib/image-prep';
 import { readPrePhoto } from '@/lib/photo-ocr';
 
@@ -15,7 +15,7 @@ describe('Photo OCR retries', () => {
     mocks.recognize.mockResolvedValueOnce(result('z £ É', 5))
       .mockResolvedValueOnce(result('DI0060186918 Placa IYA7J31 CT-e: 365569'));
     const reading = await readPrePhoto(new File(['image'], 'photo.jpg'));
-    expect(reading.pre).toEqual({ id: 'DI0060186918', plate: 'IYA7J31', ctes: ['365569'] });
+    expect(reading.pre).toMatchObject({ id: 'DI0060186918', plate: 'IYA7J31', ctes: ['365569'] });
     expect(prepareForOcr).toHaveBeenCalledWith(expect.any(File), 90);
     expect(mocks.terminate).toHaveBeenCalledOnce();
   });
@@ -31,5 +31,14 @@ describe('Photo OCR retries', () => {
     mocks.recognize.mockRejectedValue(new Error('decoder failed'));
     await expect(readPrePhoto(new File(['image'], 'photo.jpg'))).rejects.toThrow('decoder failed');
     expect(mocks.terminate).toHaveBeenCalledOnce();
+  });
+  it('uses a separate reading of the printed ID instead of keeping an OCR letter confusion', async () => {
+    mocks.recognize.mockResolvedValueOnce({ data: {
+      text: 'DIS0123456789 Placa ABC1D23 CT-e: 123456', confidence: 80,
+      blocks: [{ paragraphs: [{ lines: [{ words: [{ text: 'DIS0123456789', confidence: 60, bbox: { x0: 100, y0: 100, x1: 300, y1: 130 } }] }] }] }],
+    } }).mockResolvedValueOnce(result('DI00123456789'));
+    const reading = await readPrePhoto(new File(['image'], 'photo.jpg'));
+    expect(reading.pre.id).toBe('DI00123456789');
+    expect(mocks.setParameters).toHaveBeenLastCalledWith({ tessedit_pageseg_mode: '7', tessedit_char_whitelist: 'DI0123456789' });
   });
 });

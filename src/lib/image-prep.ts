@@ -1,10 +1,10 @@
-/** Prepares a phone photo for OCR: caps/upsamples size, converts to grayscale and stretches contrast. Falls back to the original file. */
+/** Preserve small printed digits while resizing and rotating the photo. */
 export async function prepareForOcr(file: File, rotation: 0 | 90 | 180 | 270 = 0): Promise<Blob> {
   let bitmap: ImageBitmap | undefined;
   try {
     bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
     const longest = Math.max(bitmap.width, bitmap.height);
-    const scale = Math.min(3600 / longest, Math.max(1, 2400 / longest));
+    const scale = Math.min(3, 3840 / longest);
     const canvas = document.createElement('canvas');
     const width = Math.round(bitmap.width * scale);
     const height = Math.round(bitmap.height * scale);
@@ -13,21 +13,39 @@ export async function prepareForOcr(file: File, rotation: 0 | 90 | 180 | 270 = 0
     canvas.height = sideways ? width : height;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return file;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     ctx.fillStyle = '#fff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.translate(canvas.width / 2, canvas.height / 2);
     ctx.rotate(rotation * Math.PI / 180);
     ctx.drawImage(bitmap, -width / 2, -height / 2, width, height);
-    const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const d = img.data; const hist = new Array<number>(256).fill(0);
-    for (let i = 0; i < d.length; i += 4) { const g = Math.round(0.299 * d[i]! + 0.587 * d[i + 1]! + 0.114 * d[i + 2]!); d[i] = d[i + 1] = d[i + 2] = g; hist[g]!++; }
-    const total = d.length / 4; let acc = 0; let lo = 0; let hi = 255;
-    for (let v = 0; v < 256; v++) { acc += hist[v]!; if (acc >= total * 0.01) { lo = v; break; } }
-    acc = 0; for (let v = 255; v >= 0; v--) { acc += hist[v]!; if (acc >= total * 0.01) { hi = v; break; } }
-    const range = Math.max(1, hi - lo);
-    for (let i = 0; i < d.length; i += 4) { const g = Math.max(0, Math.min(255, ((d[i]! - lo) * 255) / range)); d[i] = d[i + 1] = d[i + 2] = g; }
-    ctx.putImageData(img, 0, 0);
     return await new Promise<Blob>(resolve => canvas.toBlob(b => resolve(b ?? file), 'image/png'));
   } catch { return file; }
   finally { bitmap?.close(); }
+}
+
+/** Isolate a small printed field from table lines and nearby barcode bars. */
+export async function preparePrintedField(source: Blob, box: { x0: number; y0: number; x1: number; y1: number }): Promise<Blob> {
+  const bitmap = await createImageBitmap(source);
+  try {
+    const height = box.y1 - box.y0;
+    const x = Math.max(0, box.x0 - height * 2);
+    const y = Math.max(0, box.y0 - height * 0.3);
+    const width = Math.min(bitmap.width - x, box.x1 - x + height * 2);
+    const cropHeight = Math.min(bitmap.height - y, height * 1.6);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(width + 40); canvas.height = Math.ceil(cropHeight + 40);
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return source;
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(bitmap, x, y, width, cropHeight, 20, 20, width, cropHeight);
+    const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    for (let i = 0; i < pixels.data.length; i += 4) {
+      const g = (pixels.data[i]! + pixels.data[i + 1]! + pixels.data[i + 2]!) / 3 < 160 ? 0 : 255;
+      pixels.data[i] = pixels.data[i + 1] = pixels.data[i + 2] = g;
+    }
+    ctx.putImageData(pixels, 0, 0);
+    return await new Promise<Blob>(resolve => canvas.toBlob(b => resolve(b ?? source), 'image/png'));
+  } finally { bitmap.close(); }
 }
