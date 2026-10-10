@@ -9,7 +9,7 @@ export const analyzeDivergence = createServerFn({ method: 'POST' })
     return { cte: clean(data.cte), nf: clean(data.nf), volumesExpected: clean(data.volumesExpected), volumesReceived: clean(data.volumesReceived), manifest: clean(data.manifest), description: clean(data.description) };
   })
   .handler(async ({ data }) => {
-    const key = process.env.LOVABLE_API_KEY;
+    const key = process.env['LOVABLE_API_KEY'];
     if (!key) return { ok: false as const, error: 'Análise indisponível: chave não configurada.' };
     const prompt = `Dados informados pelo conferente:\nCT-e: ${data.cte || '—'}\nNF: ${data.nf || '—'}\nPré-manifesto: ${data.manifest || '—'}\nVolumes esperados: ${data.volumesExpected || '—'}\nVolumes recebidos: ${data.volumesReceived || '—'}\nDivergência: ${data.description}`;
     const res = await fetch('https://ai.gateway.lovable.dev/v1/responses', {
