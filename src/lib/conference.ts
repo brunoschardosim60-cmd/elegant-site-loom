@@ -1,4 +1,4 @@
-export type DocumentItem = { id: string; ctc: string; nf: string; volumes: number; received: boolean; receivedAt?: string | undefined };
+export type DocumentItem = { id: string; ctc: string; nf: string; client?: string; recipient?: string; volumes: number; received: boolean; receivedAt?: string | undefined };
 export type Manifest = { id: string; driver: string; plate: string; date: string; documents: DocumentItem[]; finishedAt?: string | undefined };
 export type Reading = { kind: 'ctc'; number: string } | { kind: 'nfe' } | { kind: 'invalid' };
 

@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { Camera, Loader2, Sparkles, ArrowDownToLine, ArrowRight, Barcode, Check, CheckCheck, ChevronRight, CircleCheck, Clock3, FileCheck2, FileText, Inbox, Layers, Plus, Search, ScanLine, ShieldCheck, Undo2, TriangleAlert } from 'lucide-react';
+import { Loader2, Sparkles, ArrowDownToLine, ArrowRight, Barcode, Check, CheckCheck, ChevronRight, CircleCheck, Clock3, FileCheck2, FileText, Inbox, Layers, Plus, Search, ScanLine, ShieldCheck, Undo2, TriangleAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { demoManifests, findMatches, parseReading, setReceived, type Manifest } from '@/lib/conference';
 import { analyzeDivergence } from '@/lib/divergence.functions';
 
-import { ManifestDocumentsEditor, type ManifestDraftRow } from './manifest-documents-editor';
+import { ManifestImportDialog } from './manifest-import-dialog';
+import { applyImports, type ImportDraft } from '@/lib/manifest-import';
 
 type View = 'pending' | 'finished' | 'issues';
 type Activity = { id: number; title: string; description: string; time: string; warning?: boolean };
@@ -29,33 +30,12 @@ export function ConferenceWorkspace() {
   const [blocked, setBlocked] = useState<string | null>(null);
   const [newOpen, setNewOpen] = useState(false);
   const [now, setNow] = useState('2026-10-09T09:36:00');
-  const [formError, setFormError] = useState('');
-  const [newRows, setNewRows] = useState<ManifestDraftRow[]>([{ ctc: '', nf: '', volumes: '1' }]);
-  const [selectedRow, setSelectedRow] = useState(0);
+  const [prefillId, setPrefillId] = useState('');
   const sequence = useRef(10);
-  const [ocrBusy, setOcrBusy] = useState(false);
-  const [ocrText, setOcrText] = useState('');
-  const [ocrProgress, setOcrProgress] = useState('');
-  const [draft, setDraft] = useState({ id: '', plate: '', driver: '' });
   const [divOpen, setDivOpen] = useState(false);
   const [div, setDiv] = useState({ ctc: '', nf: '', manifest: '', volumesExpected: '', volumesReceived: '', description: '' });
   const [divBusy, setDivBusy] = useState(false);
   const [divResult, setDivResult] = useState<{ text?: string; error?: string } | null>(null);
-  async function readPhoto(file: File | undefined) {
-    if (!file) return;
-    setOcrBusy(true); setFormError(''); setOcrText('');
-    try {
-      const { readPrePhoto } = await import('@/lib/photo-ocr');
-      const { text, pre } = await readPrePhoto(file, setOcrProgress);
-      setOcrText(text.trim());
-      setDraft(d => ({ ...d, id: pre.id || d.id, plate: pre.plate || d.plate, driver: pre.driver || d.driver }));
-      if (pre.documents.length) setNewRows(pre.documents);
-      else if (pre.ctcs.length) setNewRows(pre.ctcs.map(ctc => ({ ctc, nf: '', volumes: '' })));
-      setSelectedRow(0);
-      setFormError(pre.documents.length ? `Foto lida: ${pre.documents.length} CTC(s) importados. Revise os dados antes de cadastrar.` : pre.id || pre.plate || pre.ctcs.length ? `Foto lida: ${pre.ctcs.length} CTC(s) encontrados. Revise antes de cadastrar.` : 'Confira o texto lido ou preencha os dados manualmente.');
-    } catch { setFormError('Falha ao ler a foto. Digite os dados manualmente.'); }
-    finally { setOcrBusy(false); }
-  }
   async function submitDivergence(event: FormEvent) {
     event.preventDefault();
     if (!div.description.trim()) return;
@@ -68,18 +48,18 @@ export function ConferenceWorkspace() {
     const { jsPDF } = await import('jspdf');
     const { default: autoTable } = await import('jspdf-autotable');
     const pdf = new jsPDF();
-    const done = manifests.flatMap(m => m.documents.filter(d => d.received).map(d => [m.id, m.driver, d.ctc, d.nf, String(d.volumes)]));
-    const open = manifests.flatMap(m => m.documents.filter(d => !d.received).map(d => [m.id, m.driver, d.ctc, d.nf, String(d.volumes)]));
+    const done = manifests.flatMap(m => m.documents.filter(d => d.received).map(d => [m.id, m.driver, d.ctc, d.client || '—', d.nf, String(d.volumes)]));
+    const open = manifests.flatMap(m => m.documents.filter(d => !d.received).map(d => [m.id, m.driver, d.ctc, d.client || '—', d.nf, String(d.volumes)]));
     pdf.setFontSize(16); pdf.text('Relatório de conferência de CTC', 14, 18);
     pdf.setFontSize(10); pdf.text(`Gerado em ${new Date().toLocaleString('pt-BR')}`, 14, 25);
     const status = !manifests.length ? 'Sem pré-manifestos' : open.length ? `Em aberto — ${open.length} pendência(s)` : 'Concluída — todos os CTC conferidos';
     pdf.text(`Status final: ${status}`, 14, 31);
     pdf.text(`Pré-manifestos: ${manifests.length} · Finalizados: ${manifests.filter(m => m.finishedAt).length} · Ocorrências: ${issues.length}`, 14, 37);
-    const head = [['Pré', 'Motorista', 'CTC', 'NF', 'Vols.']];
-    autoTable(pdf, { startY: 44, head: [['CTC conferidos (' + done.length + ')', '', '', '', '']], body: [], theme: 'plain' });
-    autoTable(pdf, { head, body: done.length ? done : [['—', '', '', '', '']], headStyles: { fillColor: [0, 61, 165] } });
-    autoTable(pdf, { head: [['Pendências (' + open.length + ')', '', '', '', '']], body: [], theme: 'plain' });
-    autoTable(pdf, { head, body: open.length ? open : [['—', '', '', '', '']], headStyles: { fillColor: [200, 120, 0] } });
+    const head = [['Pré', 'Motorista', 'CTC', 'Cliente / laboratório', 'NF', 'Vols.']];
+    autoTable(pdf, { startY: 44, head: [['CTC conferidos (' + done.length + ')', '', '', '', '', '']], body: [], theme: 'plain' });
+    autoTable(pdf, { head, body: done.length ? done : [['—', '', '', '', '', '']], headStyles: { fillColor: [0, 61, 165] } });
+    autoTable(pdf, { head: [['Pendências (' + open.length + ')', '', '', '', '', '']], body: [], theme: 'plain' });
+    autoTable(pdf, { head, body: open.length ? open : [['—', '', '', '', '', '']], headStyles: { fillColor: [200, 120, 0] } });
     if (issues.length) { autoTable(pdf, { head: [['Ocorrências', 'Detalhe', 'Hora']], body: issues.map(i => [i.title, i.description, i.time]), headStyles: { fillColor: [90, 90, 90] } }); }
     pdf.save('conferencia.pdf');
   }
@@ -106,7 +86,7 @@ export function ConferenceWorkspace() {
     if (/^DI/i.test(input)) {
       const manifest = current.current.find(item => item.id.toUpperCase() === input.toUpperCase());
       if (manifest) { setView(manifest.finishedAt ? 'finished' : 'pending'); setQuery(manifest.id); notify(`Pré de ${manifest.driver.split(' ')[0]} localizado`); }
-      else { setFormError(''); setDraft(d => ({ ...d, id: input.toUpperCase() })); setNewOpen(true); }
+      else { setPrefillId(input.toUpperCase()); setNewOpen(true); }
       return;
     }
     const reading = parseReading(input);
@@ -135,22 +115,19 @@ export function ConferenceWorkspace() {
   const documents = manifests.flatMap(item => item.documents);
   const missing = pending.flatMap(item => item.documents).filter(doc => !doc.received);
   const age = (date: string) => Math.max(0, Math.floor((new Date(now).getTime() - new Date(date).getTime()) / 86400000));
-  const visible = (view === 'finished' ? finished : pending).filter(item => `${item.driver} ${item.id} ${item.plate} ${item.documents.map(doc => doc.ctc).join(' ')}`.toLowerCase().includes(query.toLowerCase())).filter(item => filter !== 'old' || age(item.date) >= 2).sort((a, b) => filter === 'new' ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date));
+  const visible = (view === 'finished' ? finished : pending).filter(item => `${item.driver} ${item.id} ${item.plate} ${item.documents.map(doc => `${doc.ctc} ${doc.nf} ${doc.client || ''} ${doc.recipient || ''}`).join(' ')}`.toLowerCase().includes(query.toLowerCase())).filter(item => filter !== 'old' || age(item.date) >= 2).sort((a, b) => filter === 'new' ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date));
 
-  function addManifest(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const data = new FormData(event.currentTarget);
-    const id = String(data.get('id')).trim().toUpperCase();
-    if (current.current.some(item => item.id === id)) { setFormError('Esse pré-manifesto já está cadastrado.'); return; }
-    const validRows = newRows.map(row => ({ ...row, reading: parseReading(row.ctc) }));
-    if (validRows.some(row => row.reading.kind !== 'ctc' || !Number.isInteger(Number(row.volumes)) || Number(row.volumes) < 1)) { setFormError('Informe CTCs válidos e volumes inteiros maiores que zero.'); return; }
-    const identifiers = validRows.map(row => row.ctc.replace(/\s/g, ''));
-    if (new Set(identifiers).size !== identifiers.length) { setFormError('Há um CTC repetido nesta lista.'); return; }
-    const manifest: Manifest = { id, driver: String(data.get('driver')).trim(), plate: String(data.get('plate')).trim().toUpperCase(), date: new Date().toISOString(), documents: validRows.map((row, i) => ({ id: `${id}-${i}`, ctc: row.ctc.replace(/\s/g, ''), nf: row.nf.trim() || '—', volumes: Number(row.volumes), received: false })) };
-    update([...current.current, manifest]); setView('pending'); setQuery(''); setFilter('all'); setNewOpen(false); setNewRows([{ ctc: '', nf: '', volumes: '1' }]); setSelectedRow(0); setDraft({ id: '', plate: '', driver: '' }); log('Pré-manifesto adicionado', manifest.driver); notify('Pré-manifesto cadastrado. Documentos pendentes.');
+  function importDrafts(drafts: ImportDraft[]) {
+    const result = applyImports(current.current, drafts, new Date().toISOString());
+    if (result.ok) {
+      update(result.manifests); setView('pending'); setQuery(''); setFilter('all');
+      log('Documentos importados', `${drafts.length} foto(s) / pré(s) revisados`);
+      notify(`${drafts.length} cadastro(s) concluídos.`);
+    }
+    return result;
   }
   function exportSession() {
-    const rows = [['Pré-manifesto', 'Motorista', 'Placa', 'CTC', 'NF', 'Volumes', 'Status'], ...manifests.flatMap(item => item.documents.map(doc => [item.id, item.driver, item.plate, doc.ctc, doc.nf, String(doc.volumes), doc.received ? 'Conferido' : 'Pendente']))];
+    const rows = [['Pré-manifesto', 'Motorista', 'Placa', 'CTC', 'Cliente / laboratório', 'Destinatário', 'NF', 'Volumes', 'Status'], ...manifests.flatMap(item => item.documents.map(doc => [item.id, item.driver, item.plate, doc.ctc, doc.client || '', doc.recipient || '', doc.nf, String(doc.volumes), doc.received ? 'Conferido' : 'Pendente']))];
     const text = '\ufeff' + rows.map(row => row.map(value => `"${value.replace(/"/g, '""')}"`).join(';')).join('\r\n');
     const url = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }));
     const link = document.createElement('a'); link.href = url; link.download = 'conferencia.csv'; link.click(); URL.revokeObjectURL(url);
@@ -174,14 +151,14 @@ export function ConferenceWorkspace() {
     <main className="main">
       <header className="topbar"><div className="topbar-trail"><span>Operação</span><ChevronRight size={12} /><span className="text-foreground font-semibold">{view === 'pending' ? 'Conferência' : view === 'finished' ? 'Finalizados' : 'Ocorrências'}</span></div><div className="topbar-meta"><span className="date-meta">{new Date(now).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}</span><span><i className="online-dot" />Sessão ativa</span></div></header>
       <div className="page-content">
-        <div className="page-heading"><div><h1>{titles[view]}</h1><p className="subtitle">{view === 'pending' ? 'Tudo o que saiu. Tudo o que voltou. Sem perder uma nota.' : view === 'finished' ? 'Documentos recebidos. Conferência concluída.' : 'Documentos que precisam de atenção.'}</p></div><Button onClick={() => { setFormError(''); setNewOpen(true); }}><Plus size={15} /> Novo pré<span className="hidden sm:inline">-manifesto</span></Button></div>
+        <div className="page-heading"><div><h1>{titles[view]}</h1><p className="subtitle">{view === 'pending' ? 'Tudo o que saiu. Tudo o que voltou. Sem perder uma nota.' : view === 'finished' ? 'Documentos recebidos. Conferência concluída.' : 'Documentos que precisam de atenção.'}</p></div><Button onClick={() => { setPrefillId(''); setNewOpen(true); }}><Plus size={15} /> Novo pré<span className="hidden sm:inline">-manifesto</span></Button></div>
         <div className="metric-grid">
           {[{ label: 'Pré-manifestos em aberto', value: pending.length, caption: 'Aguardando documentos', icon: Layers, color: '' }, { label: 'Documentos pendentes', value: missing.length, caption: `${missing.reduce((sum, doc) => sum + doc.volumes, 0)} volumes a conferir`, icon: FileText, color: '' }, { label: 'Documentos conferidos', value: documents.filter(doc => doc.received).length, caption: 'Recebidos e identificados', icon: CircleCheck, color: 'text-success' }, { label: 'Pré-manifestos finalizados', value: finished.length, caption: 'Todos os documentos recebidos', icon: CheckCheck, color: 'text-primary' }].map(metric => <div className="metric" key={metric.label}><div className="metric-label">{metric.label}<metric.icon /></div><div className={`metric-value ${metric.color}`}>{String(metric.value).padStart(2, '0')}</div><div className="metric-caption">{metric.caption}</div></div>)}
         </div>
         <section className="scanner-band" aria-label="Leitor de CTC"><div className="scanner-symbol"><ScanLine size={29} strokeWidth={1.6} /></div><div className="scanner-copy"><h2>Pronto para a próxima leitura</h2><p><span className="online-dot" />Aguardando CTC</p></div><form className="scan-form" onSubmit={scan}><Barcode /><input ref={scanner} aria-label="Código do CTC" className="scan-input" placeholder="Bipe ou digite o código do CTC…" value={code} onChange={event => setCode(event.target.value)} autoComplete="off" disabled={!!blocked || newOpen} /><Button type="submit" size="sm" disabled={!code.trim() || !!blocked || newOpen}>Conferir <ArrowRight size={13} /></Button></form></section>
         <div className="content-grid"><section>
           <div className="section-heading"><h2 className="mr-auto">{view === 'pending' ? 'Pré-manifestos em aberto' : view === 'finished' ? 'Conferências concluídas' : 'Ocorrências'}<span className="section-count">{view === 'issues' ? issues.length : visible.length}</span></h2><Button variant="ghost" size="sm" onClick={exportSession} className="text-muted-foreground text-[10px]"><ArrowDownToLine size={12} /> CSV</Button><Button variant="outline" size="sm" onClick={exportPdf} className="text-[11px]"><FileText size={12} /> PDF</Button><Button size="sm" onClick={() => { setDivResult(null); setDivOpen(true); }} className="text-[11px]"><Sparkles size={12} /> Divergência</Button></div>
-          {view !== 'issues' && <div className="list-tools"><label className="search-wrap"><Search /><input aria-label="Buscar pré-manifesto" placeholder="Buscar motorista, placa ou pré-manifesto" value={query} onChange={event => setQuery(event.target.value)} /></label><select aria-label="Filtrar pré-manifestos" className="filter-select" value={filter} onChange={event => setFilter(event.target.value)}><option value="all">Mais antigos primeiro</option><option value="new">Mais recentes</option><option value="old">Há 2 dias ou mais</option></select></div>}
+          {view !== 'issues' && <div className="list-tools"><label className="search-wrap"><Search /><input aria-label="Buscar pré-manifesto" placeholder="Buscar pré, CTC, NF ou cliente" value={query} onChange={event => setQuery(event.target.value)} /></label><select aria-label="Filtrar pré-manifestos" className="filter-select" value={filter} onChange={event => setFilter(event.target.value)}><option value="all">Mais antigos primeiro</option><option value="new">Mais recentes</option><option value="old">Há 2 dias ou mais</option></select></div>}
           <div className="manifest-list">
             {view === 'issues' ? issues.length ? issues.map(issue => <div className="manifest-card p-5 flex gap-3" key={issue.id}><TriangleAlert className="text-warning shrink-0" size={19} /><div><h3 className="font-semibold text-xs">{issue.title}</h3><p className="text-muted-foreground text-xs mt-2">{issue.description}</p><p className="text-muted-foreground text-[10px] mt-2">{issue.time}</p></div></div>) : <div className="empty-state"><ShieldCheck /><h3>Nenhuma ocorrência</h3><p className="text-xs mt-2">Tudo certo com as leituras desta sessão.</p></div> : visible.length ? visible.map(manifest => {
               const count = manifest.documents.filter(doc => doc.received).length;
@@ -189,7 +166,7 @@ export function ConferenceWorkspace() {
               return <article className="manifest-card" key={manifest.id}>
                 <div className="manifest-head"><div className="driver-avatar">{initials(manifest.driver)}</div><div className="flex-1 min-w-0"><h3 className="driver-name">{manifest.driver}</h3><div className="manifest-meta"><span>{manifest.id}</span><span>·</span><span className="plate">{manifest.plate}</span><span>·</span><span>{new Date(manifest.date).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</span></div></div><span className={`status-badge ${manifest.finishedAt ? 'badge-success' : days >= 2 ? 'badge-warning' : 'badge-pending'}`}>{manifest.finishedAt ? <Check size={11} /> : <Clock3 size={10} />}{manifest.finishedAt ? 'Finalizado' : days === 0 ? 'Hoje' : `Há ${days} ${days === 1 ? 'dia' : 'dias'}`}</span></div>
                 <div className="manifest-progress"><div className="progress-label"><span><strong>{count}</strong> de {manifest.documents.length} documentos conferidos</span><strong>{Math.round(count / manifest.documents.length * 100)}%</strong></div><div className="progress-track" role="progressbar" aria-label={`Conferência de ${manifest.driver}`} aria-valuenow={count} aria-valuemin={0} aria-valuemax={manifest.documents.length}>{manifest.documents.map(doc => <span key={doc.id} className={`progress-segment ${doc.received ? 'done' : ''}`} />)}</div></div>
-                <table className="document-table"><thead><tr><th>CTC</th><th>Nota fiscal</th><th>Vols.</th><th>Status</th><th><span className="sr-only">Ações</span></th></tr></thead><tbody>{manifest.documents.map(doc => <tr key={doc.id} className={doc.received ? 'received-row' : ''}><td className="ctc-number">{doc.ctc}</td><td className="text-muted-foreground">{doc.nf}</td><td className="text-muted-foreground">{doc.volumes}</td><td><span className={`status-badge ${doc.received ? 'badge-success' : 'badge-pending'}`}>{doc.received ? <Check size={10} /> : <Clock3 size={10} />}{doc.received ? 'Conferido' : 'Pendente'}</span></td><td><Button variant="ghost" size="icon" className="document-action text-muted-foreground" title={doc.received ? `Desfazer CTC ${doc.ctc}` : `Marcar CTC ${doc.ctc} como recebido`} aria-label={doc.received ? `Desfazer CTC ${doc.ctc}` : `Marcar CTC ${doc.ctc} como recebido`} onClick={() => toggleDocument(manifest, doc.id, !doc.received)}>{doc.received ? <Undo2 /> : <Check />}</Button></td></tr>)}</tbody></table>
+                <div className="overflow-x-auto"><table className="document-table"><thead><tr><th>CTC / Cliente</th><th>Nota fiscal</th><th>Vols.</th><th>Status</th><th><span className="sr-only">Ações</span></th></tr></thead><tbody>{manifest.documents.map(doc => <tr key={doc.id} className={doc.received ? 'received-row' : ''}><td className="ctc-number">{doc.ctc}{doc.client && <span className="block text-muted-foreground text-[10px] font-sans mt-1">{doc.client}</span>}{doc.recipient && <span className="block text-muted-foreground text-[9px] font-sans mt-1">Para: {doc.recipient}</span>}</td><td className="text-muted-foreground">{doc.nf}</td><td className="text-muted-foreground">{doc.volumes}</td><td><span className={`status-badge ${doc.received ? 'badge-success' : 'badge-pending'}`}>{doc.received ? <Check size={10} /> : <Clock3 size={10} />}{doc.received ? 'Conferido' : 'Pendente'}</span></td><td><Button variant="ghost" size="icon" className="document-action text-muted-foreground" title={doc.received ? `Desfazer CTC ${doc.ctc}` : `Marcar CTC ${doc.ctc} como recebido`} aria-label={doc.received ? `Desfazer CTC ${doc.ctc}` : `Marcar CTC ${doc.ctc} como recebido`} onClick={() => toggleDocument(manifest, doc.id, !doc.received)}>{doc.received ? <Undo2 /> : <Check />}</Button></td></tr>)}</tbody></table></div>
               </article>;
             }) : <div className="empty-state"><Inbox /><h3>{view === 'finished' ? 'Nenhum pré finalizado' : 'Nenhum pré pendente'}</h3><p className="text-xs mt-2">{query ? 'Nenhum resultado para essa busca.' : 'A lista está em dia.'}</p></div>}
           </div>
@@ -199,7 +176,7 @@ export function ConferenceWorkspace() {
     </main>
     <div className="toast-stack" aria-live="polite">{notices.map(notice => <div className={`scan-toast ${notice.warning ? 'warning' : ''}`} key={notice.id}>{notice.warning ? <TriangleAlert className="text-warning shrink-0" size={17} /> : <CircleCheck className="text-success shrink-0" size={17} />}<span>{notice.text}</span></div>)}</div>
     <Dialog open={!!blocked} onOpenChange={open => { if (!open) setBlocked(null); }}><DialogContent><DialogHeader><div className="text-warning mb-2"><TriangleAlert size={30} /></div><DialogTitle>Este CTC precisa de atenção</DialogTitle><DialogDescription className="pt-2">{blocked}</DialogDescription></DialogHeader><p className="text-xs text-muted-foreground">Confira o documento e os CTCs cadastrados antes de continuar.</p><Button onClick={() => setBlocked(null)}>Entendido, continuar <ArrowRight /></Button></DialogContent></Dialog>
-    <Dialog open={newOpen} onOpenChange={setNewOpen}><DialogContent className="max-h-[90dvh] overflow-y-auto"><DialogHeader><DialogTitle>Novo pré-manifesto</DialogTitle><DialogDescription>Cadastre os dados do pré e os CTCs esperados.</DialogDescription></DialogHeader><form onSubmit={addManifest} className="grid gap-4"><label className="photo-pick"><input type="file" accept="image/*" capture="environment" className="sr-only" disabled={ocrBusy} onChange={e => { void readPhoto(e.target.files?.[0]); e.target.value = ""; }} />{ocrBusy ? <Loader2 className="animate-spin" size={18} /> : <Camera size={18} />}<span>{ocrBusy ? ocrProgress || "Lendo a foto do pré…" : "Tirar ou enviar foto do pré"}<small>Leitura no próprio aparelho, sem IA</small></span></label>{ocrText && <details className="text-[11px] text-muted-foreground"><summary className="cursor-pointer">Texto lido da foto</summary><textarea readOnly className="mt-2 w-full h-32 rounded-md border border-border bg-background p-2 font-mono text-[11px]" value={ocrText} /></details>}<div className="form-grid"><label className="form-field">Número do pré<input name="id" required placeholder="DI0000000000" value={draft.id} onChange={e => setDraft(d => ({ ...d, id: e.target.value }))} /></label><label className="form-field">Placa<input name="plate" required placeholder="ABC1D23" maxLength={8} value={draft.plate} onChange={e => setDraft(d => ({ ...d, plate: e.target.value }))} /></label><label className="form-field col-span-2">Motorista<input name="driver" required placeholder="Nome completo" value={draft.driver} onChange={e => setDraft(d => ({ ...d, driver: e.target.value }))} /></label></div><ManifestDocumentsEditor rows={newRows} onChange={setNewRows} selectedIndex={selectedRow} onSelect={setSelectedRow} disabled={ocrBusy} />{formError && <p className="text-destructive text-xs" role="alert">{formError}</p>}<div className="flex justify-end gap-2 border-t border-border pt-4"><Button type="button" variant="outline" onClick={() => setNewOpen(false)}>Cancelar</Button><Button type="submit" disabled={ocrBusy}><Plus /> Cadastrar pré</Button></div></form></DialogContent></Dialog>
+    <ManifestImportDialog open={newOpen} onOpenChange={setNewOpen} manifests={manifests} onCreate={importDrafts} initialId={prefillId} />
     <Dialog open={divOpen} onOpenChange={setDivOpen}><DialogContent className="max-h-[90dvh] overflow-y-auto"><DialogHeader><DialogTitle>Registrar divergência</DialogTitle><DialogDescription>Informe os dados do CTC e descreva o problema. A IA aponta inconsistências e sugere a ação.</DialogDescription></DialogHeader><form onSubmit={submitDivergence} className="grid gap-4"><div className="form-grid">{([['ctc', 'CTC', 'numeric'], ['nf', 'Nota fiscal', 'text'], ['manifest', 'Pré-manifesto', 'text'], ['volumesExpected', 'Vols. esperados', 'numeric'], ['volumesReceived', 'Vols. recebidos', 'numeric']] as const).map(([k, l, m]) => <label className="form-field" key={k}>{l}<input inputMode={m} value={div[k]} onChange={e => setDiv(d => ({ ...d, [k]: e.target.value }))} /></label>)}</div><label className="form-field">Descrição da divergência<textarea required rows={4} className="div-text" placeholder="Ex.: chegaram 25 volumes, CTC indica 27; caixa avariada…" value={div.description} onChange={e => setDiv(d => ({ ...d, description: e.target.value }))} /></label><Button type="submit" disabled={divBusy || !div.description.trim()}>{divBusy ? <><Loader2 className="animate-spin" /> Analisando…</> : <><Sparkles /> Analisar divergência</>}</Button></form>{divResult?.error && <p className="text-destructive text-xs" role="alert">{divResult.error}</p>}{divResult?.text && <div className="ai-result">{divResult.text}</div>}</DialogContent></Dialog>
   </div>;
 }

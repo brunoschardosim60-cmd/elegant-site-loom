@@ -1,7 +1,7 @@
 import { Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
-export type ManifestDraftRow = { ctc: string; nf: string; volumes: string };
+export type ManifestDraftRow = { ctc: string; nf: string; volumes: string; client?: string; recipient?: string; review?: string[] };
 
 export function ManifestDocumentsEditor({ rows, onChange, selectedIndex, onSelect, disabled }: {
   rows: ManifestDraftRow[]; onChange: (rows: ManifestDraftRow[]) => void;
@@ -22,6 +22,12 @@ export function ManifestDocumentsEditor({ rows, onChange, selectedIndex, onSelec
       </label>)}
       <Button type="button" variant="ghost" size="icon" className="w-7" aria-label="Remover CTC" disabled={disabled || rows.length === 1} onClick={() => { onChange(rows.filter((_, i) => i !== index)); onSelect(Math.max(0, index - 1)); }}><Trash2 /></Button>
     </div>
+    <div className="grid gap-3 mt-3">
+      {(['client', 'recipient'] as const).map(field => <label className="form-field" key={field}>{field === 'client' ? 'Cliente / laboratório (remetente)' : 'Destinatário'}
+        <input aria-label={field === 'client' ? 'Cliente / laboratório' : 'Destinatário'} disabled={disabled} value={row[field] ?? ''} onChange={event => onChange(rows.map((item, i) => i === index ? { ...item, [field]: event.target.value } : item))} />
+      </label>)}
+    </div>
+    {!!row.review?.length && <p className="text-xs text-amber-700 mt-2">Conferir na foto: {row.review.join(', ')}.</p>}
     <Button type="button" variant="ghost" size="sm" className="text-primary mt-3" disabled={disabled} onClick={() => { onChange([...rows, { ctc: '', nf: '', volumes: '1' }]); onSelect(rows.length); }}><Plus /> Adicionar CTC</Button>
   </section>;
 }
