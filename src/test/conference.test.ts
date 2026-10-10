@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findMatches, parseReading, setReceived, type Manifest } from '@/lib/conference';
+import { findMatches, parsePreText, parseReading, setReceived, type Manifest } from '@/lib/conference';
 
 function key(model: string, number: string) {
   const base = '43' + '2610' + '12345678000195' + model + '001' + number.padStart(9, '0') + '1' + '12345678';
@@ -24,4 +24,6 @@ describe('Conferência somente CT-e', () => {
   it('does not infer CT-e from an internal CTC', () => expect(parseReading('4400365569').kind).toBe('invalid'));
   it('reopens a finalized manifest when a receipt is undone', () => { const done = setReceived(setReceived(manifest, '1', true, 'now'), '2', true, 'now'); expect(setReceived(done, '1', false, 'later').finishedAt).toBeUndefined(); });
   it('does not match different full keys sharing a document number', () => { const full: Manifest = { ...manifest, documents: [{ id: 'full', nf: '1127276-1', volumes: 27, received: false, cte: key('57', '365569') }] }; expect(findMatches([full], { kind: 'cte', number: '365569', key: 'different' })).toEqual([]); });
+  it('reads PRE number, plate and labelled CT-es from photo text', () => expect(parsePreText('Pré DI0060186918 Placa IYA-7J31\nCT-e: 365569\nCTC 4400365506')).toEqual({ id: 'DI0060186918', plate: 'IYA7J31', ctes: ['365569'] }));
+  it('accepts a valid 44-digit CT-e key from photo text', () => expect(parsePreText(key('57', '365569')).ctes).toEqual([key('57', '365569')]));
 });
