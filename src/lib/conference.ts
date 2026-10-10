@@ -31,13 +31,31 @@ export const demoManifests: Manifest[] = [];
 
 export type PreDraft = { id: string; plate: string; ctes: string[] };
 
-/** Extracts PRE fields from OCR text. CT-es only from explicit 44-digit keys or "CT-e" labelled numbers. */
+/** Fixes the digit confusions OCR commonly makes inside numeric fields. */
+const toDigits = (v: string) => v.replace(/[OQD]/g, '0').replace(/[IL|]/g, '1').replace(/S/g, '5').replace(/B/g, '8').replace(/\D/g, '');
+
+/**
+ * Extracts PRE fields from OCR text, tolerating common OCR noise (D1/DL for DI, spaced plates, "CTE"/"CT E" labels).
+ * CT-es only come from valid 44-digit keys or "CT-e" labelled numbers; CTC/internal numbers are never used.
+ */
 export function parsePreText(text: string): PreDraft {
   const upper = text.toUpperCase();
-  const id = upper.match(/DI\s?\d{8,12}/)?.[0].replace(/\s/g, '') ?? '';
-  const plate = upper.match(/\b[A-Z]{3}-?\d[A-Z0-9]\d{2}\b/)?.[0].replace('-', '') ?? '';
+  const idMatch = upper.match(/\bD\s?[I1L|]\s?[-:.]?\s?([0-9OQIL|SB]{8,12})\b/);
+  const idDigits = idMatch?.[1] ? toDigits(idMatch[1]) : '';
+  const id = idDigits.length >= 8 ? `DI${idDigits}` : '';
+  const plateMatch = upper.match(/\b([A-Z]{3})[\s-]?([0-9OIL])\s?([A-Z0-9])\s?([0-9OIL])\s?([0-9OIL])\b/);
+  const plate = plateMatch ? `${plateMatch[1]}${toDigits(plateMatch[2]!)}${plateMatch[3]}${toDigits(plateMatch[4]!)}${toDigits(plateMatch[5]!)}` : '';
   const ctes = new Set<string>();
-  for (const m of text.replace(/(\d)[ .](?=\d)/g, '$1').matchAll(/\d{44}/g)) { const r = parseReading(m[0]); if (r.kind === 'cte') ctes.add(m[0]); }
-  for (const m of upper.matchAll(/CT-?E\s*(?:N[º°O.]*)?\s*[:#]?\s*(\d{4,9})\b/g)) if (m[1]) ctes.add(String(Number(m[1])));
+  // Only complete numeric runs are keys; never take a 44-digit substring from a longer run.
+  for (const m of text.matchAll(/\d(?:[\s.\-]*\d)*/g)) {
+    const digits = m[0].replace(/\D/g, '');
+    if (digits.length !== 44) continue;
+    const r = parseReading(digits);
+    if (r.kind === 'cte') ctes.add(digits);
+  }
+  for (const m of upper.matchAll(/\bC\s?T\s?[-–.]?\s?E\b\.?\s*(?:N[º°O.]*)?\s*[:#.\-]?\s*([0-9OIL]{4,9})\b/g)) {
+    const n = m[1] ? toDigits(m[1]) : '';
+    if (n.length >= 4) ctes.add(String(Number(n)));
+  }
   return { id, plate, ctes: [...ctes] };
 }

@@ -26,4 +26,14 @@ describe('Conferência somente CT-e', () => {
   it('does not match different full keys sharing a document number', () => { const full: Manifest = { ...manifest, documents: [{ id: 'full', nf: '1127276-1', volumes: 27, received: false, cte: key('57', '365569') }] }; expect(findMatches([full], { kind: 'cte', number: '365569', key: 'different' })).toEqual([]); });
   it('reads PRE number, plate and labelled CT-es from photo text', () => expect(parsePreText('Pré DI0060186918 Placa IYA-7J31\nCT-e: 365569\nCTC 4400365506')).toEqual({ id: 'DI0060186918', plate: 'IYA7J31', ctes: ['365569'] }));
   it('accepts a valid 44-digit CT-e key from photo text', () => expect(parsePreText(key('57', '365569')).ctes).toEqual([key('57', '365569')]));
+  it('tolerates OCR noise in PRE number, plate and CT-e label', () => expect(parsePreText('Pre D1 0060l86918 Placa IYA 7J31\nCTE N° 365569\nCT E: 365506')).toEqual({ id: 'DI0060186918', plate: 'IYA7J31', ctes: ['365569', '365506'] }));
+  it('accepts a CT-e key broken by spaces or line breaks', () => { const k = key('57', '365569'); expect(parsePreText(k.replace(/(.{4})/g, '$1 ')).ctes).toEqual([k]); expect(parsePreText(k.slice(0, 22) + '\n' + k.slice(22)).ctes).toEqual([k]); });
+  it('never derives CT-e from CTC numbers', () => expect(parsePreText('DI0060186918 CTC 4400365506').ctes).toEqual([]));
+  it('does not mistake other labels for CT-e', () => expect(parsePreText('CTF: 365569\nCT3: 365506').ctes).toEqual([]));
+  it('rejects a key embedded in a longer number', () => expect(parsePreText('9' + key('57', '365569')).ctes).toEqual([]));
+  it('rejects NF-e and invalid keys from OCR', () => {
+    expect(parsePreText(key('55', '365569')).ctes).toEqual([]);
+    const value = key('57', '365569');
+    expect(parsePreText(value.slice(0, 43) + ((Number(value[43]) + 1) % 10)).ctes).toEqual([]);
+  });
 });
