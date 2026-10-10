@@ -13,9 +13,9 @@ const result = (text: string, confidence = 80) => ({ data: { text, confidence } 
 describe('Photo OCR retries', () => {
   it('finds a sideways document and terminates the worker', async () => {
     mocks.recognize.mockResolvedValueOnce(result('z £ É', 5))
-      .mockResolvedValueOnce(result('DI0060186918 Placa IYA7J31 CT-e: 365569'));
+      .mockResolvedValueOnce(result('DI0060186918 Placa IYA7J31 CTC: 1234567890'));
     const reading = await readPrePhoto(new File(['image'], 'photo.jpg'));
-    expect(reading.pre).toMatchObject({ id: 'DI0060186918', plate: 'IYA7J31', ctes: ['365569'] });
+    expect(reading.pre).toMatchObject({ id: 'DI0060186918', plate: 'IYA7J31', ctcs: ['1234567890'] });
     expect(prepareForOcr).toHaveBeenCalledWith(expect.any(File), 90);
     expect(mocks.terminate).toHaveBeenCalledOnce();
   });
@@ -34,7 +34,7 @@ describe('Photo OCR retries', () => {
   });
   it('uses a separate reading of the printed ID instead of keeping an OCR letter confusion', async () => {
     mocks.recognize.mockResolvedValueOnce({ data: {
-      text: 'DIS0123456789 Placa ABC1D23 CT-e: 123456', confidence: 80,
+      text: 'DIS0123456789 Placa ABC1D23 CTC: 1234567890', confidence: 80,
       blocks: [{ paragraphs: [{ lines: [{ words: [{ text: 'DIS0123456789', confidence: 60, bbox: { x0: 100, y0: 100, x1: 300, y1: 130 } }] }] }] }],
     } }).mockResolvedValueOnce(result('DI00123456789'));
     const reading = await readPrePhoto(new File(['image'], 'photo.jpg'));

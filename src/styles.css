@@ -230,8 +230,8 @@ h1 { font-size: 28px; font-weight: 750; line-height: 1.3; }
 .document-table th { background: var(--background); color: var(--muted-foreground); font-weight: 500; font-size: 9px; padding: 9px 20px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
 .document-table td { padding: 10px 20px; border-bottom: 1px solid var(--border); }
 .document-table tr:last-child td { border-bottom: 0; }
-.document-table .cte-number { font-family: monospace; font-size: 11px; }
-.document-table .received-row .cte-number { color: var(--muted-foreground); }
+.document-table .ctc-number { font-family: monospace; font-size: 11px; }
+.document-table .received-row .ctc-number { color: var(--muted-foreground); }
 .document-table td:last-child { padding-left: 0; padding-right: 15px; text-align: right; }
 .document-action { width: 26px; height: 26px; }
 .document-action svg { width: 13px; height: 13px; }
@@ -284,7 +284,7 @@ h1 { font-size: 28px; font-weight: 750; line-height: 1.3; }
   .div-text { height: auto; }
   .form-grid { grid-template-columns: 1fr; } .form-field.col-span-2 { grid-column: auto; }
   .new-document-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 56px 36px; }
-  .document-table { font-size: 13px; } .document-table .cte-number { font-size: 14px; font-weight: 700; }
+  .document-table { font-size: 13px; } .document-table .ctc-number { font-size: 14px; font-weight: 700; }
   .document-table th:nth-child(2), .document-table td:nth-child(2) { display: none; }
   .status-badge { font-size: 11px; padding: 5px 8px; font-weight: 650; }
   .document-action { width: 40px; height: 40px; }

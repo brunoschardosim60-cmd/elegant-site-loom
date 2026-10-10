@@ -28,10 +28,10 @@ export async function readPrePhoto(file: File, progress: (message: string) => vo
         successful = true;
         const candidate = { text: data.text.trim(), pre: parsePhotoFields(data), confidence: data.confidence, angle: attempt.angle, source, words: pageWords(data) };
         if (score(candidate.pre) > score(best.pre) || (score(candidate.pre) === score(best.pre) && candidate.confidence > best.confidence)) best = candidate;
-        if (best.pre.id && best.pre.plate && (best.pre.ctes.length || best.pre.documents.length >= 5)) break;
+        if (best.pre.id && best.pre.plate && ((best.pre.ctcs.length && !best.pre.documents.length) || best.pre.documents.length >= 5)) break;
       } catch (error) { failure = error; }
     }
-    if (!best.pre.ctes.length) {
+    if (!best.pre.ctcs.length || best.pre.documents.some(row => !row.nf || !row.volumes)) {
       progress('Procurando campos e tabelas…');
       await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT });
       const tableSources = best.pre.id && best.pre.plate && best.pre.documents.length >= 5 ? [{ source: best.source, angle: best.angle }] : sources;

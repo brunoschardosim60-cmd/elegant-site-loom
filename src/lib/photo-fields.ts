@@ -51,8 +51,9 @@ export function parsePhotoFields(page: OcrPage): PhotoFields {
       .sort((a, b) => Math.abs(cy(a) - baseline) - Math.abs(cy(b) - baseline))[0] : undefined;
     fields.documents.push({ ctc: row.text, nf: nfWord && nfWord.confidence >= 70 && /^\d{2,9}-\d{1,3}$/.test(nfWord.text) ? nfWord.text : '', volumes: volumeWord && volumeWord.confidence >= 80 ? volumeWord.text : '' });
   }
+  fields.ctcs = [...new Set([...fields.ctcs, ...fields.documents.map(row => row.ctc)])];
   return fields;
 }
 
-export const photoScore = (pre: PhotoFields) => Number(!!pre.id) * 4 + Number(!!pre.plate) * 2 + Number(!!pre.driver) + Math.min(pre.ctes.length + pre.documents.length, 30) * 3
+export const photoScore = (pre: PhotoFields) => Number(!!pre.id) * 4 + Number(!!pre.plate) * 2 + Number(!!pre.driver) + Math.min(Math.max(pre.ctcs.length, pre.documents.length), 30) * 3
   + pre.documents.reduce((sum, row) => sum + Number(!!row.nf) + Number(!!row.volumes), 0);
