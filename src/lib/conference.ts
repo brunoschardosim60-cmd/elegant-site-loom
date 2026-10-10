@@ -27,24 +27,17 @@ export function setReceived(manifest: Manifest, id: string, received: boolean, n
   return { ...manifest, documents, finishedAt: documents.every(doc => doc.received) ? now : undefined };
 }
 
-export const demoManifests: Manifest[] = [
-  { id: 'DI0060186918', driver: 'Luciano Teixeira Duarte', plate: 'IYA7J31', date: '2026-10-08T16:59:41', documents: [
-    { id: 'l1', cte: '365569', nf: '1127276-1', volumes: 27, received: false },
-    { id: 'l2', cte: '365506', nf: '1126736-1', volumes: 45, received: true, receivedAt: '2026-10-09T08:43:00' },
-    { id: 'l3', cte: '365505', nf: '1126683-1', volumes: 18, received: false },
-  ] },
-  { id: 'DI0060186942', driver: 'Luiz Kleber da Silva', plate: 'JBT2E84', date: '2026-10-07T14:20:00', documents: [
-    { id: 'k1', cte: '365710', nf: '1128012-1', volumes: 12, received: true },
-    { id: 'k2', cte: '365711', nf: '1128018-1', volumes: 8, received: false },
-    { id: 'k3', cte: '365712', nf: '1128031-1', volumes: 16, received: false },
-    { id: 'k4', cte: '365713', nf: '1128046-1', volumes: 24, received: true },
-  ] },
-  { id: 'DI0060186975', driver: 'Carlos Eduardo Martins', plate: 'IVQ8A12', date: '2026-10-09T07:30:00', documents: [
-    { id: 'c1', cte: '365820', nf: '1128105-1', volumes: 10, received: false },
-    { id: 'c2', cte: '365821', nf: '1128110-1', volumes: 18, received: false },
-  ] },
-  { id: 'DI0060186820', driver: 'Roberto Alves de Souza', plate: 'JAK4F90', date: '2026-10-08T08:00:00', finishedAt: '2026-10-09T08:12:00', documents: [
-    { id: 'r1', cte: '365410', nf: '1127010-1', volumes: 21, received: true },
-    { id: 'r2', cte: '365411', nf: '1127012-1', volumes: 9, received: true },
-  ] },
-];
+export const demoManifests: Manifest[] = [];
+
+export type PreDraft = { id: string; plate: string; ctes: string[] };
+
+/** Extracts PRE fields from OCR text. CT-es only from explicit 44-digit keys or "CT-e" labelled numbers. */
+export function parsePreText(text: string): PreDraft {
+  const upper = text.toUpperCase();
+  const id = upper.match(/DI\s?\d{8,12}/)?.[0].replace(/\s/g, '') ?? '';
+  const plate = upper.match(/\b[A-Z]{3}-?\d[A-Z0-9]\d{2}\b/)?.[0].replace('-', '') ?? '';
+  const ctes = new Set<string>();
+  for (const m of text.replace(/(\d)[ .](?=\d)/g, '$1').matchAll(/\d{44}/g)) { const r = parseReading(m[0]); if (r.kind === 'cte') ctes.add(m[0]); }
+  for (const m of upper.matchAll(/CT-?E\s*(?:N[º°O.]*)?\s*[:#]?\s*(\d{4,9})\b/g)) if (m[1]) ctes.add(String(Number(m[1])));
+  return { id, plate, ctes: [...ctes] };
+}
