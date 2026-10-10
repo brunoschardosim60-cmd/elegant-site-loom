@@ -1,17 +1,14 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { ArrowDownToLine, ArrowRight, Barcode, Check, CheckCheck, ChevronRight, CircleCheck, Clock3, FileCheck2, FileText, Inbox, Layers, Plus, Search, ScanLine, ShieldCheck, Trash2, Undo2, TriangleAlert } from 'lucide-react';
+import { Camera, Loader2, Sparkles, ArrowDownToLine, ArrowRight, Barcode, Check, CheckCheck, ChevronRight, CircleCheck, Clock3, FileCheck2, FileText, Inbox, Layers, Plus, Search, ScanLine, ShieldCheck, Trash2, Undo2, TriangleAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { demoManifests, findMatches, parseReading, setReceived, type Manifest } from '@/lib/conference';
+import { demoManifests, findMatches, parsePreText, parseReading, setReceived, type Manifest } from '@/lib/conference';
+import { analyzeDivergence } from '@/lib/divergence.functions';
 
 type View = 'pending' | 'finished' | 'issues';
 type Activity = { id: number; title: string; description: string; time: string; warning?: boolean };
 type Notice = { id: number; text: string; warning?: boolean };
-const initialActivity: Activity[] = [
-  { id: 1, title: 'CT-e 365506 conferido', description: 'Luciano Teixeira Duarte', time: '08:43' },
-  { id: 2, title: 'Pré-manifesto finalizado', description: 'Roberto Alves de Souza · 2 documentos', time: '08:12' },
-  { id: 3, title: 'Pré-manifesto adicionado', description: 'Carlos Eduardo Martins · 2 documentos', time: '07:30' },
-];
+const initialActivity: Activity[] = [];
 const titles: Record<View, string> = { pending: 'Conferência de documentos', finished: 'Pré-manifestos finalizados', issues: 'Ocorrências da conferência' };
 const initials = (name: string) => name.split(' ').filter(Boolean).slice(0, 2).map(word => word[0]).join('');
 const timeNow = () => new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
@@ -33,6 +30,52 @@ export function ConferenceWorkspace() {
   const [formError, setFormError] = useState('');
   const [newRows, setNewRows] = useState([{ cte: '', nf: '', volumes: '1' }]);
   const sequence = useRef(10);
+  const [ocrBusy, setOcrBusy] = useState(false);
+  const [draft, setDraft] = useState({ id: '', plate: '', driver: '' });
+  const [divOpen, setDivOpen] = useState(false);
+  const [div, setDiv] = useState({ cte: '', nf: '', manifest: '', volumesExpected: '', volumesReceived: '', description: '' });
+  const [divBusy, setDivBusy] = useState(false);
+  const [divResult, setDivResult] = useState<{ text?: string; error?: string } | null>(null);
+  async function readPhoto(file: File | undefined) {
+    if (!file) return;
+    setOcrBusy(true); setFormError('');
+    try {
+      const { recognize } = await import('tesseract.js');
+      const { data } = await recognize(file, 'por');
+      const pre = parsePreText(data.text);
+      setDraft(d => ({ ...d, id: pre.id || d.id, plate: pre.plate || d.plate }));
+      if (pre.ctes.length) setNewRows(pre.ctes.map(cte => ({ cte, nf: '', volumes: '1' })));
+      setFormError(pre.id || pre.ctes.length ? `Foto lida: ${pre.ctes.length} CT-e(s) encontrados. Revise antes de cadastrar.` : 'Não consegui ler os dados. Tente uma foto mais nítida ou digite.');
+    } catch { setFormError('Falha ao ler a foto. Digite os dados manualmente.'); }
+    finally { setOcrBusy(false); }
+  }
+  async function submitDivergence(event: FormEvent) {
+    event.preventDefault();
+    if (!div.description.trim()) return;
+    setDivBusy(true); setDivResult(null);
+    try { const r = await analyzeDivergence({ data: div }); setDivResult(r.ok ? { text: r.text } : { error: r.error }); if (r.ok) log('Divergência analisada', `CT-e ${div.cte || '—'} · ${div.description.slice(0, 60)}`, true); }
+    catch { setDivResult({ error: 'Não foi possível analisar agora.' }); }
+    finally { setDivBusy(false); }
+  }
+  async function exportPdf() {
+    const { jsPDF } = await import('jspdf');
+    const { default: autoTable } = await import('jspdf-autotable');
+    const pdf = new jsPDF();
+    const done = manifests.flatMap(m => m.documents.filter(d => d.received).map(d => [m.id, m.driver, d.cte, d.nf, String(d.volumes)]));
+    const open = manifests.flatMap(m => m.documents.filter(d => !d.received).map(d => [m.id, m.driver, d.cte, d.nf, String(d.volumes)]));
+    pdf.setFontSize(16); pdf.text('Relatório de conferência de CT-e', 14, 18);
+    pdf.setFontSize(10); pdf.text(`Gerado em ${new Date().toLocaleString('pt-BR')}`, 14, 25);
+    const status = !manifests.length ? 'Sem pré-manifestos' : open.length ? `Em aberto — ${open.length} pendência(s)` : 'Concluída — todos os CT-e conferidos';
+    pdf.text(`Status final: ${status}`, 14, 31);
+    pdf.text(`Pré-manifestos: ${manifests.length} · Finalizados: ${manifests.filter(m => m.finishedAt).length} · Ocorrências: ${issues.length}`, 14, 37);
+    const head = [['Pré', 'Motorista', 'CT-e', 'NF', 'Vols.']];
+    autoTable(pdf, { startY: 44, head: [['CT-e conferidos (' + done.length + ')', '', '', '', '']], body: [], theme: 'plain' });
+    autoTable(pdf, { head, body: done.length ? done : [['—', '', '', '', '']], headStyles: { fillColor: [0, 61, 165] } });
+    autoTable(pdf, { head: [['Pendências (' + open.length + ')', '', '', '', '']], body: [], theme: 'plain' });
+    autoTable(pdf, { head, body: open.length ? open : [['—', '', '', '', '']], headStyles: { fillColor: [200, 120, 0] } });
+    if (issues.length) { autoTable(pdf, { head: [['Ocorrências', 'Detalhe', 'Hora']], body: issues.map(i => [i.title, i.description, i.time]), headStyles: { fillColor: [90, 90, 90] } }); }
+    pdf.save('conferencia.pdf');
+  }
   useEffect(() => { setNow(new Date().toISOString()); }, []);
   useEffect(() => { if (!blocked && !newOpen) scanner.current?.focus(); }, [blocked, newOpen]);
 
@@ -56,7 +99,7 @@ export function ConferenceWorkspace() {
     if (/^DI/i.test(input)) {
       const manifest = current.current.find(item => item.id.toUpperCase() === input.toUpperCase());
       if (manifest) { setView(manifest.finishedAt ? 'finished' : 'pending'); setQuery(manifest.id); notify(`Pré de ${manifest.driver.split(' ')[0]} localizado`); }
-      else { setFormError(''); setNewOpen(true); }
+      else { setFormError(''); setDraft(d => ({ ...d, id: input.toUpperCase() })); setNewOpen(true); }
       return;
     }
     const reading = parseReading(input);
@@ -97,7 +140,7 @@ export function ConferenceWorkspace() {
     const identifiers = validRows.map(row => row.cte.trim());
     if (new Set(identifiers).size !== identifiers.length) { setFormError('Há um CT-e repetido nesta lista.'); return; }
     const manifest: Manifest = { id, driver: String(data.get('driver')).trim(), plate: String(data.get('plate')).trim().toUpperCase(), date: new Date().toISOString(), documents: validRows.map((row, i) => ({ id: `${id}-${i}`, cte: row.cte.replace(/\s/g, ''), nf: row.nf.trim() || '—', volumes: Number(row.volumes), received: false })) };
-    update([...current.current, manifest]); setView('pending'); setQuery(''); setFilter('all'); setNewOpen(false); setNewRows([{ cte: '', nf: '', volumes: '1' }]); log('Pré-manifesto adicionado', manifest.driver); notify('Pré-manifesto cadastrado. Documentos pendentes.');
+    update([...current.current, manifest]); setView('pending'); setQuery(''); setFilter('all'); setNewOpen(false); setNewRows([{ cte: '', nf: '', volumes: '1' }]); setDraft({ id: '', plate: '', driver: '' }); log('Pré-manifesto adicionado', manifest.driver); notify('Pré-manifesto cadastrado. Documentos pendentes.');
   }
   function exportSession() {
     const rows = [['Pré-manifesto', 'Motorista', 'Placa', 'CT-e', 'NF', 'Volumes', 'Status'], ...manifests.flatMap(item => item.documents.map(doc => [item.id, item.driver, item.plate, doc.cte, doc.nf, String(doc.volumes), doc.received ? 'Conferido' : 'Pendente']))];
@@ -130,7 +173,7 @@ export function ConferenceWorkspace() {
         </div>
         <section className="scanner-band" aria-label="Leitor de CT-e"><div className="scanner-symbol"><ScanLine size={29} strokeWidth={1.6} /></div><div className="scanner-copy"><h2>Pronto para a próxima leitura</h2><p><span className="online-dot" />Aguardando CT-e</p></div><form className="scan-form" onSubmit={scan}><Barcode /><input ref={scanner} aria-label="Código do CT-e" className="scan-input" placeholder="Bipe ou digite o código do CT-e…" value={code} onChange={event => setCode(event.target.value)} autoComplete="off" disabled={!!blocked || newOpen} /><Button type="submit" size="sm" disabled={!code.trim() || !!blocked || newOpen}>Conferir <ArrowRight size={13} /></Button></form></section>
         <div className="content-grid"><section>
-          <div className="section-heading"><h2>{view === 'pending' ? 'Pré-manifestos em aberto' : view === 'finished' ? 'Conferências concluídas' : 'Ocorrências'}<span className="section-count">{view === 'issues' ? issues.length : visible.length}</span></h2><Button variant="ghost" size="sm" onClick={exportSession} className="text-muted-foreground text-[10px]"><ArrowDownToLine size={12} /> Exportar</Button></div>
+          <div className="section-heading"><h2 className="mr-auto">{view === 'pending' ? 'Pré-manifestos em aberto' : view === 'finished' ? 'Conferências concluídas' : 'Ocorrências'}<span className="section-count">{view === 'issues' ? issues.length : visible.length}</span></h2><Button variant="ghost" size="sm" onClick={exportSession} className="text-muted-foreground text-[10px]"><ArrowDownToLine size={12} /> CSV</Button><Button variant="outline" size="sm" onClick={exportPdf} className="text-[11px]"><FileText size={12} /> PDF</Button><Button size="sm" onClick={() => { setDivResult(null); setDivOpen(true); }} className="text-[11px]"><Sparkles size={12} /> Divergência</Button></div>
           {view !== 'issues' && <div className="list-tools"><label className="search-wrap"><Search /><input aria-label="Buscar pré-manifesto" placeholder="Buscar motorista, placa ou pré-manifesto" value={query} onChange={event => setQuery(event.target.value)} /></label><select aria-label="Filtrar pré-manifestos" className="filter-select" value={filter} onChange={event => setFilter(event.target.value)}><option value="all">Mais antigos primeiro</option><option value="new">Mais recentes</option><option value="old">Há 2 dias ou mais</option></select></div>}
           <div className="manifest-list">
             {view === 'issues' ? issues.length ? issues.map(issue => <div className="manifest-card p-5 flex gap-3" key={issue.id}><TriangleAlert className="text-warning shrink-0" size={19} /><div><h3 className="font-semibold text-xs">{issue.title}</h3><p className="text-muted-foreground text-xs mt-2">{issue.description}</p><p className="text-muted-foreground text-[10px] mt-2">{issue.time}</p></div></div>) : <div className="empty-state"><ShieldCheck /><h3>Nenhuma ocorrência</h3><p className="text-xs mt-2">Tudo certo com as leituras desta sessão.</p></div> : visible.length ? visible.map(manifest => {
@@ -144,11 +187,12 @@ export function ConferenceWorkspace() {
             }) : <div className="empty-state"><Inbox /><h3>{view === 'finished' ? 'Nenhum pré finalizado' : 'Nenhum pré pendente'}</h3><p className="text-xs mt-2">{query ? 'Nenhum resultado para essa busca.' : 'A lista está em dia.'}</p></div>}
           </div>
         </section><aside className="activity-panel"><div className="activity-heading">Últimas atividades <span className="live-label"><i className="online-dot" />Ao vivo</span></div><div className="activity-date">Hoje</div><div className="activity-list">{activity.slice(0, 5).map(item => <div className="activity-item" key={item.id}><div className={`activity-icon ${item.warning ? 'warning' : ''}`}>{item.warning ? <TriangleAlert /> : item.title.includes('finalizado') ? <CheckCheck /> : item.title.includes('adicionado') ? <Plus /> : <Check />}</div><div><div className="activity-title">{item.title}</div><div className="activity-description">{item.description}</div><div className="activity-time">{item.time}</div></div></div>)}</div><div className="daily-summary"><h3>Resumo da sessão</h3><div className="summary-line"><span>Documentos recebidos</span><strong>{documents.filter(doc => doc.received).length}</strong></div><div className="summary-line"><span>Pré-manifestos concluídos</span><strong>{finished.length}</strong></div><div className="summary-line"><span>Ocorrências registradas</span><strong>{issues.length}</strong></div><div className="flex gap-2 text-success text-[10px] mt-5 items-center"><ShieldCheck size={13} />{issues.length ? 'Confira as ocorrências' : 'Nenhuma divergência nesta sessão'}</div></div></aside></div>
-        <footer className="page-footer"><span className="flex gap-1.5 items-center"><ShieldCheck size={12} /> Dados de exemplo · CT-es demonstrativos · Sem conexão com a Luft</span><span>confere. <span className="mx-2">/</span> Controle de retorno de documentos</span></footer>
+        <footer className="page-footer"><span className="flex gap-1.5 items-center"><ShieldCheck size={12} /> Dados temporários · reiniciam ao atualizar a página</span><span>confere. <span className="mx-2">/</span> Controle de retorno de documentos</span></footer>
       </div>
     </main>
     <div className="toast-stack" aria-live="polite">{notices.map(notice => <div className={`scan-toast ${notice.warning ? 'warning' : ''}`} key={notice.id}>{notice.warning ? <TriangleAlert className="text-warning shrink-0" size={17} /> : <CircleCheck className="text-success shrink-0" size={17} />}<span>{notice.text}</span></div>)}</div>
     <Dialog open={!!blocked} onOpenChange={open => { if (!open) setBlocked(null); }}><DialogContent><DialogHeader><div className="text-warning mb-2"><TriangleAlert size={30} /></div><DialogTitle>Este CT-e precisa de atenção</DialogTitle><DialogDescription className="pt-2">{blocked}</DialogDescription></DialogHeader><p className="text-xs text-muted-foreground">Confira o documento e os CT-es cadastrados antes de continuar.</p><Button onClick={() => setBlocked(null)}>Entendido, continuar <ArrowRight /></Button></DialogContent></Dialog>
-    <Dialog open={newOpen} onOpenChange={setNewOpen}><DialogContent><DialogHeader><DialogTitle>Novo pré-manifesto</DialogTitle><DialogDescription>Cadastre os dados do pré e os CT-es esperados.</DialogDescription></DialogHeader><form onSubmit={addManifest} className="grid gap-4"><div className="form-grid"><label className="form-field">Número do pré<input name="id" required placeholder="DI0060187000" /></label><label className="form-field">Placa<input name="plate" required placeholder="ABC1D23" maxLength={8} /></label><label className="form-field col-span-2">Motorista<input name="driver" required placeholder="Nome completo" /></label></div><div className="border-t border-border pt-4"><h3 className="text-xs font-semibold mb-2">Documentos esperados</h3><p className="text-[11px] text-muted-foreground mb-4 leading-relaxed">Use a chave de 44 dígitos ou o número real do CT-e. O CTC interno da Luft não identifica o CT-e automaticamente.</p><div className="grid gap-3">{newRows.map((row, index) => <div className="new-document-row" key={index}>{(['cte', 'nf', 'volumes'] as const).map(field => <label className="form-field" key={field}>{field === 'cte' ? 'CT-e' : field === 'nf' ? 'NF-série' : 'Vols.'}<input aria-label={`${field === 'cte' ? 'CT-e' : field === 'nf' ? 'NF-série' : 'Volumes'} ${index + 1}`} required={field !== 'nf'} value={row[field]} type={field === 'volumes' ? 'number' : 'text'} min={field === 'volumes' ? 1 : undefined} onChange={event => setNewRows(rows => rows.map((item, i) => i === index ? { ...item, [field]: event.target.value } : item))} /></label>)}<Button type="button" variant="ghost" size="icon" className="w-7" aria-label={`Remover documento ${index + 1}`} disabled={newRows.length === 1} onClick={() => setNewRows(rows => rows.filter((_, i) => i !== index))}><Trash2 /></Button></div>)}</div><Button type="button" variant="ghost" size="sm" className="text-primary mt-3" onClick={() => setNewRows(rows => [...rows, { cte: '', nf: '', volumes: '1' }])}><Plus /> Adicionar documento</Button></div>{formError && <p className="text-destructive text-xs" role="alert">{formError}</p>}<div className="flex justify-end gap-2 border-t border-border pt-4"><Button type="button" variant="outline" onClick={() => setNewOpen(false)}>Cancelar</Button><Button type="submit"><Plus /> Cadastrar pré</Button></div></form></DialogContent></Dialog>
+    <Dialog open={newOpen} onOpenChange={setNewOpen}><DialogContent><DialogHeader><DialogTitle>Novo pré-manifesto</DialogTitle><DialogDescription>Cadastre os dados do pré e os CT-es esperados.</DialogDescription></DialogHeader><form onSubmit={addManifest} className="grid gap-4"><label className="photo-pick"><input type="file" accept="image/*" capture="environment" className="sr-only" disabled={ocrBusy} onChange={e => { void readPhoto(e.target.files?.[0]); e.target.value = ""; }} />{ocrBusy ? <Loader2 className="animate-spin" size={18} /> : <Camera size={18} />}<span>{ocrBusy ? "Lendo a foto do pré…" : "Tirar ou enviar foto do pré"}<small>Leitura no próprio aparelho, sem IA</small></span></label><div className="form-grid"><label className="form-field">Número do pré<input name="id" required placeholder="DI0000000000" value={draft.id} onChange={e => setDraft(d => ({ ...d, id: e.target.value }))} /></label><label className="form-field">Placa<input name="plate" required placeholder="ABC1D23" maxLength={8} value={draft.plate} onChange={e => setDraft(d => ({ ...d, plate: e.target.value }))} /></label><label className="form-field col-span-2">Motorista<input name="driver" required placeholder="Nome completo" value={draft.driver} onChange={e => setDraft(d => ({ ...d, driver: e.target.value }))} /></label></div><div className="border-t border-border pt-4"><h3 className="text-xs font-semibold mb-2">Documentos esperados</h3><p className="text-[11px] text-muted-foreground mb-4 leading-relaxed">Use a chave de 44 dígitos ou o número real do CT-e. O CTC interno da Luft não identifica o CT-e automaticamente.</p><div className="grid gap-3">{newRows.map((row, index) => <div className="new-document-row" key={index}>{(['cte', 'nf', 'volumes'] as const).map(field => <label className="form-field" key={field}>{field === 'cte' ? 'CT-e' : field === 'nf' ? 'NF-série' : 'Vols.'}<input aria-label={`${field === 'cte' ? 'CT-e' : field === 'nf' ? 'NF-série' : 'Volumes'} ${index + 1}`} required={field !== 'nf'} value={row[field]} type={field === 'volumes' ? 'number' : 'text'} min={field === 'volumes' ? 1 : undefined} onChange={event => setNewRows(rows => rows.map((item, i) => i === index ? { ...item, [field]: event.target.value } : item))} /></label>)}<Button type="button" variant="ghost" size="icon" className="w-7" aria-label={`Remover documento ${index + 1}`} disabled={newRows.length === 1} onClick={() => setNewRows(rows => rows.filter((_, i) => i !== index))}><Trash2 /></Button></div>)}</div><Button type="button" variant="ghost" size="sm" className="text-primary mt-3" onClick={() => setNewRows(rows => [...rows, { cte: '', nf: '', volumes: '1' }])}><Plus /> Adicionar documento</Button></div>{formError && <p className="text-destructive text-xs" role="alert">{formError}</p>}<div className="flex justify-end gap-2 border-t border-border pt-4"><Button type="button" variant="outline" onClick={() => setNewOpen(false)}>Cancelar</Button><Button type="submit"><Plus /> Cadastrar pré</Button></div></form></DialogContent></Dialog>
+    <Dialog open={divOpen} onOpenChange={setDivOpen}><DialogContent className="max-h-[90dvh] overflow-y-auto"><DialogHeader><DialogTitle>Registrar divergência</DialogTitle><DialogDescription>Informe os dados do CT-e e descreva o problema. A IA aponta inconsistências e sugere a ação.</DialogDescription></DialogHeader><form onSubmit={submitDivergence} className="grid gap-4"><div className="form-grid">{([['cte', 'CT-e', 'numeric'], ['nf', 'Nota fiscal', 'text'], ['manifest', 'Pré-manifesto', 'text'], ['volumesExpected', 'Vols. esperados', 'numeric'], ['volumesReceived', 'Vols. recebidos', 'numeric']] as const).map(([k, l, m]) => <label className="form-field" key={k}>{l}<input inputMode={m} value={div[k]} onChange={e => setDiv(d => ({ ...d, [k]: e.target.value }))} /></label>)}</div><label className="form-field">Descrição da divergência<textarea required rows={4} className="div-text" placeholder="Ex.: chegaram 25 volumes, CT-e indica 27; caixa avariada…" value={div.description} onChange={e => setDiv(d => ({ ...d, description: e.target.value }))} /></label><Button type="submit" disabled={divBusy || !div.description.trim()}>{divBusy ? <><Loader2 className="animate-spin" /> Analisando…</> : <><Sparkles /> Analisar divergência</>}</Button></form>{divResult?.error && <p className="text-destructive text-xs" role="alert">{divResult.error}</p>}{divResult?.text && <div className="ai-result">{divResult.text}</div>}</DialogContent></Dialog>
   </div>;
 }
