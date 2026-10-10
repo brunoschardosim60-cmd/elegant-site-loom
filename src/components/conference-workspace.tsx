@@ -52,7 +52,7 @@ export function ConferenceWorkspace() {
       if (pre.documents.length) setNewRows(pre.documents);
       else if (pre.ctcs.length) setNewRows(pre.ctcs.map(ctc => ({ ctc, nf: '', volumes: '' })));
       setSelectedRow(0);
-      setFormError(pre.documents.length ? `Foto lida: ${pre.documents.length} CTC(s) encontrados. Revise pré, placa, motorista, NF e volumes. A tabela não informa CTC: preencha o CTC correspondente em cada linha antes de cadastrar.` : pre.id || pre.plate || pre.ctcs.length ? `Foto lida: ${pre.ctcs.length} CTC(s) encontrados. Revise antes de cadastrar.` : text ? 'O texto foi lido, mas não identifiquei número do pré, placa ou CTC. Confira o texto abaixo.' : 'Nenhum texto reconhecido após tentar outras orientações. Envie a foto aproximada do documento, com boa iluminação.');
+      setFormError(pre.documents.length ? `Foto lida: ${pre.documents.length} CTC(s) importados. Revise os dados antes de cadastrar.` : pre.id || pre.plate || pre.ctcs.length ? `Foto lida: ${pre.ctcs.length} CTC(s) encontrados. Revise antes de cadastrar.` : 'Confira o texto lido ou preencha os dados manualmente.');
     } catch { setFormError('Falha ao ler a foto. Digite os dados manualmente.'); }
     finally { setOcrBusy(false); }
   }
