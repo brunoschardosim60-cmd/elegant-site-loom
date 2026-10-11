@@ -13,6 +13,14 @@ Controle de retorno de CTCs e pré-manifestos, com leitura de fotos pelo Gemini 
 - `GEMINI_API_KEY` permanece exclusivamente no servidor da Vercel. A leitura por IA exige sessão Supabase válida.
 - Migração: `supabase/migrations/20261011040000_conference.sql`. Testes transacionais de permissões: `supabase/tests/conference-security.sql` (fixtures desfeitas com rollback).
 
+## Leitura e revisão
+
+- Lotes processam até duas fotos ao mesmo tempo, preservando a posição de cada arquivo. Uma única decodificação gera as imagens de leitura e a ampliação.
+- Uma transcrição compacta independente confere orientação, cabeçalho, placa, CTC, NF e volumes; a leitura completa também transcreve remetente e destinatário. Só diferenças numéricas ou de cabeçalho acionam uma conferência adicional.
+- Valores divergentes só são corrigidos automaticamente quando duas transcrições independentes concordam em um valor válido. Nomes de clientes e conjunto de CTCs nunca são reescritos por votação. Dúvidas continuam visíveis; concordância não representa garantia de exatidão.
+- Limites: 20 segundos para a leitura compacta, 35 por leitura completa/conferência e 75 por foto. Uma falha HTTP transitória recebe uma nova tentativa; timeout não reinicia outra espera longa. Se apenas a conferência adicional falhar, os dados já lidos continuam disponíveis com aviso.
+- Fechar ou parar cancela as requisições e impede resultados tardios de preencher outro formulário. O servidor combina o cancelamento com seu timeout e limita requisições por usuário autenticado.
+
 This project was built with [Lovable](https://lovable.dev).
 
 ## Build with Lovable

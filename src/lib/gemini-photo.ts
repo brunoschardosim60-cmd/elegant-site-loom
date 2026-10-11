@@ -48,10 +48,15 @@ export function normalizeGeminiPhoto(value: unknown): PhotoFields {
   });
   const warnings: string[] = [];
   const plate = normalizePlate(data.plate);
+  const headerReview: string[] = [];
+  if (data.kind === 'pre' && data.plate.toUpperCase().replace(/[^A-Z0-9]/g, '') !== plate) headerReview.push('Placa ajustada por formato. Confira letras e números.');
   if (data.kind === 'pre' && !/^[A-Z]{3}\d[A-Z0-9]\d{2}$/.test(plate)) warnings.push('Confira placa: possível confusão entre letra e número');
+  if (data.kind === 'pre' && !/^DI\d{8,12}$/.test(data.id.trim().toUpperCase())) headerReview.push('Confira o número do pré.');
+  if (data.kind === 'pre' && !data.driver.trim()) headerReview.push('Confira o motorista.');
+  if (!documents.length) headerReview.push('Nenhum CTC legível nesta foto.');
   if (new Set(documents.map(d => d.ctc).filter(Boolean)).size !== documents.length) warnings.push('CTC repetido ou ilegível: confira todas as linhas');
   if (data.expectedRows && data.expectedRows !== documents.length) warnings.push(`Cabeçalho informa ${data.expectedRows} CTCs; foram lidos ${documents.length}`);
   if (data.totalVolumes && documents.reduce((sum, d) => sum + Number(d.volumes), 0) !== data.totalVolumes) warnings.push(`Confira a soma: cabeçalho informa ${data.totalVolumes} volumes`);
   documents.forEach(d => d.review.push(...warnings));
-  return { kind: data.kind, id: /^DI\d{8,12}$/.test(data.id.trim().toUpperCase()) ? data.id.trim().toUpperCase() : '', plate, driver: data.driver.trim(), ctcs: documents.map(d => d.ctc).filter(Boolean), documents };
+  return { kind: data.kind, id: /^DI\d{8,12}$/.test(data.id.trim().toUpperCase()) ? data.id.trim().toUpperCase() : '', plate, rawPlate: data.plate, driver: data.driver.trim(), expectedRows: data.expectedRows, totalVolumes: data.totalVolumes, headerReview: [...headerReview, ...warnings], ctcs: documents.map(d => d.ctc).filter(Boolean), documents };
 }

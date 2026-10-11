@@ -2,7 +2,11 @@ import { parsePreText } from './conference';
 
 export type OcrWord = { text: string; confidence: number; bbox: { x0: number; y0: number; x1: number; y1: number } };
 export type PhotoDocument = { ctc: string; nf: string; volumes: string; client?: string; recipient?: string; review?: string[] };
-export type PhotoFields = ReturnType<typeof parsePreText> & { kind: 'pre' | 'dacte' | 'unknown'; driver: string; documents: PhotoDocument[] };
+export type PhotoFields = ReturnType<typeof parsePreText> & {
+  kind: 'pre' | 'dacte' | 'unknown'; driver: string; documents: PhotoDocument[];
+  rawPlate?: string; expectedRows?: number; totalVolumes?: number; headerReview?: string[];
+  verification?: { status: 'matched' | 'review' | 'unavailable'; checkedFields: number; conflicts: number };
+};
 export type OcrPage = { text: string; blocks?: { paragraphs: { lines: { words: OcrWord[] }[] }[] }[] | null };
 export type CellRegion = { row: number; field: 'ctc' | 'nf' | 'volumes'; box: OcrWord['bbox'] };
 export const pageWords = (page: OcrPage): OcrWord[] => page.blocks?.flatMap(b => b.paragraphs.flatMap(p => p.lines.flatMap(l => l.words))) ?? [];
