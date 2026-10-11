@@ -16,9 +16,9 @@ Controle de retorno de CTCs e pré-manifestos, com leitura de fotos pelo Gemini 
 ## Leitura e revisão
 
 - Lotes processam até duas fotos ao mesmo tempo, preservando a posição de cada arquivo. Uma única decodificação gera as imagens de leitura e a ampliação.
-- Uma transcrição compacta independente confere orientação, cabeçalho, placa, CTC, NF e volumes; a leitura completa também transcreve remetente e destinatário. Só diferenças numéricas ou de cabeçalho acionam uma conferência adicional.
+- A leitura completa transcreve todas as linhas e nomes. Uma segunda leitura independente, na imagem orientada e ampliada, confere cabeçalho, placa, CTC, NF e volumes com o mesmo modelo de maior precisão. Só diferenças numéricas ou de cabeçalho acionam uma conferência adicional.
 - Valores divergentes só são corrigidos automaticamente quando duas transcrições independentes concordam em um valor válido. Nomes de clientes e conjunto de CTCs nunca são reescritos por votação. Dúvidas continuam visíveis; concordância não representa garantia de exatidão.
-- Limites: 20 segundos para a leitura compacta, 35 por leitura completa/conferência e 75 por foto. Uma falha HTTP transitória recebe uma nova tentativa; timeout não reinicia outra espera longa. Se apenas a conferência adicional falhar, os dados já lidos continuam disponíveis com aviso.
+- Limites: 45 segundos para a leitura completa, 25 por conferência compacta e 75 por foto. Uma falha HTTP transitória recebe uma nova tentativa; timeout não reinicia outra espera longa. Se apenas a conferência falhar, os dados já lidos continuam disponíveis com aviso.
 - Fechar ou parar cancela as requisições e impede resultados tardios de preencher outro formulário. O servidor combina o cancelamento com seu timeout e limita requisições por usuário autenticado.
 
 This project was built with [Lovable](https://lovable.dev).

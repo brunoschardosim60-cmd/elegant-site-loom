@@ -13,10 +13,10 @@ export const photoJsonSchema = {
     kind: { type: 'string', enum: ['pre', 'dacte', 'unknown'] },
     ...Object.fromEntries(['id', 'plate', 'driver'].map(k => [k, { type: 'string' }])),
     clockwiseRotation: { type: 'integer', enum: [0, 90, 180, 270] },
-    expectedRows: { type: 'integer' }, totalVolumes: { type: 'integer' },
-    documents: { type: 'array', items: { type: 'object', properties: {
+    expectedRows: { type: 'integer', minimum: 0, maximum: 300 }, totalVolumes: { type: 'integer', minimum: 0, maximum: 1000000 },
+    documents: { type: 'array', maxItems: 300, items: { type: 'object', properties: {
       ...Object.fromEntries(['ctc', 'nf', 'volumes', 'client', 'recipient'].map(k => [k, { type: 'string' }])),
-      review: { type: 'array', items: { type: 'string' } },
+      review: { type: 'array', maxItems: 10, items: { type: 'string' } },
     }, required: ['ctc', 'nf', 'volumes', 'client', 'recipient', 'review'] } },
   }, required: ['kind', 'id', 'plate', 'driver', 'expectedRows', 'totalVolumes', 'documents', 'clockwiseRotation'],
 };

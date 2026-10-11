@@ -3,7 +3,7 @@ import { getSupabaseClient } from './supabase-client';
 import { needsVerificationRecheck, reconcilePhotoRead, reconcileThreePhotoReads } from './photo-verification';
 import type { PhotoFields } from './photo-fields';
 
-/** Decode once; the survey and upright detail reuse the same source pixels. */
+/** Decode once; both readings reuse the same source pixels. */
 function photoPayload(image: ImageBitmap, rotation = 0, detail = false, maxSize = 2600) {
   const scale = Math.min(1, maxSize / Math.max(image.width, image.height));
   const canvas = document.createElement('canvas');
@@ -43,29 +43,27 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
       const progress = (message: string) => { if (!photoSignal.aborted) onProgress?.(index, message); };
       const retryProgress = () => progress('Gemini ocupado. Tentando novamente…');
       try {
-        progress('1/2 · Lendo placa, CTCs, NFs e volumes…');
+        progress('1/2 · Lendo todas as linhas e laboratórios…');
         image = await createImageBitmap(file);
         if (photoSignal.aborted) throw new Error('Leitura interrompida.');
-        let survey: Awaited<ReturnType<typeof requestAiPhoto>> | { ok: false; error: string };
-        try { survey = await requestAiPhoto({ data: { ...photoPayload(image, 0, false, 1800), accessToken, mode: 'survey' }, signal: photoSignal }, retryProgress); }
-        catch { survey = { ok: false, error: 'Primeira conferência indisponível.' }; }
-        if (photoSignal.aborted) throw new Error('Leitura interrompida.');
-        const rotation = survey.ok ? survey.rotation : 0;
-        const payload = photoPayload(image, rotation, survey.ok && survey.pre.kind === 'pre');
-        progress('2/2 · Conferindo todas as linhas e laboratórios…');
-        const full = await requestAiPhoto({ data: { ...payload, accessToken, mode: 'full' }, signal: photoSignal }, retryProgress);
-        const firstCheck = survey.ok ? survey.check : null;
-        if (full.ok) completedPhoto = reconcilePhotoRead(full.pre, firstCheck);
+        const full = await requestAiPhoto({ data: { ...photoPayload(image), accessToken, mode: 'full' }, signal: photoSignal }, retryProgress);
+        if (full.ok) completedPhoto = reconcilePhotoRead(full.pre, null);
         if (photoSignal.aborted) throw new Error('Leitura interrompida.');
         if (!full.ok) { if (!signal?.aborted) onResult(index, { error: full.error }); continue; }
-        let pre = completedPhoto!;
-        if (needsVerificationRecheck(pre)) {
+        const payload = photoPayload(image, full.rotation, full.pre.kind === 'pre');
+        progress('2/2 · Conferindo placa, CTCs, NFs e volumes…');
+        const check = await requestAiPhoto({ data: { ...payload, accessToken, mode: 'verify' }, signal: photoSignal }, retryProgress);
+        if (photoSignal.aborted) throw new Error('Leitura interrompida.');
+        let pre = reconcilePhotoRead(full.pre, check.ok ? check.check : null);
+        completedPhoto = pre;
+        if (!check.ok) pre.headerReview = [...(pre.headerReview ?? []), check.error];
+        if (check.ok && needsVerificationRecheck(pre)) {
           progress('Conferindo diferenças entre as leituras…');
           // Keep the whole page: a long table may extend beyond the detail crop.
           const verification = await requestAiPhoto({ data: { ...payload, accessToken, mode: 'verify' }, signal: photoSignal }, retryProgress);
           if (photoSignal.aborted) throw new Error('Leitura interrompida.');
-          if (verification.ok) pre = reconcileThreePhotoReads(full.pre, firstCheck, verification.check);
-          else pre = { ...pre, headerReview: [...(pre.headerReview ?? []), 'Não foi possível concluir a conferência adicional. Revise as diferenças indicadas.'], verification: { status: 'review', checkedFields: pre.verification?.checkedFields ?? 0, conflicts: pre.verification?.conflicts ?? 0 } };
+          if (verification.ok) pre = reconcileThreePhotoReads(full.pre, check.check, verification.check);
+          else pre = { ...pre, headerReview: [...(pre.headerReview ?? []), `Conferência adicional: ${verification.error}`], verification: { status: 'review', checkedFields: pre.verification?.checkedFields ?? 0, conflicts: pre.verification?.conflicts ?? 0 } };
         }
         if (!signal?.aborted) onResult(index, { pre, text: JSON.stringify(pre, null, 2), milliseconds: performance.now() - start });
       } catch (error) {

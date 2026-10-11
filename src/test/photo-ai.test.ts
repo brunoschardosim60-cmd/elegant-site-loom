@@ -31,14 +31,14 @@ function responses(number: number, rotation: 0 | 90 | 180 | 270 = 0) {
     documents: [{ ctc: String(number).padStart(10, '0'), nf: `${100 + number}-1`, volumes: '3' }],
   };
   const pre = normalizeGeminiPhoto({ ...check, documents: check.documents.map(row => ({ ...row, client: 'LAB TESTE', recipient: 'CLIENTE TESTE', review: [] })) });
-  const survey: Response = { ok: true, pre, check, rotation, text: '' };
-  const full: Response = { ok: true, pre, check: null, rotation: 0, text: '' };
-  return { survey, full };
+  const verification: Response = { ok: true, pre, check: { ...check, clockwiseRotation: 0 }, rotation: 0, text: '' };
+  const full: Response = { ok: true, pre, check: null, rotation, text: '' };
+  return { verification, full };
 }
 
-async function pendingCall(name: string, mode: 'survey' | 'full' | 'verify') {
-  await waitFor(() => expect(calls.some(call => call.name === name && call.input.data.mode === mode)).toBe(true));
-  return calls.find(call => call.name === name && call.input.data.mode === mode)!;
+async function pendingCall(name: string, mode: 'full' | 'verify', occurrence = 0) {
+  await waitFor(() => expect(calls.filter(call => call.name === name && call.input.data.mode === mode).length).toBeGreaterThan(occurrence));
+  return calls.filter(call => call.name === name && call.input.data.mode === mode)[occurrence]!;
 }
 
 beforeEach(() => {
@@ -83,24 +83,24 @@ describe('AI photo import pipeline', () => {
     const receive = vi.fn();
     const batch = readAiPhotos([photo('a.jpg'), photo('b.jpg'), photo('c.jpg')], receive, undefined);
     const a = responses(1); const b = responses(2); const c = responses(3);
-    await pendingCall('a.jpg', 'survey');
-    const bSurvey = await pendingCall('b.jpg', 'survey');
+    await pendingCall('a.jpg', 'full');
+    const bFull = await pendingCall('b.jpg', 'full');
     expect(mocks.decode).toHaveBeenCalledTimes(2);
     expect(calls).toHaveLength(2);
     expect(calls.some(call => call.name === 'c.jpg')).toBe(false);
-    bSurvey.pending.resolve(b.survey);
-    const bFull = await pendingCall('b.jpg', 'full');
+    bFull.pending.resolve(b.full);
+    const bCheck = await pendingCall('b.jpg', 'verify');
     expect(mocks.decode).toHaveBeenCalledTimes(2);
     expect(calls.some(call => call.name === 'c.jpg')).toBe(false);
-    bFull.pending.resolve(b.full);
-    const cSurvey = await pendingCall('c.jpg', 'survey');
+    bCheck.pending.resolve(b.verification);
+    const cFull = await pendingCall('c.jpg', 'full');
     expect(receive.mock.calls.map(call => call[0])).toEqual([1]);
     expect(bitmaps.find(image => image.name === 'b.jpg')!.close).toHaveBeenCalledOnce();
-    cSurvey.pending.resolve(c.survey);
-    (await pendingCall('c.jpg', 'full')).pending.resolve(c.full);
+    cFull.pending.resolve(c.full);
+    (await pendingCall('c.jpg', 'verify')).pending.resolve(c.verification);
     await waitFor(() => expect(receive.mock.calls.map(call => call[0])).toEqual([1, 2]));
-    (await pendingCall('a.jpg', 'survey')).pending.resolve(a.survey);
     (await pendingCall('a.jpg', 'full')).pending.resolve(a.full);
+    (await pendingCall('a.jpg', 'verify')).pending.resolve(a.verification);
     await batch;
     expect(peakRequests).toBe(2);
     expect(activeRequests).toBe(0);
@@ -110,44 +110,44 @@ describe('AI photo import pipeline', () => {
     bitmaps.forEach(image => expect(image.close).toHaveBeenCalledOnce());
   });
 
-  it('uses one decode and exactly two reads when the survey and full results agree', async () => {
+  it('uses one decode and exactly two reads when the full read and independent verification agree', async () => {
     const receive = vi.fn(); const progress = vi.fn(); const result = responses(1, 90);
     const batch = readAiPhotos([photo('sideways.jpg')], receive, progress);
-    const survey = await pendingCall('sideways.jpg', 'survey');
-    expect(atob(survey.input.data.data)).toContain('800x1200');
-    survey.pending.resolve(result.survey);
     const full = await pendingCall('sideways.jpg', 'full');
-    expect(atob(full.input.data.data)).toContain('1200x800');
-    expect(atob(full.input.data.detail!)).toContain('1200x520');
+    expect(atob(full.input.data.data)).toContain('800x1200');
     full.pending.resolve(result.full);
+    const verification = await pendingCall('sideways.jpg', 'verify');
+    expect(atob(verification.input.data.data)).toContain('1200x800');
+    expect(atob(verification.input.data.detail!)).toContain('1200x520');
+    verification.pending.resolve(result.verification);
     await batch;
-    expect(calls.map(call => call.input.data.mode)).toEqual(['survey', 'full']);
+    expect(calls.map(call => call.input.data.mode)).toEqual(['full', 'verify']);
     calls.forEach(call => expect(call.input.data.accessToken).toBe('test-session-token-kept-out-of-results'));
     expect(mocks.decode).toHaveBeenCalledOnce();
     expect(mocks.rotate).toHaveBeenCalledWith(Math.PI / 2);
     expect(receive).toHaveBeenCalledOnce();
     expect(receive.mock.calls[0]?.[1].pre).toMatchObject({ verification: { status: 'matched', conflicts: 0 }, documents: [{ ctc: '0000000001', nf: '101-1', volumes: '3', client: 'LAB TESTE' }] });
     expect(receive.mock.calls[0]?.[1].pre.verification.checkedFields).toBeGreaterThanOrEqual(8);
-    expect(progress.mock.calls.map(call => call[1])).toEqual(['1/2 · Lendo placa, CTCs, NFs e volumes…', '2/2 · Conferindo todas as linhas e laboratórios…']);
+    expect(progress.mock.calls.map(call => call[1])).toEqual(['1/2 · Lendo todas as linhas e laboratórios…', '2/2 · Conferindo placa, CTCs, NFs e volumes…']);
     expect(bitmaps[0]!.close).toHaveBeenCalledOnce();
   });
 
   it('suppresses late results and progress after closing, aborts active reads and never starts the queued photo', async () => {
     const abort = new AbortController(); const receive = vi.fn(); const progress = vi.fn();
     const batch = readAiPhotos([photo('a.jpg'), photo('b.jpg'), photo('queued.jpg')], receive, progress, abort.signal);
-    (await pendingCall('a.jpg', 'survey')).pending.resolve(responses(1).survey);
-    const full = await pendingCall('a.jpg', 'full');
-    const survey = await pendingCall('b.jpg', 'survey');
+    (await pendingCall('a.jpg', 'full')).pending.resolve(responses(1).full);
+    const verification = await pendingCall('a.jpg', 'verify');
+    const full = await pendingCall('b.jpg', 'full');
     abort.abort();
     const progressCount = progress.mock.calls.length;
-    full.pending.resolve(responses(1).full);
-    survey.pending.resolve(responses(2).survey);
+    verification.pending.resolve(responses(1).verification);
+    full.pending.resolve(responses(2).full);
     await batch;
     expect(receive).not.toHaveBeenCalled();
     expect(progress).toHaveBeenCalledTimes(progressCount);
     expect(calls.every(call => call.input.signal?.aborted)).toBe(true);
     expect(calls.some(call => call.name === 'queued.jpg')).toBe(false);
-    expect(calls.some(call => call.name === 'b.jpg' && call.input.data.mode === 'full')).toBe(false);
+    expect(calls.some(call => call.name === 'b.jpg' && call.input.data.mode === 'verify')).toBe(false);
     expect(mocks.decode).toHaveBeenCalledTimes(2);
     bitmaps.forEach(image => expect(image.close).toHaveBeenCalledOnce());
   });
@@ -166,20 +166,34 @@ describe('AI photo import pipeline', () => {
     expect(image.close).toHaveBeenCalledOnce();
   });
 
-  it('continues with the full read after a rejected survey and confirms it with an additional reading', async () => {
-    const receive = vi.fn(); const result = responses(1);
-    const batch = readAiPhotos([photo('survey-offline.jpg')], receive, undefined);
-    (await pendingCall('survey-offline.jpg', 'survey')).pending.reject(new Error('Survey network failure'));
-    (await pendingCall('survey-offline.jpg', 'full')).pending.resolve(result.full);
-    (await pendingCall('survey-offline.jpg', 'verify')).pending.resolve(result.survey);
+  it('returns a photo error when the first full read rejects without trying a verification fallback', async () => {
+    const receive = vi.fn();
+    const batch = readAiPhotos([photo('full-offline.jpg')], receive, undefined);
+    (await pendingCall('full-offline.jpg', 'full')).pending.reject(new Error('Full read network failure'));
     await batch;
-    expect(calls.map(call => call.input.data.mode)).toEqual(['survey', 'full', 'verify']);
+    expect(calls.map(call => call.input.data.mode)).toEqual(['full']);
+    expect(receive).toHaveBeenCalledOnce();
+    const reading = receive.mock.calls[0]![1];
+    expect(reading).toEqual({ error: 'Full read network failure' });
+    expect(reading).not.toHaveProperty('pre');
+    expect(mocks.decode).toHaveBeenCalledOnce();
+    expect(bitmaps[0]!.close).toHaveBeenCalledOnce();
+    expect(activeRequests).toBe(0);
+  });
+
+  it('keeps the full result with unavailable verification and the provider error when the second read fails', async () => {
+    const receive = vi.fn(); const result = responses(1);
+    const batch = readAiPhotos([photo('second-offline.jpg')], receive, undefined);
+    (await pendingCall('second-offline.jpg', 'full')).pending.resolve(result.full);
+    (await pendingCall('second-offline.jpg', 'verify')).pending.resolve({ ok: false, retryable: true, error: 'Gemini indisponível (503). Tente novamente.' });
+    await batch;
+    expect(calls.map(call => call.input.data.mode)).toEqual(['full', 'verify']);
     expect(receive).toHaveBeenCalledOnce();
     const reading = receive.mock.calls[0]![1];
     expect(reading).not.toHaveProperty('error');
-    expect(reading.pre).toMatchObject({ id: 'DI000000001', verification: { status: 'matched', conflicts: 0 }, documents: [{ ctc: '0000000001', nf: '101-1', volumes: '3', client: 'LAB TESTE' }] });
-    expect(reading.pre.headerReview).toEqual([]);
-    expect(mocks.decode).toHaveBeenCalledOnce();
+    expect(reading.pre).toMatchObject({ id: 'DI000000001', verification: { status: 'unavailable', checkedFields: 0, conflicts: 0 }, documents: [{ ctc: '0000000001', nf: '101-1', volumes: '3', client: 'LAB TESTE' }] });
+    expect(reading.pre.headerReview).toContain('Gemini indisponível (503). Tente novamente.');
+    expect(reading.pre.headerReview).toContain('Segunda leitura indisponível. Confira os dados antes de cadastrar.');
     expect(bitmaps[0]!.close).toHaveBeenCalledOnce();
     expect(activeRequests).toBe(0);
   });
@@ -187,12 +201,12 @@ describe('AI photo import pipeline', () => {
   it('preserves the full read with a review warning when the additional request rejects', async () => {
     const receive = vi.fn(); const result = responses(1);
     const batch = readAiPhotos([photo('verify-offline.jpg')], receive, undefined);
-    const conflictingSurvey: Response = { ...result.survey, check: { ...result.survey.check!, documents: [{ ctc: '0000000001', nf: '999-1', volumes: '3' }] } };
-    (await pendingCall('verify-offline.jpg', 'survey')).pending.resolve(conflictingSurvey);
+    const conflictingCheck: Response = { ...result.verification, check: { ...result.verification.check!, documents: [{ ctc: '0000000001', nf: '999-1', volumes: '3' }] } };
     (await pendingCall('verify-offline.jpg', 'full')).pending.resolve(result.full);
-    (await pendingCall('verify-offline.jpg', 'verify')).pending.reject(new Error('Verification network failure'));
+    (await pendingCall('verify-offline.jpg', 'verify')).pending.resolve(conflictingCheck);
+    (await pendingCall('verify-offline.jpg', 'verify', 1)).pending.reject(new Error('Verification network failure'));
     await batch;
-    expect(calls.map(call => call.input.data.mode)).toEqual(['survey', 'full', 'verify']);
+    expect(calls.map(call => call.input.data.mode)).toEqual(['full', 'verify', 'verify']);
     expect(receive).toHaveBeenCalledOnce();
     const reading = receive.mock.calls[0]![1];
     expect(reading).not.toHaveProperty('error');

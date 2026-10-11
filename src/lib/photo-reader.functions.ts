@@ -24,9 +24,10 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
     if (bucket.count >= 80) return { ok: false as const, error: 'Muitas fotos seguidas. Aguarde alguns minutos.' };
     bucket.count++; requests.set(userId, bucket);
     const compact = data.mode === 'survey' || data.mode === 'verify';
+    let stage = 'connection';
     try {
       const request = (model: string) => fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-        method: 'POST', signal: AbortSignal.any([getRequest().signal, AbortSignal.timeout(data.mode === 'survey' ? 20000 : 35000)]),
+        method: 'POST', signal: AbortSignal.any([getRequest().signal, AbortSignal.timeout(data.mode === 'survey' ? 20000 : data.mode === 'verify' ? 25000 : 45000)]),
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: 'Faça TRANSCRIÇÃO LITERAL. Não use conhecimento externo para expandir razões sociais. Copie exatamente as abreviações visíveis, sem país ou sufixo inventado. NF-Série é a coluna imediatamente ANTES de Nº Pedido; nunca use o pedido como NF. Se houver segunda imagem, ela é uma ampliação da MESMA página, não outro documento. Use a ampliação para ler os números pequenos.' }] },
@@ -36,14 +37,21 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
       });
       const response = await request(data.orientationOnly || data.mode === 'survey' ? 'gemini-3.5-flash-lite' : process.env['GEMINI_OCR_MODEL'] || 'gemini-3.8-flash');
       if (!response.ok) return { ok: false as const, retryable: [500, 502, 503, 504].includes(response.status), error: response.status === 429 ? 'Limite do Gemini atingido. Aguarde e tente novamente.' : response.status === 403 || response.status === 401 ? 'Chave do Gemini sem acesso. Confira a configuração na Vercel.' : `Gemini indisponível (${response.status}). Tente novamente.` };
+      stage = 'provider-json';
       const result = await response.json() as { candidates?: { finishReason?: string; content?: { parts?: { text?: string; thought?: boolean }[] } }[] };
       const candidate = result.candidates?.[0];
       if (candidate?.finishReason !== 'STOP') return { ok: false as const, error: 'A leitura ficou incompleta. Tente novamente com uma foto por vez.' };
       const output = candidate.content?.parts?.filter(p => !p.thought).map(p => p.text || '').join('') || '';
+      stage = 'transcription-json';
       const parsed = JSON.parse(output);
+      stage = 'schema';
       const check = compact ? verificationSchema.parse(parsed) : null;
       const pre = normalizeGeminiPhoto(data.orientationOnly ? { ...parsed, id: '', plate: '', driver: '', expectedRows: 0, totalVolumes: 0, documents: [] } : check ? { ...check, documents: check.documents.map(row => ({ ...row, client: '', recipient: '', review: [] })) } : parsed);
       const rotation = [90, 180, 270].includes(parsed.clockwiseRotation) ? parsed.clockwiseRotation as number : 0;
       return { ok: true as const, pre, check, rotation, text: JSON.stringify(pre, null, 2) };
-    } catch { return { ok: false as const, retryable: false, error: 'A leitura demorou ou ficou incompleta. Tente novamente esta foto; nenhum cadastro foi feito.' }; }
+    } catch (error) {
+      const fields = error instanceof z.ZodError ? [...new Set(error.issues.map(issue => issue.path.join('.')))] : [];
+      console.warn('ocr_failure', { stage, type: error instanceof Error ? error.name : 'unknown', fields });
+      return { ok: false as const, retryable: false, error: stage === 'schema' ? `A IA retornou campos incompletos (${fields.join(', ') || 'formato'}). Releia esta foto.` : stage === 'transcription-json' || stage === 'provider-json' ? 'A IA retornou uma resposta incompleta. Releia esta foto.' : 'O Gemini não respondeu dentro do prazo. Tente novamente esta foto; nenhum cadastro foi feito.' };
+    }
   });
