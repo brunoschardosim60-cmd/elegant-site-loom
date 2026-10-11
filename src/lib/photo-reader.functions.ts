@@ -6,7 +6,7 @@ const requests = new Map<string, { count: number; until: number }>();
 export const photoReaderStatus = createServerFn({ method: 'GET' }).handler(async () => ({ configured: Boolean(process.env['GEMINI_API_KEY']) }));
 
 export const readPhotoWithGemini = createServerFn({ method: 'POST' })
-  .inputValidator(z.object({ data: z.string().min(100).max(3800000).regex(/^[A-Za-z0-9+/=]+$/), mimeType: z.literal('image/jpeg') }))
+  .inputValidator(z.object({ data: z.string().min(100).max(2800000).regex(/^[A-Za-z0-9+/=]+$/), detail: z.string().max(1000000).regex(/^[A-Za-z0-9+/=]+$/).optional(), mimeType: z.literal('image/jpeg') }))
   .handler(async ({ data }) => {
     const key = process.env['GEMINI_API_KEY'];
     if (!key) return { ok: false as const, error: 'Configure GEMINI_API_KEY na Vercel para ativar a leitura por IA.' };
@@ -22,7 +22,8 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
         method: 'POST', signal: AbortSignal.timeout(55000),
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
         body: JSON.stringify({ model, store: false,
-          input: [{ type: 'text', text: photoPrompt }, { type: 'image', data: data.data, mime_type: data.mimeType }],
+          system_instruction: 'Faça TRANSCRIÇÃO LITERAL. Não use conhecimento externo para expandir razões sociais. Copie exatamente as abreviações visíveis: por exemplo LABORATORIOS BAGO continua LABORATORIOS BAGO, sem país ou sufixo inventado. NF-Série é a coluna imediatamente ANTES de Nº Pedido; nunca use o pedido como NF. Se houver segunda imagem, ela é uma ampliação da MESMA página, não outro documento. Use a ampliação para ler os números pequenos.',
+          input: [{ type: 'text', text: photoPrompt }, { type: 'image', data: data.data, mime_type: data.mimeType }, ...(data.detail ? [{ type: 'image', data: data.detail, mime_type: data.mimeType }] : [])],
           response_format: { type: 'text', mime_type: 'application/json', schema: photoJsonSchema },
           generation_config: { max_output_tokens: 12000, thinking_level: 'low' },
         }),

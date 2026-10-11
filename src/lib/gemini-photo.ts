@@ -32,7 +32,7 @@ export function normalizeGeminiPhoto(value: unknown): PhotoFields {
     const ctc = row.ctc.trim(); const volumes = row.volumes.trim();
     if (!/^\d{10}$/.test(ctc)) review.push('CTC ilegível: informe 10 dígitos');
     if (!/^\d+$/.test(volumes) || Number(volumes) < 1) review.push('Confira volumes');
-    if (!row.nf.trim()) review.push('Confira NF e série');
+    if (!/^\d{1,9}-\d{1,3}$/.test(row.nf.trim())) review.push('Confira NF e série');
     if (!row.client.trim()) review.push('Confira cliente/laboratório');
     if (!row.recipient.trim()) review.push('Confira destinatário');
     return { ...row, ctc: /^\d{10}$/.test(ctc) ? ctc : '', volumes: /^\d+$/.test(volumes) && Number(volumes) > 0 ? volumes : '', review };
