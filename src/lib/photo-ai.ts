@@ -1,9 +1,10 @@
 import { requestAiPhoto } from './photo-ai-request';
 import { getSupabaseClient } from './supabase-client';
-import { needsVerificationRecheck, reconcilePhotoRead, reconcileThreePhotoReads } from './photo-verification';
+import { needsPhotoVerification, reconcilePhotoRead } from './photo-verification';
+import { getPhotoProviderBlock, rememberPhotoProviderBlock } from './photo-provider-block';
 import type { PhotoFields } from './photo-fields';
 
-/** Decode once; both readings reuse the same source pixels. */
+/** Decode once; an optional second reading reuses the same source pixels. */
 function photoPayload(image: ImageBitmap, rotation = 0, detail = false, maxSize = 2600) {
   const scale = Math.min(1, maxSize / Math.max(image.width, image.height));
   const canvas = document.createElement('canvas');
@@ -30,8 +31,17 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
   if (!session) throw new Error('Entre na sua conta para ler fotos.');
   if (signal?.aborted) return;
   const accessToken = session.access_token;
+  const userId = session.user.id;
   let next = 0;
-  const providerBlock: { result?: Extract<Awaited<ReturnType<typeof requestAiPhoto>>, { ok: false }> } = {};
+  const providerBlock: { result: Extract<Awaited<ReturnType<typeof requestAiPhoto>>, { ok: false }> | undefined } = { result: getPhotoProviderBlock(userId) };
+  if (providerBlock.result) {
+    for (const index of files.keys()) {
+      if (signal?.aborted) return;
+      onProgress?.(index, 'Cota diária esgotada · usando o leitor gratuito…');
+      onResult(index, { error: providerBlock.result.error });
+    }
+    return;
+  }
   const getBlockedError = () => providerBlock.result;
   const providerAwareRequest = async (input: Parameters<typeof requestAiPhoto>[0], onRetry: () => void) => {
     // A photo already being decoded can finish after another worker hits the
@@ -39,6 +49,7 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
     // but do not make doomed new calls after the request helper has retried.
     if (providerBlock.result) return providerBlock.result;
     const result = await requestAiPhoto(input, onRetry);
+    if (!result.ok) rememberPhotoProviderBlock(userId, result);
     if (!result.ok && (('quota' in result && result.quota === 'daily') || ('unavailable' in result && result.unavailable === true))) providerBlock.result = result;
     return result;
   };
@@ -54,27 +65,23 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
       const progress = (message: string) => { if (!photoSignal.aborted) onProgress?.(index, message); };
       const retryProgress = () => progress('Gemini ocupado. Tentando novamente…');
       try {
-        progress('1/2 · Lendo todas as linhas e laboratórios…');
+        progress('Lendo todas as linhas e laboratórios…');
         image = await createImageBitmap(file);
         if (photoSignal.aborted) throw new Error('Leitura interrompida.');
         const full = await providerAwareRequest({ data: { ...photoPayload(image), accessToken, mode: 'full' }, signal: photoSignal }, retryProgress);
-        if (full.ok) completedPhoto = reconcilePhotoRead(full.pre, null);
+        if (full.ok) completedPhoto = { ...full.pre, verification: { status: 'single', checkedFields: 0, conflicts: 0 } };
         if (photoSignal.aborted) throw new Error('Leitura interrompida.');
         if (!full.ok) { if (!signal?.aborted) onResult(index, { error: full.error, ...('fallback' in full && full.fallback === false ? { fallback: false } : {}) }); continue; }
-        const payload = photoPayload(image, full.rotation, full.pre.kind === 'pre');
-        progress('2/2 · Conferindo placa, CTCs, NFs e volumes…');
-        const check = await providerAwareRequest({ data: { ...payload, accessToken, mode: 'verify' }, signal: photoSignal }, retryProgress);
-        if (photoSignal.aborted) throw new Error('Leitura interrompida.');
-        let pre = reconcilePhotoRead(full.pre, check.ok ? check.check : null);
-        completedPhoto = pre;
-        if (!check.ok) pre.headerReview = [...(pre.headerReview ?? []), check.error];
-        if (check.ok && needsVerificationRecheck(pre)) {
-          progress('Conferindo diferenças entre as leituras…');
-          // Keep the whole page: a long table may extend beyond the detail crop.
-          const verification = await providerAwareRequest({ data: { ...payload, accessToken, mode: 'verify' }, signal: photoSignal }, retryProgress);
+        let pre = completedPhoto!;
+        if (needsPhotoVerification(full.pre)) {
+          const payload = photoPayload(image, full.rotation, full.pre.kind === 'pre');
+          progress('Conferindo campos sinalizados em uma segunda leitura…');
+          // Keep the whole page so every CTC retains its NF, quantities and names.
+          const check = await providerAwareRequest({ data: { ...payload, accessToken, mode: 'verify' }, signal: photoSignal }, retryProgress);
           if (photoSignal.aborted) throw new Error('Leitura interrompida.');
-          if (verification.ok) pre = reconcileThreePhotoReads(full.pre, check.check, verification.check);
-          else pre = { ...pre, headerReview: [...(pre.headerReview ?? []), `Conferência adicional: ${verification.error}`], verification: { status: 'review', checkedFields: pre.verification?.checkedFields ?? 0, conflicts: pre.verification?.conflicts ?? 0 } };
+          pre = reconcilePhotoRead(full.pre, check.ok ? check.check : null);
+          completedPhoto = pre;
+          if (!check.ok) pre.headerReview = [...(pre.headerReview ?? []), check.error];
         }
         if (!signal?.aborted) onResult(index, { pre, text: JSON.stringify(pre, null, 2), milliseconds: performance.now() - start });
       } catch (error) {

@@ -7,7 +7,7 @@ export type PhotoFields = ReturnType<typeof parsePreText> & {
   rawPlate?: string; expectedRows?: number; totalVolumes?: number; headerReview?: string[];
   readingSource?: 'gemini' | 'local';
   readingFallback?: boolean;
-  verification?: { status: 'matched' | 'review' | 'unavailable'; checkedFields: number; conflicts: number };
+  verification?: { status: 'single' | 'matched' | 'review' | 'unavailable'; checkedFields: number; conflicts: number };
 };
 export type OcrPage = { text: string; blocks?: { paragraphs: { lines: { words: OcrWord[] }[] }[] }[] | null };
 export type CellRegion = { row: number; field: 'ctc' | 'nf' | 'volumes'; box: OcrWord['bbox'] };

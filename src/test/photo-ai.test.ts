@@ -22,17 +22,19 @@ let bitmaps: FakeBitmap[];
 let calls: { name: string; input: RequestInput; pending: Deferred<Response> }[];
 let activeRequests: number;
 let peakRequests: number;
+let testUser = 0;
 const photo = (name: string) => new File(['fake image'], name, { type: 'image/jpeg' });
 const bitmap = (name: string): FakeBitmap => ({ name, width: 800, height: 1200, close: vi.fn() }) as unknown as FakeBitmap;
 const quotaMessages = { daily: 'A cota diária do Gemini terminou. Tente novamente amanhã.', minute: 'Limite de leitura por minuto atingido.', unknown: 'Limite do Gemini atingido.' };
 const quotaFailure = (quota: keyof typeof quotaMessages) => ({ ok: false as const, error: quotaMessages[quota], quota, retryable: false as const });
 
-function responses(number: number, rotation: 0 | 90 | 180 | 270 = 0) {
+function responses(number: number, rotation: 0 | 90 | 180 | 270 = 0, needsCheck = true) {
   const check = {
     kind: 'pre' as const, clockwiseRotation: rotation, id: `DI${String(number).padStart(9, '0')}`, plate: 'ABC1D23', driver: 'ANA SILVA', expectedRows: 1, totalVolumes: 3,
     documents: [{ ctc: String(number).padStart(10, '0'), nf: `${100 + number}-1`, volumes: '3' }],
   };
-  const pre = normalizeGeminiPhoto({ ...check, documents: check.documents.map(row => ({ ...row, client: 'LAB TESTE', recipient: 'CLIENTE TESTE', review: [] })) });
+  // A positional plate repair is a concrete reason to request verification.
+  const pre = normalizeGeminiPhoto({ ...check, plate: needsCheck ? 'ABCID23' : check.plate, documents: check.documents.map(row => ({ ...row, client: 'LAB TESTE', recipient: 'CLIENTE TESTE', review: [] })) });
   const verification: Response = { ok: true, pre, check: { ...check, clockwiseRotation: 0 }, rotation: 0, text: '' };
   const full: Response = { ok: true, pre, check: null, rotation, text: '' };
   return { verification, full };
@@ -46,7 +48,7 @@ async function pendingCall(name: string, mode: 'full' | 'verify', occurrence = 0
 beforeEach(() => {
   vi.clearAllMocks();
   bitmaps = []; calls = []; activeRequests = 0; peakRequests = 0;
-  mocks.session.mockResolvedValue({ data: { session: { access_token: 'test-session-token-kept-out-of-results' } } });
+  mocks.session.mockResolvedValue({ data: { session: { user: { id: `photo-ai-test-${++testUser}` }, access_token: 'test-session-token-kept-out-of-results' } } });
   mocks.decode.mockImplementation(async (file: File) => { const image = bitmap(file.name); bitmaps.push(image); return image; });
   vi.stubGlobal('createImageBitmap', mocks.decode);
   // jsdom's AbortSignal lacks the modern static helpers used by browsers.
@@ -81,38 +83,62 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('AI photo import pipeline', () => {
+  it('finishes a complete and locally consistent photo after exactly one AI call', async () => {
+    const receive = vi.fn(); const progress = vi.fn();
+    const batch = readAiPhotos([photo('complete.jpg')], receive, progress);
+    (await pendingCall('complete.jpg', 'full')).pending.resolve(responses(1, 0, false).full);
+    await batch;
+    expect(calls.map(call => call.input.data.mode)).toEqual(['full']);
+    expect(receive).toHaveBeenCalledOnce();
+    const result = receive.mock.calls[0]![1];
+    expect(result.pre.verification).toEqual({ status: 'single', checkedFields: 0, conflicts: 0 });
+    expect(result.pre.headerReview).toEqual([]);
+    expect(result.pre.documents[0]).toMatchObject({ ctc: '0000000001', nf: '101-1', volumes: '3', client: 'LAB TESTE', recipient: 'CLIENTE TESTE' });
+    expect(JSON.parse(result.text).verification.status).toBe('single');
+    expect(progress).toHaveBeenCalledOnce();
+    expect(bitmaps[0]!.close).toHaveBeenCalledOnce();
+  });
+
+  it('requests the second reading for missing names and recovers them by CTC identity', async () => {
+    const response = responses(1, 0, false);
+    const missing = { ...response.full, pre: { ...response.full.pre, documents: response.full.pre.documents.map(row => ({ ...row, client: '', review: ['Confira cliente/laboratório'] })) } };
+    const receive = vi.fn();
+    const batch = readAiPhotos([photo('missing-name.jpg')], receive, undefined);
+    (await pendingCall('missing-name.jpg', 'full')).pending.resolve(missing);
+    (await pendingCall('missing-name.jpg', 'verify')).pending.resolve({ ...response.verification, check: { ...response.verification.check!, documents: [{ ctc: '0000000001', nf: '101-1', volumes: '3', client: 'LAB TESTE', recipient: 'CLIENTE TESTE' }] } });
+    await batch;
+    expect(calls).toHaveLength(2);
+    expect(receive.mock.calls[0]![1].pre.documents[0].client).toBe('LAB TESTE');
+    expect(receive.mock.calls[0]![1].pre.verification.status).toBe('review');
+  });
+
   it('limits concurrent photos to two and returns their original indices when they finish out of order', async () => {
     const receive = vi.fn();
     const batch = readAiPhotos([photo('a.jpg'), photo('b.jpg'), photo('c.jpg')], receive, undefined);
-    const a = responses(1); const b = responses(2); const c = responses(3);
+    const a = responses(1, 0, false); const b = responses(2, 0, false); const c = responses(3, 0, false);
     await pendingCall('a.jpg', 'full');
     const bFull = await pendingCall('b.jpg', 'full');
     expect(mocks.decode).toHaveBeenCalledTimes(2);
     expect(calls).toHaveLength(2);
     expect(calls.some(call => call.name === 'c.jpg')).toBe(false);
     bFull.pending.resolve(b.full);
-    const bCheck = await pendingCall('b.jpg', 'verify');
-    expect(mocks.decode).toHaveBeenCalledTimes(2);
-    expect(calls.some(call => call.name === 'c.jpg')).toBe(false);
-    bCheck.pending.resolve(b.verification);
     const cFull = await pendingCall('c.jpg', 'full');
     expect(receive.mock.calls.map(call => call[0])).toEqual([1]);
     expect(bitmaps.find(image => image.name === 'b.jpg')!.close).toHaveBeenCalledOnce();
     cFull.pending.resolve(c.full);
-    (await pendingCall('c.jpg', 'verify')).pending.resolve(c.verification);
     await waitFor(() => expect(receive.mock.calls.map(call => call[0])).toEqual([1, 2]));
     (await pendingCall('a.jpg', 'full')).pending.resolve(a.full);
-    (await pendingCall('a.jpg', 'verify')).pending.resolve(a.verification);
     await batch;
     expect(peakRequests).toBe(2);
     expect(activeRequests).toBe(0);
     expect(receive.mock.calls.map(([index, result]) => [index, result.pre.id])).toEqual([[1, 'DI000000002'], [2, 'DI000000003'], [0, 'DI000000001']]);
-    expect(mocks.request).toHaveBeenCalledTimes(6);
+    expect(mocks.request).toHaveBeenCalledTimes(3);
+    receive.mock.calls.forEach(([, result]) => expect(result.pre.verification.status).toBe('single'));
     expect(bitmaps).toHaveLength(3);
     bitmaps.forEach(image => expect(image.close).toHaveBeenCalledOnce());
   });
 
-  it('uses one decode and exactly two reads when the full read and independent verification agree', async () => {
+  it('uses one decode and a second read only to corroborate an automatically repaired plate', async () => {
     const receive = vi.fn(); const progress = vi.fn(); const result = responses(1, 90);
     const batch = readAiPhotos([photo('sideways.jpg')], receive, progress);
     const full = await pendingCall('sideways.jpg', 'full');
@@ -130,7 +156,7 @@ describe('AI photo import pipeline', () => {
     expect(receive).toHaveBeenCalledOnce();
     expect(receive.mock.calls[0]?.[1].pre).toMatchObject({ verification: { status: 'matched', conflicts: 0 }, documents: [{ ctc: '0000000001', nf: '101-1', volumes: '3', client: 'LAB TESTE' }] });
     expect(receive.mock.calls[0]?.[1].pre.verification.checkedFields).toBeGreaterThanOrEqual(8);
-    expect(progress.mock.calls.map(call => call[1])).toEqual(['1/2 · Lendo todas as linhas e laboratórios…', '2/2 · Conferindo placa, CTCs, NFs e volumes…']);
+    expect(progress.mock.calls.map(call => call[1])).toEqual(['Lendo todas as linhas e laboratórios…', 'Conferindo campos sinalizados em uma segunda leitura…']);
     expect(bitmaps[0]!.close).toHaveBeenCalledOnce();
   });
 
@@ -200,20 +226,29 @@ describe('AI photo import pipeline', () => {
     expect(activeRequests).toBe(0);
   });
 
-  it('preserves the full read with a review warning when the additional request rejects', async () => {
+  it('preserves the full result if the optional second request throws', async () => {
+    const receive = vi.fn();
+    const batch = readAiPhotos([photo('verification-offline.jpg')], receive, undefined);
+    (await pendingCall('verification-offline.jpg', 'full')).pending.resolve(responses(1).full);
+    (await pendingCall('verification-offline.jpg', 'verify')).pending.reject(new Error('Network unavailable'));
+    await batch;
+    expect(calls).toHaveLength(2);
+    expect(receive.mock.calls[0]![1].pre).toMatchObject({ id: 'DI000000001', verification: { status: 'review' }, documents: [{ ctc: '0000000001', nf: '101-1' }] });
+    expect(receive.mock.calls[0]![1].pre.headerReview).toContain('A conferência adicional não terminou. Confira os campos sinalizados antes de cadastrar.');
+  });
+
+  it('keeps disagreements visible for manual review without spending a third reading', async () => {
     const receive = vi.fn(); const result = responses(1);
     const batch = readAiPhotos([photo('verify-offline.jpg')], receive, undefined);
     const conflictingCheck: Response = { ...result.verification, check: { ...result.verification.check!, documents: [{ ctc: '0000000001', nf: '999-1', volumes: '3' }] } };
     (await pendingCall('verify-offline.jpg', 'full')).pending.resolve(result.full);
     (await pendingCall('verify-offline.jpg', 'verify')).pending.resolve(conflictingCheck);
-    (await pendingCall('verify-offline.jpg', 'verify', 1)).pending.reject(new Error('Verification network failure'));
     await batch;
-    expect(calls.map(call => call.input.data.mode)).toEqual(['full', 'verify', 'verify']);
+    expect(calls.map(call => call.input.data.mode)).toEqual(['full', 'verify']);
     expect(receive).toHaveBeenCalledOnce();
     const reading = receive.mock.calls[0]![1];
     expect(reading).not.toHaveProperty('error');
     expect(reading.pre).toMatchObject({ id: 'DI000000001', plate: 'ABC1D23', driver: 'ANA SILVA', verification: { status: 'review', conflicts: 1 }, documents: [{ ctc: '0000000001', nf: '101-1', volumes: '3', client: 'LAB TESTE', recipient: 'CLIENTE TESTE' }] });
-    expect(reading.pre.headerReview).toContain('A conferência adicional não terminou. Confira os campos sinalizados antes de cadastrar.');
     expect(reading.pre.documents[0].review).toContain('NF e série divergente no CTC 0000000001: 101-1 / 999-1.');
     expect(JSON.parse(reading.text).verification.status).toBe('review');
     expect(bitmaps[0]!.close).toHaveBeenCalledOnce();
@@ -267,26 +302,16 @@ describe('AI photo import pipeline', () => {
     bitmaps.forEach(image => expect(image.close).toHaveBeenCalledOnce());
   });
 
-  it('retains disagreements when daily quota stops a third reading, without leaving queued photos pending', async () => {
-    const receive = vi.fn(); const result = responses(1);
-    const batch = readAiPhotos([photo('third-limit.jpg'), photo('in-flight.jpg'), photo('queued.jpg')], receive, undefined);
-    const conflicting: Response = { ...result.verification, check: { ...result.verification.check!, documents: [{ ctc: '0000000001', nf: '999-1', volumes: '3' }] } };
-    (await pendingCall('third-limit.jpg', 'full')).pending.resolve(result.full);
-    (await pendingCall('third-limit.jpg', 'verify')).pending.resolve(conflicting);
-    (await pendingCall('third-limit.jpg', 'verify', 1)).pending.resolve(quotaFailure('daily'));
-    await waitFor(() => expect(receive).toHaveBeenCalledTimes(2));
-    (await pendingCall('in-flight.jpg', 'full')).pending.resolve(responses(2).full);
-    await batch;
-    const results = new Map(receive.mock.calls.map(([index, reading]) => [index, reading]));
-    expect(results.get(0)).not.toHaveProperty('error');
-    expect(results.get(0).pre).toMatchObject({ verification: { status: 'review', conflicts: 1 }, documents: [{ ctc: '0000000001', nf: '101-1', volumes: '3' }] });
-    expect(results.get(0).pre.headerReview).toContain(`Conferência adicional: ${quotaMessages.daily}`);
-    expect(results.get(0).pre.documents[0].review).toContain('NF e série divergente no CTC 0000000001: 101-1 / 999-1.');
-    expect(results.get(2)).toEqual({ error: quotaMessages.daily });
-    expect(calls).toHaveLength(4);
-    expect(receive).toHaveBeenCalledTimes(3);
-    expect(mocks.decode).toHaveBeenCalledTimes(2);
-    bitmaps.forEach(image => expect(image.close).toHaveBeenCalledOnce());
+  it('goes directly to local fallback on the next import after a known daily quota failure', async () => {
+    const first = readAiPhotos([photo('limited.jpg')], vi.fn(), undefined);
+    (await pendingCall('limited.jpg', 'full')).pending.resolve(quotaFailure('daily'));
+    await first;
+    const receive = vi.fn(); const progress = vi.fn();
+    await readAiPhotos([photo('next-batch.jpg'), photo('next-batch-2.jpg')], receive, progress);
+    expect(calls).toHaveLength(1);
+    expect(mocks.decode).toHaveBeenCalledOnce();
+    expect(receive.mock.calls.map(([index, result]) => [index, 'error' in result])).toEqual([[0, true], [1, true]]);
+    expect(progress).toHaveBeenCalledTimes(2);
   });
 
   it('stops unavailable-provider calls for ten photos after the request helper returns, preserving a valid in-flight full read', async () => {

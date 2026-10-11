@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PhotoFields } from '@/lib/photo-fields';
-import { needsVerificationRecheck, reconcilePhotoRead, reconcileThreePhotoReads, verificationSchema } from '@/lib/photo-verification';
+import { needsPhotoVerification, needsVerificationRecheck, reconcilePhotoRead, reconcileThreePhotoReads, verificationSchema } from '@/lib/photo-verification';
 
 const primary = (): PhotoFields & { expectedRows: number; totalVolumes: number } => ({
   kind: 'pre', id: 'DI00123456789', plate: 'ABC1D23', driver: 'JOÃO DA SILVA',
@@ -185,5 +185,183 @@ describe('independent photo verification', () => {
     expect(result.documents[0]!.review).toEqual(nameDoubts);
     expect(result.documents[0]).toMatchObject({ client: 'LAB A', recipient: 'CLIENTE A' });
     expect(result.verification.status).toBe('review');
+  });
+  it('checks customer and recipient names by CTC, retaining accents and literal abbreviations', () => {
+    const full = primary();
+    full.documents[0]!.client = 'LABORATÓRIO A';
+    const check = { ...second(), documents: [
+      { ctc: '0000000002', nf: '102-1', volumes: '3', client: 'lab b', recipient: 'cliente b' },
+      { ctc: '0000000001', nf: '101-1', volumes: '2', client: ' laboratorio   a ', recipient: 'CLIENTE A' },
+    ] };
+    const result = meta(reconcilePhotoRead(full, check));
+    expect(result.verification.status).toBe('matched');
+    expect(result.documents).toEqual(full.documents);
+    check.documents[0]!.client = 'LABORATÓRIO B';
+    check.documents[0]!.recipient = 'OUTRO CLIENTE';
+    const differing = meta(reconcilePhotoRead(full, check));
+    expect(differing.documents[1]).toMatchObject({ client: 'LAB B', recipient: 'CLIENTE B' });
+    expect(differing.documents[1]!.review?.join(' ')).toContain('Cliente/laboratório divergente no CTC 0000000002');
+    expect(differing.documents[1]!.review?.join(' ')).toContain('Destinatário divergente');
+    expect(differing.verification).toMatchObject({ status: 'review', conflicts: 2 });
+  });
+  it('recovers absent names only from the matching CTC and flags the recovery', () => {
+    const full = primary(); full.documents[0]!.client = ''; full.documents[0]!.recipient = '?';
+    const check = { ...second(), documents: [
+      { ctc: '0000000002', nf: '102-1', volumes: '3', client: 'LAB B', recipient: 'CLIENTE B' },
+      { ctc: '0000000001', nf: '101-1', volumes: '2', client: 'LAB A', recipient: 'CLIENTE A' },
+    ] };
+    const result = meta(reconcilePhotoRead(full, check));
+    expect(result.documents[0]).toMatchObject({ client: 'LAB A', recipient: 'CLIENTE A' });
+    expect(result.documents[0]!.review?.filter(message => message.includes('recuperado pela segunda leitura'))).toHaveLength(2);
+    expect(result.verification.status).toBe('review');
+    expect(full.documents[0]).toMatchObject({ client: '', recipient: '?' });
+    check.documents[1]!.ctc = '0000000999';
+    expect(reconcilePhotoRead(full, check).documents[0]).toMatchObject({ client: '', recipient: '?' });
+  });
+  it('flags empty second-read names and clears only a precise notice after a matching name', () => {
+    const full = primary();
+    full.documents[0]!.review = ['Confira cliente/laboratório', 'Confira destinatário', 'NF e destinatário ilegíveis'];
+    const check = { ...second(), documents: [
+      { ctc: '0000000002', nf: '102-1', volumes: '3', client: 'LAB B', recipient: '' },
+      { ctc: '0000000001', nf: '101-1', volumes: '2', client: 'LAB A', recipient: 'CLIENTE A' },
+    ] };
+    const result = meta(reconcilePhotoRead(full, check));
+    expect(result.documents[0]!.review).toEqual(['NF e destinatário ilegíveis']);
+    expect(result.documents[1]!.review?.join(' ')).toContain('Destinatário não confirmado');
+    expect(result.documents[1]!.recipient).toBe('CLIENTE B');
+    expect(result.verification.status).toBe('review');
+    expect(verificationSchema.safeParse(second()).success).toBe(true);
+  });
+});
+
+describe('economic photo verification decision', () => {
+  it('skips a second request only for a complete consistent read and does not mutate it', () => {
+    const full = { ...primary(), rawPlate: 'abc-1d23', readingSource: 'gemini' as const };
+    const original = structuredClone(full);
+    expect(needsPhotoVerification(full)).toBe(false);
+    expect(full).toEqual(original);
+    full.documents[1]!.nf = full.documents[0]!.nf;
+    expect(needsPhotoVerification(full)).toBe(false); // One NF can appear under different CTCs.
+  });
+  it.each<[string, (full: ReturnType<typeof primary>) => void]>([
+    ['unknown document', full => { full.kind = 'unknown'; }],
+    ['no document rows', full => { full.documents = []; full.ctcs = []; }],
+    ['missing pre number', full => { full.id = ''; }],
+    ['invalid pre number', full => { full.id = 'DI123'; }],
+    ['missing driver', full => { full.driver = ' '; }],
+    ['placeholder driver', full => { full.driver = 'Não informado'; }],
+    ['incomplete plate', full => { full.plate = 'ABC1D2'; }],
+    ['normalized plate repair', full => { full.rawPlate = 'ABCID23'; }],
+    ['punctuation hiding a plate doubt', full => { full.rawPlate = 'ABC1D23?'; }],
+    ['CTC fiscal key', full => { full.documents[0]!.ctc = '9'.repeat(44); }],
+    ['duplicate CTC', full => { full.documents[1]!.ctc = full.documents[0]!.ctc; }],
+    ['inconsistent CTC summary', full => { full.ctcs = ['0000000001']; }],
+    ['missing NF', full => { full.documents[1]!.nf = ''; }],
+    ['NF without series', full => { full.documents[1]!.nf = '102'; }],
+    ['missing volumes', full => { full.documents[1]!.volumes = ''; }],
+    ['zero volumes', full => { full.documents[1]!.volumes = '0'; }],
+    ['fractional volumes', full => { full.documents[1]!.volumes = '3.5'; }],
+    ['unsafe volume integer', full => { full.documents[1]!.volumes = '9007199254740993'; }],
+    ['missing laboratory', full => { full.documents[1]!.client = ''; }],
+    ['unreadable laboratory placeholder', full => { full.documents[1]!.client = '???'; }],
+    ['missing recipient', full => { delete full.documents[1]!.recipient; }],
+    ['missing header row count', full => { full.expectedRows = 0; }],
+    ['wrong header row count', full => { full.expectedRows = 3; }],
+    ['missing header total', full => { full.totalVolumes = 0; }],
+    ['wrong header total', full => { full.totalVolumes = 6; }],
+    ['invalid header total', full => { full.totalVolumes = Number.NaN; }],
+    ['fractional header count', full => { full.expectedRows = 2.1; }],
+    ['header review notice', full => { full.headerReview = ['Confira a placa']; }],
+    ['row review notice', full => { full.documents[1]!.review = ['Confira remetente']; }],
+    ['local OCR source', full => { full.readingSource = 'local'; }],
+    ['local fallback result', full => { full.readingFallback = true; }],
+    ['previous unavailable verification', full => { full.verification = { status: 'unavailable', checkedFields: 0, conflicts: 0 }; }],
+  ])('requests verification for %s, even if the other fields look complete', (_, change) => {
+    const full = primary(); change(full);
+    expect(needsPhotoVerification(full)).toBe(true);
+  });
+  it.each(['O', '0', 'I', '1', 'L', 'B', '8'])('rechecks a syntactically valid but ambiguous fifth plate character %s', character => {
+    const full = primary(); full.plate = `ABC1${character}23`; full.rawPlate = full.plate;
+    expect(needsPhotoVerification(full)).toBe(true);
+  });
+  it('does not require pre fields or non-existent header totals on a complete DACTE', () => {
+    const full = primary(); full.kind = 'dacte'; full.id = ''; full.plate = ''; full.driver = '';
+    full.expectedRows = 0; full.totalVolumes = 0;
+    expect(needsPhotoVerification(full)).toBe(false);
+    full.totalVolumes = 6;
+    expect(needsPhotoVerification(full)).toBe(true);
+    full.totalVolumes = 0; full.documents[0]!.recipient = '';
+    expect(needsPhotoVerification(full)).toBe(true);
+  });
+});
+
+describe('conservative recovery of omitted photo rows', () => {
+  const incomplete = () => {
+    const full = primary(); full.documents = [full.documents[0]!]; full.ctcs = [full.documents[0]!.ctc];
+    full.headerReview = ['Cabeçalho informa 2 CTCs; foram lidos 1'];
+    return full;
+  };
+  const completeCheck = () => ({ ...second(), documents: primary().documents.map(({ review, ...row }) => row).reverse() });
+
+  it('recovers a complete omitted row under the same confirmed pre, retaining CTC associations and marking review', () => {
+    const full = incomplete(); full.documents[0]!.client = 'LÁB A';
+    const original = structuredClone(full);
+    const result = meta(reconcilePhotoRead(full, completeCheck()));
+    expect(result.ctcs).toEqual(['0000000002', '0000000001']);
+    expect(result.documents[0]).toMatchObject({ ctc: '0000000002', nf: '102-1', volumes: '3', client: 'LAB B', recipient: 'CLIENTE B' });
+    expect(result.documents[1]).toMatchObject({ ctc: '0000000001', nf: '101-1', volumes: '2', client: 'LÁB A' });
+    expect(result.documents[0]!.review?.join(' ')).toContain('Linha recuperada pela segunda leitura');
+    expect(result.headerReview.join(' ')).toContain('recuperou 1 linha(s)');
+    expect(result.verification.status).toBe('review');
+    expect(result.verification.conflicts).toBe(0);
+    expect(full).toEqual(original);
+  });
+  it('recovers an initially empty table only when the pre identity and complete second header are confirmed', () => {
+    const full = incomplete(); full.documents = []; full.ctcs = [];
+    const result = meta(reconcilePhotoRead(full, completeCheck()));
+    expect(result.documents).toHaveLength(2);
+    expect(result.documents.every(row => row.review?.some(message => message.includes('Linha recuperada')))).toBe(true);
+    expect(result.verification.status).toBe('review');
+    full.id = '';
+    expect(reconcilePhotoRead(full, completeCheck()).documents).toHaveLength(0);
+  });
+  it('allows missing primary totals to be recovered from a complete coherent secondary table', () => {
+    const full = incomplete(); full.expectedRows = 0; full.totalVolumes = 0;
+    const result = meta(reconcilePhotoRead(full, completeCheck()));
+    expect(result).toMatchObject({ expectedRows: 2, totalVolumes: 5 });
+    expect(result.documents).toHaveLength(2);
+    expect(result.verification.status).toBe('review');
+  });
+  it.each<[string, (full: ReturnType<typeof incomplete>, check: ReturnType<typeof completeCheck>) => void]>([
+    ['different pre', (_, check) => { check.id = 'DI00123456788'; }],
+    ['invalid primary pre', full => { full.id = ''; }],
+    ['different plate', (_, check) => { check.plate = 'XYZ2D34'; }],
+    ['different driver', (_, check) => { check.driver = 'OUTRO MOTORISTA'; }],
+    ['conflicting known NF', (_, check) => { check.documents[1]!.nf = '999-1'; }],
+    ['conflicting known volumes', (_, check) => { check.documents[1]!.volumes = '4'; check.totalVolumes = 7; }],
+    ['conflicting laboratory', (_, check) => { check.documents[1]!.client = 'OUTRO LAB'; }],
+    ['primary header count conflict', full => { full.expectedRows = 1; }],
+    ['incomplete secondary table', (_, check) => { check.expectedRows = 3; }],
+    ['absent secondary count', (_, check) => { check.expectedRows = 0; }],
+    ['primary volume total conflict', full => { full.totalVolumes = 4; }],
+    ['secondary sum conflict', (_, check) => { check.totalVolumes = 6; }],
+    ['absent secondary volume total', (_, check) => { check.totalVolumes = 0; }],
+    ['duplicate secondary CTC', (_, check) => { check.documents.push({ ...check.documents[0]! }); check.expectedRows = 3; check.totalVolumes = 8; }],
+    ['duplicate primary CTC', full => { full.documents.push({ ...full.documents[0]! }); }],
+    ['primary CTC absent from second table', full => { full.documents[0]!.ctc = '0000000999'; }],
+    ['invalid primary CTC', full => { full.documents[0]!.ctc = ''; }],
+    ['invalid secondary CTC', (_, check) => { check.documents[0]!.ctc = '999'; }],
+    ['missing extra NF', (_, check) => { check.documents[0]!.nf = ''; }],
+    ['missing extra volumes', (_, check) => { check.documents[0]!.volumes = ''; }],
+    ['missing extra laboratory', (_, check) => { delete check.documents[0]!.client; }],
+    ['missing extra recipient', (_, check) => { check.documents[0]!.recipient = '?'; }],
+    ['DACTE without a shared pre identity', (full, check) => { full.kind = 'dacte'; check.kind = 'dacte'; }],
+  ])('does not add a secondary row with %s', (_, change) => {
+    const full = incomplete(); const check = completeCheck(); change(full, check);
+    const count = full.documents.length;
+    const result = meta(reconcilePhotoRead(full, check));
+    expect(result.documents).toHaveLength(count);
+    expect(result.verification.status).toBe('review');
+    expect(result.documents.some(row => row.review?.some(message => message.includes('Linha recuperada')))).toBe(false);
   });
 });

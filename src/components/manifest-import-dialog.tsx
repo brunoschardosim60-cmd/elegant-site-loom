@@ -5,9 +5,11 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { ManifestDocumentsEditor } from './manifest-documents-editor';
 import type { Manifest } from '@/lib/conference';
 import type { ImportDraft, ImportOutcome } from '@/lib/manifest-import';
+import type { PhotoFields } from '@/lib/photo-fields';
 import { photoReaderStatus } from '@/lib/photo-reader.functions';
+import { uniquePhotoFiles } from '@/lib/photo-files';
 
-type Verification = { status: 'matched' | 'review' | 'unavailable'; checkedFields: number; conflicts: number };
+type Verification = NonNullable<PhotoFields['verification']>;
 type Draft = ImportDraft & {
   key: string; filename: string; file?: File; url?: string; text?: string;
   status: 'manual' | 'waiting' | 'reading' | 'read' | 'error';
@@ -18,13 +20,15 @@ const blank = (): Draft => ({ key: crypto.randomUUID(), filename: 'Cadastro manu
 const documentCount = (item: Draft) => item.rows.filter(row => row.ctc).length;
 const volumeCount = (item: Draft) => item.rows.reduce((sum, row) => sum + (Number.isInteger(Number(row.volumes)) && Number(row.volumes) > 0 ? Number(row.volumes) : 0), 0);
 const reviewCount = (item: Draft) => item.rows.filter(row => row.review?.length).length;
-const statusText = (item: Draft) => item.status === 'read' ? item.readingSource === 'local' ? 'Leitura local · conferir' : item.edited ? 'Ajustado manualmente' : reviewCount(item) || item.headerReview?.length || item.verification?.status === 'review' ? 'Conferir campos' : 'Leitura concluída' : item.status === 'error' ? 'Leitura interrompida' : item.status === 'reading' ? 'Lendo documento' : item.status === 'waiting' ? 'Aguardando leitura' : 'Cadastro manual';
+const needsReview = (item: Draft) => item.status === 'error' || item.readingSource === 'local' || !!item.headerReview?.length || !!reviewCount(item) || item.verification?.status === 'review' || item.verification?.status === 'unavailable';
+const statusText = (item: Draft) => item.status === 'read' ? item.readingSource === 'local' ? 'Leitura local · conferir' : item.edited ? 'Ajustado manualmente' : needsReview(item) ? 'Conferir campos' : 'Leitura concluída' : item.status === 'error' ? 'Leitura interrompida' : item.status === 'reading' ? 'Lendo documento' : item.status === 'waiting' ? 'Aguardando leitura' : 'Cadastro manual';
 const hasManualContent = (item: Draft) => item.id || item.plate || item.driver || item.rows.some(row => row.ctc || row.nf || row.client || row.recipient || (row.volumes && row.volumes !== '1'));
 
 export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, initialId }: {
   initialId?: string; open: boolean; onOpenChange: (open: boolean) => void; manifests: Manifest[]; onCreate: (drafts: ImportDraft[]) => ImportOutcome;
 }) {
   const [items, setItems] = useState<Draft[]>([]);
+  const currentItems = useRef(items); currentItems.current = items;
   const [active, setActive] = useState(0);
   const [selectedRow, setSelectedRow] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -53,12 +57,15 @@ export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, 
     onOpenChange(value);
   }
   async function readFiles(input: FileList | File[] | null, detailed = false, replaceKey?: string) {
-    if (busy || reader === 'checking') return;
+    if (busy || controller.current || reader === 'checking') return;
     const selected = Array.from(input ?? []);
-    const files = selected.filter(file => file.type.startsWith('image/'));
+    let files = selected.filter(file => file.type.startsWith('image/'));
     if (!files.length) { if (selected.length) setError('Envie uma foto em JPG, PNG ou WebP. Arquivos PDF ainda não são aceitos.'); return; }
-    setError(selected.length !== files.length ? 'Alguns arquivos foram ignorados. Envie fotos em JPG, PNG ou WebP.' : '');
+    const skippedMessage = selected.length !== files.length ? 'Alguns arquivos foram ignorados. Envie fotos em JPG, PNG ou WebP.' : '';
+    setError(skippedMessage);
     setBusy(true); setSelectedRow(0); setPreviewRotation(0);
+    const abort = new AbortController(); controller.current = abort;
+    setProgress(replaceKey ? 'Preparando a releitura…' : 'Verificando fotos repetidas…');
     const previous = items.find(item => item.key === replaceKey);
     const recoverable = previous?.status === 'read' && hasManualContent(previous);
     const protectedAi = recoverable && previous.readingSource === 'gemini' && previous.rows.some(row => /^\d{10}$/.test(row.ctc));
@@ -68,16 +75,25 @@ export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, 
       headerReview: [...new Set([...(previous.headerReview ?? []), preservedMessage])], message: preservedMessage,
       verification: previous.verification ? { ...previous.verification, status: 'review' } : undefined,
     } : item;
-    const additions: Draft[] = files.map(file => {
-      const url = URL.createObjectURL(file); urls.current.push(url);
-      return { ...(previous ?? blank()), key: crypto.randomUUID(), file, filename: file.name, url, status: 'waiting', rows: previous?.rows ?? [{ ctc: '', nf: '', volumes: '' }], verification: undefined, headerReview: undefined, readingSource: undefined, readingFallback: undefined, edited: false };
-    });
-    if (previous) releaseUrl(previous.url);
-    const keep = items.filter(item => item.key !== replaceKey && (item.status !== 'manual' || hasManualContent(item)));
-    setItems([...keep, ...additions]); setActive(keep.length);
-    const abort = new AbortController(); controller.current = abort;
+    let additions: Draft[] = [];
     try {
+      if (!replaceKey) {
+        const existing = items.flatMap(item => item.file ? [item.file] : []);
+        const unique = await uniquePhotoFiles(files, existing, abort.signal);
+        if (abort.signal.aborted) return;
+        files = unique.files;
+        setError([skippedMessage, unique.duplicates ? `${unique.duplicates} foto(s) repetida(s) ignorada(s).` : ''].filter(Boolean).join(' '));
+        if (!files.length) return;
+      }
+      additions = files.map(file => {
+        const url = URL.createObjectURL(file); urls.current.push(url);
+        return { ...(previous ?? blank()), key: crypto.randomUUID(), file, filename: file.name, url, status: 'waiting', rows: previous?.rows ?? [{ ctc: '', nf: '', volumes: '' }], verification: undefined, headerReview: undefined, readingSource: undefined, readingFallback: undefined, edited: false };
+      });
+      if (previous) releaseUrl(previous.url);
+      const keep = currentItems.current.filter(item => item.key !== replaceKey && (item.status !== 'manual' || hasManualContent(item)));
+      setItems([...keep, ...additions]); setActive(keep.length);
       const readPrePhotos = reader === 'ai' ? (await import('@/lib/photo-reader')).readPhotosWithFallback : (await import('@/lib/photo-ocr')).readPrePhotos;
+      if (abort.signal.aborted) return;
       await readPrePhotos(files, (index, result) => {
         if (abort.signal.aborted) return;
         const key = additions[index]!.key;
@@ -100,7 +116,7 @@ export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, 
         setProgress(`Foto ${index + 1} de ${files.length} · ${message}`);
         setItems(list => list.map(item => item.key === additions[index]!.key ? { ...item, status: 'reading', progress: message } : item));
       }, abort.signal, detailed);
-    } catch { if (!abort.signal.aborted) setError('Falha ao iniciar o leitor. Suas fotos continuam na lista para tentar novamente.'); }
+    } catch { if (!abort.signal.aborted) setError(additions.length ? 'Falha ao iniciar o leitor. Suas fotos continuam na lista para tentar novamente.' : 'Não foi possível preparar as fotos. Tente selecioná-las novamente.'); }
     finally {
       if (controller.current === abort) {
         setBusy(false); controller.current = null; setProgress('');
@@ -126,7 +142,8 @@ export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, 
   const volumes = items.reduce((sum, item) => sum + volumeCount(item), 0);
   const locked = busy || reader === 'checking';
   const verifiedTitle = draft?.kind === 'dacte' ? 'Números conferidos' : 'Cabeçalho e números conferidos';
-  const verifiedDescription = `Duas leituras concordam em ${draft?.verification?.checkedFields ?? 0} campos: ${draft?.kind === 'dacte' ? 'CTC, NF e volumes' : 'pré, placa, motorista, CTC, NF e volumes'}. Confira os nomes dos clientes e destinatários.`;
+  const verifiedDescription = `A conferência adicional confirmou ${draft?.verification?.checkedFields ?? 0} campos: ${draft?.kind === 'dacte' ? 'CTC, NF e volumes' : 'pré, placa, motorista, CTC, NF e volumes'}. Confira os nomes dos clientes e destinatários.`;
+  const verificationPassed = !draft?.edited && (draft?.verification?.status === 'matched' || draft?.verification?.status === 'single');
   const targets = [...manifests.map(item => ({ id: item.id, driver: item.driver })), ...items.filter(item => item.kind === 'pre' && item.id && !manifests.some(m => m.id === item.id)).map(item => ({ id: item.id, driver: item.driver }))];
   return <Dialog open={open} onOpenChange={closeDialog}><DialogContent className="import-dialog">
     <DialogHeader className="import-header">
@@ -140,7 +157,7 @@ export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, 
       </div>
       <div className="import-reader-settings">
         <span className="import-reader-badge"><span className={reader === 'checking' ? 'import-dot checking' : 'import-dot'} />{reader === 'ai' ? 'Gemini + reserva local' : reader === 'checking' ? 'Preparando leitor…' : 'Leitura local'}</span>
-        <details><summary>Opções de leitura</summary><div className="import-reader-options"><label className="form-field">Leitor<select aria-label="Leitor de fotos" disabled={locked} value={reader} onChange={e => setReader(e.target.value as 'ai' | 'local')}><option value="checking" disabled>Verificando leitor…</option><option value="ai" disabled={!aiAvailable}>Gemini + reserva local{!aiAvailable && ' (indisponível)'}</option><option value="local">Leitura no navegador</option></select></label><p>{reader === 'ai' ? 'As fotos são enviadas ao Google Gemini. Se a IA estiver indisponível, o leitor no navegador tenta a foto automaticamente, sem custo adicional. Confira os dados da leitura local.' : reader === 'checking' ? 'Verificando disponibilidade da IA…' : 'Números pequenos podem ficar incompletos na leitura local. Confira todas as linhas antes de cadastrar.'}</p></div></details>
+        <details><summary>Opções de leitura</summary><div className="import-reader-options"><label className="form-field">Leitor<select aria-label="Leitor de fotos" disabled={locked} value={reader} onChange={e => setReader(e.target.value as 'ai' | 'local')}><option value="checking" disabled>Verificando leitor…</option><option value="ai" disabled={!aiAvailable}>Gemini + reserva local{!aiAvailable && ' (indisponível)'}</option><option value="local">Leitura no navegador</option></select></label><p>{reader === 'ai' ? 'Uma leitura pelo Google Gemini, com validação local dos dados. Uma nova leitura só é solicitada se houver inconsistências. Fotos repetidas no lote ou já na lista são ignoradas. Se a IA estiver indisponível, o navegador tenta a leitura local, sem custo adicional; confira todos os campos.' : reader === 'checking' ? 'Verificando disponibilidade da IA…' : 'Números pequenos podem ficar incompletos na leitura local. Confira todas as linhas antes de cadastrar.'}</p></div></details>
       </div>
       {dragging && <div className="import-drop-overlay"><Images size={30} /><strong>Solte as fotos para ler</strong></div>}
     </div>
@@ -152,16 +169,16 @@ export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, 
         {items.length > 1 && <label className="form-field import-mobile-select">Documento selecionado<select aria-label="Selecionar foto do lote" value={active} onChange={event => selectItem(Number(event.target.value))}>{items.map((item, i) => <option key={item.key} value={i}>{i + 1}. {item.id || item.filename} · {statusText(item)}</option>)}</select></label>}
         <div className="import-queue-list">{items.map((item, index) => <button type="button" className="import-queue-item" key={item.key} aria-label={`Revisar arquivo ${index + 1}: ${item.id || item.filename}`} aria-pressed={index === active} onClick={() => selectItem(index)}>
           <div className="import-queue-thumb">{item.url ? <img src={item.url} alt="" /> : <FileImage size={22} />}<span>{index + 1}</span></div>
-          <div className="import-queue-copy"><strong>{item.id || (item.file ? 'Identificando pré…' : 'Cadastro manual')}</strong><small>{item.driver || item.filename}</small><span className={`import-file-status ${item.status === 'error' || item.readingSource === 'local' || item.headerReview?.length || reviewCount(item) ? 'warning' : item.status === 'read' ? 'success' : ''}`}>{item.status === 'reading' ? <Loader2 className="animate-spin" /> : item.status === 'error' ? <AlertCircle /> : item.status === 'read' ? <CheckCircle2 /> : null}{statusText(item)}</span>{item.status === 'reading' && item.progress && <span className="import-queue-progress">{item.progress}</span>}{item.status === 'read' && <span className="import-queue-numbers">{documentCount(item)} CTCs · {volumeCount(item)} volumes</span>}</div>
+          <div className="import-queue-copy"><strong>{item.id || (item.file ? 'Identificando pré…' : 'Cadastro manual')}</strong><small>{item.driver || item.filename}</small><span className={`import-file-status ${needsReview(item) ? 'warning' : item.status === 'read' ? 'success' : ''}`}>{item.status === 'reading' ? <Loader2 className="animate-spin" /> : item.status === 'error' ? <AlertCircle /> : item.status === 'read' ? <CheckCircle2 /> : null}{statusText(item)}</span>{item.status === 'reading' && item.progress && <span className="import-queue-progress">{item.progress}</span>}{item.status === 'read' && <span className="import-queue-numbers">{documentCount(item)} CTCs · {volumeCount(item)} volumes</span>}</div>
         </button>)}</div>
         <Button type="button" variant="outline" size="sm" className="import-manual-button" disabled={busy} onClick={() => { setItems(list => [...list, blank()]); selectItem(items.length); }}><Plus size={15} />Adicionar pré manualmente</Button>
-        <p className="import-draft-note">Os documentos só serão salvos ao cadastrar. Fechar descarta este rascunho.</p>
+        <p className="import-draft-note">Os documentos só serão salvos ao cadastrar. Fechar descarta os rascunhos e as fotos.</p>
       </aside>
       {draft && <form className="import-review" noValidate onSubmit={(event: FormEvent) => { event.preventDefault(); save(false); }}>
-        <div className="import-review-heading"><div><span className="import-eyebrow">Documento {active + 1} de {items.length}</span><h3>{draft.id || (draft.file ? 'Lendo seu documento' : 'Preencha os dados do pré')}</h3><p>{draft.file ? draft.filename : 'Cadastre os documentos sem enviar uma foto.'}</p></div><span className={`import-file-status ${draft.status === 'error' || draft.readingSource === 'local' || draft.headerReview?.length || reviewCount(draft) ? 'warning' : draft.status === 'read' ? 'success' : ''}`}>{waiting ? <Loader2 className="animate-spin" /> : draft.status === 'read' ? <CheckCircle2 /> : null}{statusText(draft)}</span></div>
+        <div className="import-review-heading"><div><span className="import-eyebrow">Documento {active + 1} de {items.length}</span><h3>{draft.id || (draft.file ? 'Lendo seu documento' : 'Preencha os dados do pré')}</h3><p>{draft.file ? draft.filename : 'Cadastre os documentos sem enviar uma foto.'}</p></div><span className={`import-file-status ${needsReview(draft) ? 'warning' : draft.status === 'read' ? 'success' : ''}`}>{waiting ? <Loader2 className="animate-spin" /> : draft.status === 'read' ? <CheckCircle2 /> : null}{statusText(draft)}</span></div>
         {error && <div className="import-alert error" role="alert"><AlertCircle size={18} /><div><strong>Confira antes de cadastrar</strong><p>{error}</p></div></div>}
         {draft.status === 'error' && <div className="import-alert error" role="alert"><AlertCircle size={18} /><div><strong>Não foi possível concluir esta foto</strong><p>{draft.message}</p></div></div>}
-        {draft.readingSource === 'local' ? <div className="import-alert warning" role="status"><AlertCircle size={19} /><div><strong>{draft.readingFallback ? 'Leitura local de reserva' : 'Leitura local'}</strong><p>Os dados foram lidos no navegador, sem conferência pela IA. Confira todas as linhas, CTCs, NFs, volumes, placa e nomes antes de cadastrar.</p></div></div> : draft.verification && <div className={`import-alert ${draft.verification.status === 'matched' && !draft.edited ? 'verified' : 'warning'}`} role="status">{draft.verification.status === 'matched' && !draft.edited ? <CheckCheck size={19} /> : <AlertCircle size={19} />}<div><strong>{draft.edited ? 'Dados ajustados manualmente' : draft.verification.status === 'matched' ? verifiedTitle : draft.verification.status === 'review' ? draft.verification.conflicts > 0 ? 'As leituras encontraram diferenças' : 'Há campos para conferir' : 'A segunda leitura não foi concluída'}</strong><p>{draft.edited ? 'A conferência automática corresponde à leitura original. Confira também os campos que você alterou.' : draft.verification.status === 'matched' ? verifiedDescription : draft.verification.status === 'review' ? draft.verification.conflicts > 0 ? `${draft.verification.conflicts} divergência(s). Confira os campos sinalizados na foto.` : 'Confira os avisos e os campos sinalizados na foto.' : 'Confira os campos extraídos antes de cadastrar.'}</p></div></div>}
+        {draft.readingSource === 'local' ? <div className="import-alert warning" role="status"><AlertCircle size={19} /><div><strong>{draft.readingFallback ? 'Leitura local de reserva' : 'Leitura local'}</strong><p>Os dados foram lidos no navegador, sem conferência pela IA. Confira todas as linhas, CTCs, NFs, volumes, placa e nomes antes de cadastrar.</p></div></div> : draft.verification && <div className={`import-alert ${verificationPassed ? 'verified' : 'warning'}`} role="status">{verificationPassed ? draft.verification.status === 'matched' ? <CheckCheck size={19} /> : <CheckCircle2 size={19} /> : <AlertCircle size={19} />}<div><strong>{draft.edited ? 'Dados ajustados manualmente' : draft.verification.status === 'single' ? 'Leitura concluída com validação local' : draft.verification.status === 'matched' ? verifiedTitle : draft.verification.status === 'review' ? draft.verification.conflicts > 0 ? 'As leituras encontraram diferenças' : 'Há campos para conferir' : 'Leitura sem conferência independente'}</strong><p>{draft.edited ? 'A validação automática corresponde à leitura original. Confira também os campos que você alterou.' : draft.verification.status === 'single' ? 'A IA leu a foto uma vez. A validação local conferiu o formato dos campos e os totais disponíveis. Revise os dados antes de cadastrar.' : draft.verification.status === 'matched' ? verifiedDescription : draft.verification.status === 'review' ? draft.verification.conflicts > 0 ? `${draft.verification.conflicts} divergência(s). Confira os campos sinalizados na foto.` : 'Confira os avisos e os campos sinalizados na foto.' : 'Os dados foram extraídos sem conferência independente. Revise os campos antes de cadastrar.'}</p></div></div>}
         {!!draft.headerReview?.length && <div className="import-alert warning" role="status"><AlertCircle size={18} /><div><strong>Conferir os dados do pré</strong>{draft.headerReview.map(message => <p key={message}>{message}</p>)}</div></div>}
         <div className={`import-review-columns ${draft.url ? 'with-photo' : ''}`}>
           <section className="import-details-panel"><div className="import-section-title"><span>1</span><h4>Dados do pré</h4></div>
