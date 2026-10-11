@@ -18,15 +18,17 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
     if (bucket.count >= 30) return { ok: false as const, error: 'Muitas fotos seguidas. Aguarde alguns minutos.' };
     bucket.count++; requests.set(ip, bucket);
     try {
-      const response = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
+      const request = (model: string) => fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
         method: 'POST', signal: AbortSignal.timeout(55000),
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-        body: JSON.stringify({ model: process.env['GEMINI_OCR_MODEL'] || 'gemini-3.8-flash', store: false,
+        body: JSON.stringify({ model, store: false,
           input: [{ type: 'text', text: photoPrompt }, { type: 'image', data: data.data, mime_type: data.mimeType }],
           response_format: { type: 'text', mime_type: 'application/json', schema: photoJsonSchema },
           generation_config: { max_output_tokens: 12000, thinking_level: 'low' },
         }),
       });
+      let response = await request(process.env['GEMINI_OCR_MODEL'] || 'gemini-3.5-flash-lite');
+      if ([404, 503].includes(response.status)) response = await request('gemini-3.8-flash');
       if (!response.ok) return { ok: false as const, error: response.status === 429 ? 'Limite do Gemini atingido. Aguarde e tente novamente.' : response.status === 403 || response.status === 401 ? 'Chave do Gemini sem acesso. Confira a configuração na Vercel.' : `Gemini indisponível (${response.status}). Tente novamente.` };
       const result = await response.json() as { status?: string; steps?: { type: string; content?: { type: string; text?: string }[] }[] };
       if (result.status !== 'completed') return { ok: false as const, error: 'A leitura ficou incompleta. Tente novamente com uma foto por vez.' };
