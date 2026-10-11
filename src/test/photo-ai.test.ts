@@ -86,6 +86,72 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('AI photo import pipeline', () => {
+  it('reuses the local orientation and returns a full independent reading without an extra AI check in single-pass mode', async () => {
+    const receive = vi.fn(); const progress = vi.fn();
+    const batch = readAiPhotos([photo('local-first.jpg')], receive, progress, undefined, { orientations: [270], singlePass: true });
+    const full = await pendingCall('local-first.jpg', 'full');
+    expect(atob(full.input.data.data)).toContain('1200x800');
+    expect(full.input.data).not.toHaveProperty('detail');
+    expect(full.input.data).not.toHaveProperty('localDrafts');
+    // The repaired plate normally triggers a second AI call through the old API.
+    full.pending.resolve(responses(1).full);
+    await batch;
+    expect(mocks.orient).not.toHaveBeenCalled();
+    expect(calls.map(call => call.input.data.mode)).toEqual(['full']);
+    expect(mocks.rotate).toHaveBeenCalledWith(270 * Math.PI / 180);
+    expect(receive).toHaveBeenCalledOnce();
+    expect(receive.mock.calls[0]![1].pre).toMatchObject({ verification: { status: 'single' }, documents: [{ ctc: '0000000001', nf: '101-1', volumes: '3', client: 'LAB TESTE' }] });
+    expect(receive.mock.calls[0]![1].pre.headerReview).toContain('Placa ajustada por formato. Confira letras e números.');
+    expect(bitmaps[0]!.close).toHaveBeenCalledOnce();
+  });
+
+  it('can skip only orientation while preserving the old optional verification behavior', async () => {
+    const receive = vi.fn();
+    const batch = readAiPhotos([photo('oriented-check.jpg')], receive, undefined, undefined, { orientations: [90] });
+    (await pendingCall('oriented-check.jpg', 'full')).pending.resolve(responses(1).full);
+    (await pendingCall('oriented-check.jpg', 'verify')).pending.resolve(responses(1).verification);
+    await batch;
+    expect(mocks.orient).not.toHaveBeenCalled();
+    expect(calls.map(call => call.input.data.mode)).toEqual(['full', 'verify']);
+    expect(receive.mock.calls[0]![1].pre.verification.status).toBe('matched');
+  });
+
+  it('stops waiting for a pending session immediately after closing, ignoring a late authentication failure', async () => {
+    const session = deferred<never>();
+    mocks.session.mockReturnValue(session.promise);
+    const abort = new AbortController(); const receive = vi.fn(); const progress = vi.fn();
+    const batch = readAiPhotos([photo('closed-during-session.jpg')], receive, progress, abort.signal);
+    await waitFor(() => expect(mocks.session).toHaveBeenCalledOnce());
+    abort.abort();
+    await batch;
+    session.reject(new Error('Late authentication failure'));
+    await Promise.resolve();
+    expect(mocks.orient).not.toHaveBeenCalled();
+    expect(mocks.decode).not.toHaveBeenCalled();
+    expect(mocks.request).not.toHaveBeenCalled();
+    expect(receive).not.toHaveBeenCalled();
+    expect(progress).not.toHaveBeenCalled();
+  });
+
+  it('does no authentication work for an import that is already closed', async () => {
+    const abort = new AbortController(); abort.abort();
+    await readAiPhotos([photo('already-closed.jpg')], vi.fn(), undefined, abort.signal);
+    expect(mocks.session).not.toHaveBeenCalled();
+    expect(mocks.orient).not.toHaveBeenCalled();
+    expect(mocks.decode).not.toHaveBeenCalled();
+    expect(mocks.request).not.toHaveBeenCalled();
+  });
+
+  it('propagates a session lookup failure rather than reporting a photo fallback', async () => {
+    mocks.session.mockRejectedValue(new Error('Authentication unavailable'));
+    const receive = vi.fn();
+    await expect(readAiPhotos([photo('auth-failure.jpg')], receive, undefined)).rejects.toThrow('Authentication unavailable');
+    expect(mocks.orient).not.toHaveBeenCalled();
+    expect(mocks.decode).not.toHaveBeenCalled();
+    expect(mocks.request).not.toHaveBeenCalled();
+    expect(receive).not.toHaveBeenCalled();
+  });
+
   it('finishes a complete and locally consistent photo after exactly one AI call', async () => {
     const receive = vi.fn(); const progress = vi.fn();
     const batch = readAiPhotos([photo('complete.jpg')], receive, progress);

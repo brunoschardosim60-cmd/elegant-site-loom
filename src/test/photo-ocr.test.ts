@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ recognize: vi.fn(), terminate: vi.fn(), setParameters: vi.fn() }));
-vi.mock('tesseract.js', () => ({ PSM: { AUTO: '3', SPARSE_TEXT: '11', SINGLE_LINE: '7' }, createWorker: vi.fn(async () => mocks) }));
-vi.mock('@/lib/image-prep', () => ({ prepareForOcr: vi.fn(async (file: File) => file), preparePrintedField: vi.fn(async (file: File) => file), prepareTableCells: vi.fn(async () => []) }));
+vi.mock('tesseract.js', () => ({ PSM: { AUTO: '3', SPARSE_TEXT: '11', SINGLE_LINE: '7', SINGLE_BLOCK: '6' }, createWorker: vi.fn(async () => mocks) }));
+vi.mock('@/lib/image-prep', () => ({ prepareForOcr: vi.fn(async (file: File) => file), preparePrintedField: vi.fn(async (file: File) => file),
+  readGrayImage: vi.fn(async () => { throw new Error('No canvas in fixture'); }),
+  prepareNumericMontage: vi.fn(async (image: File, boxes: { x0: number; x1: number; y0: number; y1: number }[]) => ({ image,
+    cells: boxes.map((box, index) => ({ box, target: { x0: 16, x1: 116, y0: 16 + index * 80, y1: 56 + index * 80 } })) })),
+  prepareTableCells: vi.fn(async () => []) }));
 import { createWorker } from 'tesseract.js';
 import { prepareForOcr } from '@/lib/image-prep';
 import { montageReadings, readPrePhoto, readPrePhotos } from '@/lib/photo-ocr';
@@ -9,6 +13,25 @@ beforeEach(() => { vi.clearAllMocks(); vi.mocked(createWorker).mockResolvedValue
 const result = (text: string, confidence = 80) => ({ data: { text, confidence } });
 const pre = 'PRÉ-MANIFESTO DI00123456789 Placa ABC1D23 CTC: 1234567890';
 describe('Photo OCR batches', () => {
+  it('rereads a confident existing volume when the header total disagrees, preserving a conflict notice', async () => {
+    const word = (text: string, x: number, y: number, width = 50) => ({ text, confidence: 95, bbox: { x0: x, x1: x + width, y0: y, y1: y + 20 } });
+    const source = { data: { text: 'PRÉ-MANIFESTO', confidence: 95, blocks: [{ paragraphs: [{ lines: [{ words: [
+      word('CTCs', 100, 100), word('NFs', 250, 100), word('VOLS', 400, 100), word('PESO', 550, 100),
+      word('2', 130, 130, 20), word('46', 430, 130, 30),
+      word('CTC', 100, 200), word('Remetente', 250, 200), word('NF-Série', 400, 200, 90), word('Vols.', 600, 200),
+      word('0000000001', 100, 240, 100), word('0000000002', 100, 290, 100),
+      word('12345-1', 400, 238, 80), word('23456-1', 400, 283, 80),
+      word('10', 610, 235, 20), word('38', 610, 280, 20),
+    ] }] }] }] } };
+    const checked = { data: { text: '10\n36', confidence: 95, blocks: [{ paragraphs: [{ lines: [{ words: [
+      word('10', 20, 20, 30), word('36', 20, 100, 30),
+    ] }] }] }] } };
+    mocks.recognize.mockResolvedValueOnce(result('PRÉ-MANIFESTO')).mockResolvedValueOnce(source).mockResolvedValueOnce(checked);
+    const reading = await readPrePhoto(new File(['image'], 'photo.jpg'));
+    expect(reading.pre.documents.map(row => [row.ctc, row.volumes])).toEqual([['0000000001', '10'], ['0000000002', '36']]);
+    expect(reading.pre.documents[1]?.review).toContain('Volumes relidos: 38 / 36. Confira na foto.');
+    expect(mocks.recognize).toHaveBeenCalledTimes(3);
+  });
   it('stops immediately during worker startup and terminates the worker if it arrives later', async () => {
     let finish!: (value: never) => void;
     vi.mocked(createWorker).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
@@ -35,8 +58,9 @@ describe('Photo OCR batches', () => {
     mocks.recognize.mockResolvedValueOnce(result('unreadable')).mockResolvedValue(result(pre));
     const reading = await readPrePhoto(new File(['image'], 'sideways.jpg'));
     expect(reading.pre).toMatchObject({ id: 'DI00123456789', ctcs: ['1234567890'] });
-    expect(prepareForOcr).toHaveBeenCalledWith(expect.any(File), 270, 1400);
-    expect(prepareForOcr).toHaveBeenCalledWith(expect.any(File), 270);
+    expect(reading.angle).toBe(270);
+    expect(prepareForOcr).toHaveBeenCalledWith(expect.any(File), 270, 1400, undefined);
+    expect(prepareForOcr).toHaveBeenCalledWith(expect.any(File), 270, 3840, undefined);
     expect(mocks.recognize).toHaveBeenCalledTimes(3);
     expect(mocks.terminate).toHaveBeenCalledOnce();
   });

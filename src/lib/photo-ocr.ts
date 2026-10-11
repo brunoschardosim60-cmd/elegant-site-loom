@@ -1,10 +1,11 @@
 import { createWorker, PSM, type Worker } from 'tesseract.js';
-import { parsePhotoFields, photoScore, pageWords, tableCellRegions, tableCtcRepairRegions, tableSummaryRegions, tableVolumeRegion, type OcrPage, type PhotoFields, type OcrWord } from './photo-fields';
-import { buildDigitTemplates, matchPrintedNumber } from './printed-digits';
-import { prepareForOcr, preparePrintedField, prepareNumericMontage, prepareNumericColumn, readGrayImage } from './image-prep';
+import { parsePhotoFields, photoScore, pageWords, tableCellRegions, tableCtcRepairRegions, tableSummaryRegions, type OcrPage, type PhotoFields, type OcrWord } from './photo-fields';
+import { buildDigitTemplates, matchPrintedNumber, type GrayImage } from './printed-digits';
+import { recoverNfSeparator } from './ocr-numeric';
+import { prepareForOcr, preparePrintedField, prepareNumericMontage, readGrayImage } from './image-prep';
 import { markLocalPhoto } from './local-photo';
 
-type Result = { text: string; pre: PhotoFields; milliseconds: number };
+type Result = { text: string; pre: PhotoFields; milliseconds: number; angle?: Angle };
 type Angle = 0 | 90 | 180 | 270;
 /** Position-based association keeps an unread montage cell from shifting later fields. */
 export function montageReadings(page: OcrPage, cells: Awaited<ReturnType<typeof prepareNumericMontage>>['cells']): (OcrWord | undefined)[] {
@@ -16,11 +17,12 @@ export function montageReadings(page: OcrPage, cells: Awaited<ReturnType<typeof 
     }).sort((a, b) => a.bbox.x0 - b.bbox.x0);
     if (!found.length) return;
     const scale = (target.x1 - target.x0) / (box.x1 - box.x0);
+    const scaleY = (target.y1 - target.y0) / (box.y1 - box.y0);
     return { text: found.map(word => word.text).join('').replace(/\s/g, ''), confidence: Math.min(...found.map(word => word.confidence)),
       bbox: { x0: box.x0 + (Math.min(...found.map(word => word.bbox.x0)) - target.x0) / scale,
         x1: box.x0 + (Math.max(...found.map(word => word.bbox.x1)) - target.x0) / scale,
-        y0: box.y0 + (Math.min(...found.map(word => word.bbox.y0)) - target.y0) / scale,
-        y1: box.y0 + (Math.max(...found.map(word => word.bbox.y1)) - target.y0) / scale } };
+        y0: box.y0 + (Math.min(...found.map(word => word.bbox.y0)) - target.y0) / scaleY,
+        y1: box.y0 + (Math.max(...found.map(word => word.bbox.y1)) - target.y0) / scaleY } };
   });
 }
 
@@ -37,7 +39,7 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
     active();
     progress('Ajustando orientação da foto…');
     try {
-      const preview = await prepareForOcr(file, candidateAngle, 1400);
+      const preview = await prepareForOcr(file, candidateAngle, 1400, signal);
       const { data } = await worker.recognize(preview);
       active();
       successful = true;
@@ -49,7 +51,7 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
   if (best.angle && angle === 0 && !/PR[EÉ][- ]?MANIFESTO|DACTE|\bDI\d{8,12}/i.test(best.page.text)) angle = best.angle;
   active();
   progress('Lendo documento e tabela…');
-  const source = await prepareForOcr(file, angle);
+  const source = await prepareForOcr(file, angle, 3840, signal);
   for (const psm of [PSM.SPARSE_TEXT, PSM.AUTO]) {
     active();
     await worker.setParameters({ tessedit_pageseg_mode: psm });
@@ -69,7 +71,7 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
     if (repairs.length) {
       progress('Conferindo CTCs e totais do cabeçalho…');
       try {
-        active(); const montage = await prepareNumericMontage(best.source, repairs.map(region => region.box));
+        active(); const montage = await prepareNumericMontage(best.source, repairs.map(region => region.box), { signal });
         await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_BLOCK, tessedit_char_whitelist: '0123456789', user_defined_dpi: '300' });
         const { data } = await worker.recognize(montage.image, {}, { text: true, blocks: true }); active();
         const recovered = montageReadings(data, montage.cells).filter((word, index): word is OcrWord => Boolean(word && word.confidence >= 75 && (repairs[index]!.field === 'ctc' ? /^\d{10}$/.test(word.text) : /^\d{1,6}$/.test(word.text) && Number(word.text) > 0)));
@@ -86,9 +88,10 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
     }
   }
   const confidentVolumes = new Set<string>();
+  let gray: GrayImage | undefined;
   if (best.pre.kind === 'pre' && best.pre.documents.length) {
     try {
-      const gray = await readGrayImage(best.source);
+      gray = await readGrayImage(best.source);
       const templates = buildDigitTemplates(gray, pageWords(best.page));
       for (const region of tableCellRegions(best.page).filter(r => r.field === 'volumes')) {
         const row = best.pre.documents[region.row]!;
@@ -99,22 +102,22 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
     } catch { /* Keep the OCR reading when there are too few clear examples. */ }
   }
   if (best.pre.kind === 'pre' && best.pre.documents.length) {
-    const region = tableVolumeRegion(best.page);
-    if (region && best.pre.documents.some(row => !row.volumes || row.review?.includes('volumes'))) {
-      progress('Conferindo a coluna de volumes…');
+    const regions = tableCellRegions(best.page).filter(region => region.field === 'volumes');
+    const sum = best.pre.documents.reduce((total, row) => total + Number(row.volumes || 0), 0);
+    const totalMismatch = Boolean(best.pre.totalVolumes && best.pre.totalVolumes !== sum);
+    if (regions.length && (totalMismatch || best.pre.documents.some(row => !row.volumes || row.review?.includes('volumes')))) {
+      progress('Ampliando os volumes em uma leitura agrupada…');
       try {
-        active(); const column = await prepareNumericColumn(best.source, region.box);
+        active(); const montage = await prepareNumericMontage(best.source, regions.map(region => region.box), { separateDigits: true, signal });
         await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_BLOCK, tessedit_char_whitelist: '0123456789', user_defined_dpi: '300' });
-        const { data } = await worker.recognize(column.image, {}, { text: true, blocks: true }); active();
-        const words = pageWords(data);
-        for (const cell of tableCellRegions(best.page).filter(cell => cell.field === 'volumes')) {
+        const { data } = await worker.recognize(montage.image, {}, { text: true, blocks: true }); active();
+        for (const [index, reading] of montageReadings(data, montage.cells).entries()) {
+          const cell = regions[index]!;
           const row = best.pre.documents[cell.row]!;
-          if (confidentVolumes.has(row.ctc) || (row.volumes && !row.review?.includes('volumes'))) continue;
-          const candidates = words.filter(word => /^\d{1,4}$/.test(word.text) && Number(word.text) > 0 && word.confidence >= 80
-            && (word.bbox.y0 + word.bbox.y1) / 2 + column.y - column.padding > cell.box.y0
-            && (word.bbox.y0 + word.bbox.y1) / 2 + column.y - column.padding < cell.box.y1);
-          if (candidates.length !== 1) continue;
-          const value = candidates[0]!.text;
+          if (!totalMismatch && (confidentVolumes.has(row.ctc) || (row.volumes && !row.review?.includes('volumes')))) continue;
+          if (!reading || !/^\d{1,4}$/.test(reading.text) || Number(reading.text) <= 0 || reading.confidence < (row.volumes ? 80 : 70)) continue;
+          const value = reading.text;
+          if (reading.confidence < 80) row.review = [...new Set([...(row.review ?? []), 'volumes', 'Volumes recuperados com leitura incerta. Confira na foto.'])];
           if (row.volumes && row.volumes !== value) row.review = [...(row.review ?? []), `Volumes relidos: ${row.volumes} / ${value}. Confira na foto.`];
           row.volumes = value;
         }
@@ -129,7 +132,7 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
     if (regions.length) {
       progress('Ampliando NFs em uma leitura agrupada…');
       try {
-        active(); const montage = await prepareNumericMontage(best.source, regions.map(region => region.box));
+        active(); const montage = await prepareNumericMontage(best.source, regions.map(region => region.box), { signal });
         await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_BLOCK, tessedit_char_whitelist: '0123456789-', user_defined_dpi: '300' });
         const { data } = await worker.recognize(montage.image, {}, { text: true, blocks: true }); active();
         for (const [i, reading] of montageReadings(data, montage.cells).entries()) {
@@ -140,6 +143,13 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
           row.nf = value;
         }
       } catch { active(); /* Full-page readings remain editable. */ }
+    }
+  }
+  if (gray && best.pre.kind === 'pre') {
+    for (const region of tableCellRegions(best.page).filter(region => region.field === 'nf')) {
+      const row = best.pre.documents[region.row]!;
+      const recovered = recoverNfSeparator(gray, region.box, row.nf);
+      if (recovered) { row.nf = recovered; row.review = [...new Set([...(row.review ?? []), 'NF', 'Separador da NF recuperado da foto. Confira os números e a série.'])]; }
     }
   }
   const idWord = pageWords(best.page).find(w => /^D[I1L|][0-9OQIL|SB]{4,12}$/i.test(w.text));
@@ -155,7 +165,7 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
       if (id) best.pre.id = id;
     } catch { active(); /* Keep the full-page ID for review. */ }
   }
-  return { text: best.page.text.trim(), pre: best.pre, milliseconds: Math.round(performance.now() - started), angle };
+  return { text: best.page.text.trim(), pre: best.pre, milliseconds: Math.round(performance.now() - started), angle: best.angle };
 }
 
 /** One language download and worker initialization for the entire batch. */

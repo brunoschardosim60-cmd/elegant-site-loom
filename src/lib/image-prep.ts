@@ -104,13 +104,13 @@ export async function preparePrintedField(source: Blob, box: { x0: number; y0: n
 type NumericBox = { x0: number; y0: number; x1: number; y1: number };
 
 /** Adapt to the paper's local brightness and remove long rules, keeping glyphs. */
-export function cleanNumericPixels(pixels: Uint8ClampedArray, width: number, height: number): void {
+export function cleanNumericPixels(pixels: Uint8ClampedArray, width: number, height: number, contrast = .55): void {
   const gray = new Uint8Array(width * height);
   const histogram = new Uint32Array(256);
   for (let i = 0; i < gray.length; i++) { gray[i] = Math.round((pixels[i * 4]! + pixels[i * 4 + 1]! + pixels[i * 4 + 2]!) / 3); histogram[gray[i]!]!++; }
   const percentile = (fraction: number) => { let count = 0; for (let value = 0; value < 256; value++) { count += histogram[value]!; if (count >= gray.length * fraction) return value; } return 255; };
   const ink = percentile(.02); const paper = percentile(.8);
-  const threshold = ink + (paper - ink) * .55;
+  const threshold = ink + (paper - ink) * contrast;
   const rules = new Set<number>();
   for (let y = 0; y < height; y++) {
     let dark = 0;
@@ -123,32 +123,90 @@ export function cleanNumericPixels(pixels: Uint8ClampedArray, width: number, hei
   }
 }
 
+/** Separate touching printed digits before OCR; this does not classify any digit. */
+export function separateNumericGlyphs(pixels: Uint8ClampedArray, width: number, height: number) {
+  // Perspective leaves fragments of the neighboring table rule in a cell.
+  // Use the tallest band of ink so a one-pixel rule does not join two digits.
+  const bands: { top: number; bottom: number }[] = [];
+  for (let y = 0; y < height; y++) {
+    let ink = 0;
+    for (let x = 0; x < width; x++) if (pixels[(y * width + x) * 4]! < 128) ink++;
+    if (ink <= 2) continue;
+    const last = bands.at(-1);
+    if (last && y - last.bottom <= 2) last.bottom = y + 1;
+    else bands.push({ top: y, bottom: y + 1 });
+  }
+  const band = bands.sort((a, b) => (b.bottom - b.top) - (a.bottom - a.top))[0];
+  if (!band || band.bottom - band.top < height * .25) return { pixels, width, height };
+  const runs: { left: number; right: number }[] = [];
+  for (let x = 0; x < width; x++) {
+    let ink = 0;
+    for (let y = band.top; y < band.bottom; y++) if (pixels[(y * width + x) * 4]! < 128) ink++;
+    if (ink <= 2) continue;
+    const last = runs.at(-1);
+    if (last && last.right === x) last.right = x + 1;
+    else runs.push({ left: x, right: x + 1 });
+  }
+  const pieces: { left: number; right: number }[] = [];
+  for (const run of runs) {
+    let top = height, bottom = 0;
+    for (let y = band.top; y < band.bottom; y++) for (let x = run.left; x < run.right; x++) if (pixels[(y * width + x) * 4]! < 128) { top = Math.min(top, y); bottom = Math.max(bottom, y + 1); }
+    const h = bottom - top, w = run.right - run.left;
+    if (h < height * .3 || w < h * .12 || w > h * 3.5) continue;
+    const count = w > h * .85 ? Math.max(1, Math.round(w / (h * .55))) : 1;
+    for (let i = 0; i < count; i++) pieces.push({ left: run.left + Math.round(i * w / count), right: run.left + Math.round((i + 1) * w / count) });
+  }
+  if (!pieces.length || pieces.length > 4) return { pixels, width, height };
+  const gap = 20, outputWidth = pieces.reduce((sum, piece) => sum + piece.right - piece.left, gap * (pieces.length + 1));
+  const output = new Uint8ClampedArray(outputWidth * height * 4).fill(255);
+  let left = gap;
+  for (const piece of pieces) {
+    for (let y = band.top; y < band.bottom; y++) for (let x = piece.left; x < piece.right; x++) {
+      const from = (y * width + x) * 4, to = (y * outputWidth + left + x - piece.left) * 4;
+      for (let c = 0; c < 4; c++) output[to + c] = pixels[from + c]!;
+    }
+    left += piece.right - piece.left + gap;
+  }
+  return { pixels: output, width: outputWidth, height };
+}
+
 /** One image/recognition for many small fields; positions keep missing reads from shifting rows. */
-export async function prepareNumericMontage(source: Blob, boxes: NumericBox[]) {
+export async function prepareNumericMontage(source: Blob, boxes: NumericBox[], options: { separateDigits?: boolean; signal?: AbortSignal | undefined } = {}) {
+  const active = () => { if (options.signal?.aborted) throw new Error('Leitura interrompida.'); };
+  active();
   const bitmap = await createImageBitmap(source);
   try {
-    const scale = 2; const padding = 16;
+    active();
+    const scale = options.separateDigits ? 3 : 2; const padding = 16;
     const clipped = boxes.map(box => ({ x0: Math.max(0, Math.floor(box.x0)), y0: Math.max(0, Math.floor(box.y0)),
       x1: Math.min(bitmap.width, Math.ceil(box.x1)), y1: Math.min(bitmap.height, Math.ceil(box.y1)) }));
     if (clipped.some(box => box.x1 <= box.x0 || box.y1 <= box.y0)) throw new Error('Invalid numeric region');
     const slotHeight = Math.max(80, ...clipped.map(box => (box.y1 - box.y0) * scale + padding * 2));
-    const width = Math.max(100, ...clipped.map(box => (box.x1 - box.x0) * scale + padding * 2));
+    const width = Math.max(100, ...clipped.map(box => (box.x1 - box.x0) * scale + padding * 2 + (options.separateDigits ? 100 : 0)));
     const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = slotHeight * boxes.length;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) throw new Error('Canvas unavailable');
     ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
     const cells = clipped.map((box, index) => {
+      active();
       const w = box.x1 - box.x0, h = box.y1 - box.y0;
       const cell = document.createElement('canvas'); cell.width = w * scale; cell.height = h * scale;
       const cellContext = cell.getContext('2d', { willReadFrequently: true });
       if (!cellContext) throw new Error('Canvas unavailable');
       cellContext.drawImage(bitmap, box.x0, box.y0, w, h, 0, 0, cell.width, cell.height);
-      const data = cellContext.getImageData(0, 0, cell.width, cell.height); cleanNumericPixels(data.data, cell.width, cell.height); cellContext.putImageData(data, 0, 0);
+      const data = cellContext.getImageData(0, 0, cell.width, cell.height); cleanNumericPixels(data.data, cell.width, cell.height, options.separateDigits ? .6 : .55);
+      if (options.separateDigits) {
+        const separated = separateNumericGlyphs(data.data, cell.width, cell.height);
+        cell.width = separated.width; cell.height = separated.height;
+        cellContext.putImageData(new ImageData(new Uint8ClampedArray(separated.pixels), separated.width, separated.height), 0, 0);
+      } else cellContext.putImageData(data, 0, 0);
       const target = { x0: padding, y0: index * slotHeight + padding, x1: padding + cell.width, y1: index * slotHeight + padding + cell.height };
       ctx.drawImage(cell, target.x0, target.y0);
       return { box, target };
     });
+    active();
     const image = await new Promise<Blob>((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Image unavailable')), 'image/png'));
+    active();
     return { image, cells };
   } finally { bitmap.close(); }
 }

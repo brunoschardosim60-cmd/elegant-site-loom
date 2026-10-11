@@ -7,6 +7,7 @@ import type { PhotoFields } from './photo-fields';
 
 type ProviderFailure = Extract<Awaited<ReturnType<typeof requestAiPhoto>>, { ok: false }>;
 type ProviderStage = 'full' | 'verify';
+export type PhotoAiOptions = { orientations?: readonly PhotoAngle[]; singlePass?: boolean };
 const temporaryBlocks = new Map<string, { until: number; result: ProviderFailure }>();
 const providerCooldown = 2 * 60 * 1000;
 // Full reading and verification use different models and quota buckets.
@@ -45,10 +46,25 @@ function photoPayload(image: ImageBitmap, rotation = 0, detail = false, maxSize 
   return { data, mimeType: 'image/jpeg' as const };
 }
 
-export async function readAiPhotos(files: File[], onResult: Parameters<typeof import('./photo-ocr').readPrePhotos>[1], onProgress: Parameters<typeof import('./photo-ocr').readPrePhotos>[2], signal?: AbortSignal) {
-  const { data: { session } } = await (await getSupabaseClient()).auth.getSession();
-  if (!session) throw new Error('Entre na sua conta para ler fotos.');
+export async function readAiPhotos(files: File[], onResult: Parameters<typeof import('./photo-ocr').readPrePhotos>[1], onProgress: Parameters<typeof import('./photo-ocr').readPrePhotos>[2], signal?: AbortSignal, options: PhotoAiOptions = {}) {
   if (signal?.aborted) return;
+  const sessionRequest = getSupabaseClient().then(client => client.auth.getSession());
+  let stopSessionWait = () => {};
+  const interruptedSession = new Promise<undefined>(resolve => { stopSessionWait = () => resolve(undefined); });
+  signal?.addEventListener('abort', stopSessionWait, { once: true });
+  if (signal?.aborted) stopSessionWait();
+  let auth: Awaited<typeof sessionRequest> | undefined;
+  try {
+    auth = await Promise.race([sessionRequest, interruptedSession]);
+  } catch (error) {
+    if (signal?.aborted) return;
+    throw error;
+  } finally {
+    signal?.removeEventListener('abort', stopSessionWait);
+  }
+  if (signal?.aborted || !auth) return;
+  const { data: { session } } = auth;
+  if (!session) throw new Error('Entre na sua conta para ler fotos.');
   const accessToken = session.access_token;
   const userId = session.user.id;
   const now = Date.now();
@@ -69,10 +85,12 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
     return;
   }
   const preparationStarted = performance.now();
-  let orientations: PhotoAngle[] = [];
-  try {
-    orientations = await detectPhotoOrientations(files, (index, message) => { if (!signal?.aborted) onProgress?.(index, message); }, signal);
-  } catch { /* An unavailable orientation worker must not prevent AI reading. */ }
+  let orientations: readonly PhotoAngle[] = options.orientations ?? [];
+  if (!options.orientations) {
+    try {
+      orientations = await detectPhotoOrientations(files, (index, message) => { if (!signal?.aborted) onProgress?.(index, message); }, signal);
+    } catch { /* An unavailable orientation worker must not prevent AI reading. */ }
+  }
   if (signal?.aborted) return;
   const preparationMilliseconds = performance.now() - preparationStarted;
   const getBlockedError = () => providerBlocks.full;
@@ -108,7 +126,7 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
         if (photoSignal.aborted) throw new Error('Leitura interrompida.');
         if (!full.ok) { if (!signal?.aborted) onResult(index, { error: full.error, ...('fallback' in full && full.fallback === false ? { fallback: false } : {}) }); continue; }
         let pre = completedPhoto!;
-        if (needsPhotoVerification(full.pre)) {
+        if (!options.singlePass && needsPhotoVerification(full.pre)) {
           if (!providerBlocks.verify) progress('Conferindo campos sinalizados em uma segunda leitura…');
           // Keep the whole page so every CTC retains its NF, quantities and names.
           const check = providerBlocks.verify ?? await providerAwareRequest({ data: { ...photoPayload(image, (orientation + full.rotation) % 360, full.pre.kind === 'pre'), accessToken, mode: 'verify' }, signal: photoSignal });

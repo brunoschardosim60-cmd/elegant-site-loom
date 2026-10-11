@@ -188,14 +188,20 @@ export function tableCellRegions(page: OcrPage): CellRegion[] {
     for (const field of ['nf', 'volumes'] as const) {
       const col = t.columns[field];
       if (col.right <= col.left) continue;
-      const known = field === 'nf' ? nf : undefined;
       const y = field === 'nf' && nf ? cy(nf[0]!) : columnBaseline(t, field, ctc);
       const numericEnds = field === 'volumes' ? col.groups.flat().filter(w => /^\d{1,4}$/.test(w.text)).map(w => w.bbox.x1) : [];
       const end = median(numericEnds) + t.height * .2;
-      const x1 = known ? Math.max(...known.map(w => w.bbox.x1)) + 4 : numericEnds.length ? end : col.right - t.height * .15;
-      const x0 = known ? Math.min(...known.map(w => w.bbox.x0)) - 4 : Math.max(col.left + t.height * .15, x1 - t.height * 2.5);
+      const nfWords = field === 'nf' ? col.groups.flat().filter(w => /^[0-9OQILBSZ-]{3,}$/i.test(w.text)) : [];
+      const nfAnchor = t.anchors.nf;
+      const x1 = field === 'nf' && nfAnchor
+        ? Math.min(col.right - t.height * .15, Math.max(nfAnchor.bbox.x1, ...nfWords.map(w => w.bbox.x1)) + t.height * .3)
+        : numericEnds.length ? end : col.right - t.height * .15;
+      const x0 = field === 'nf' && nfAnchor
+        ? Math.max(col.left + t.height * .15, Math.min(nfAnchor.bbox.x0, ...nfWords.map(w => w.bbox.x0)) - t.height * .2)
+        : Math.max(col.left + t.height * .15, x1 - t.height * 2.5);
       const glyphHeight = median(col.groups.flat().map(w => w.bbox.y1 - w.bbox.y0)) || t.height;
-      regions.push({ row, field, box: { x0, x1, y0: y - glyphHeight * .65, y1: y + glyphHeight * .65 } });
+      const halfHeight = field === 'volumes' ? Math.max(glyphHeight * .65, t.step * .42) : glyphHeight * .65;
+      regions.push({ row, field, box: { x0, x1, y0: y - halfHeight, y1: y + halfHeight } });
     }
   }
   return regions;

@@ -1,0 +1,9 @@
+.import-ctc-editor .import-ctc-fields { align-items: start; }
+.import-ctc-fields .import-remove-ctc { align-self: start; margin-top: 21px; }
+.import-ctc-editor .form-field[data-review="true"] > input { border-color: var(--warning); background: color-mix(in oklch, var(--warning-soft) 45%, var(--card)); }
+.import-field-warning, .import-inline-review { display: flex; align-items: flex-start; gap: 5px; color: var(--warning); font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; min-width: 0; }
+.import-field-warning > svg, .import-inline-review > svg { flex-shrink: 0; margin-top: 2px; }
+.import-field-warning > span, .import-inline-review > span { display: grid; gap: 3px; min-width: 0; }
+.import-field-warning strong { font-weight: 700; }
+.import-inline-review { margin-top: 12px; }
+@media (max-width: 760px) { .import-field-warning, .import-inline-review { font-size: 11px; } .import-ctc-fields .import-remove-ctc { margin-top: 25px; } }

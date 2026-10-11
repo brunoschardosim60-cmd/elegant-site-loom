@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ManifestImportDialog } from '@/components/manifest-import-dialog';
 import type { readAiPhotos } from '@/lib/photo-ai';
 import type { ImportDraft } from '@/lib/manifest-import';
+import type { PhotoReadResult } from '@/lib/photo-reader';
 import { LOCAL_HEADER_NOTICE, LOCAL_ROW_NOTICE } from '@/lib/local-photo';
 
 const mocks = vi.hoisted(() => ({ read: vi.fn(), unique: vi.fn() }));
@@ -18,6 +19,140 @@ beforeEach(() => {
 });
 const result = (id: string, ctc: string, nf: string) => ({
   pre: { id, issueDate: '2026-08-28', plate: 'ABC1D23', driver: 'MOTORISTA', kind: 'pre' as const, readingSource: 'gemini' as const, ctcs: [ctc], documents: [{ ctc, nf, volumes: '2', client: 'LAB', recipient: 'CLIENTE' }], expectedRows: 1, totalVolumes: 2, verification: { status: 'matched' as const, checkedFields: 6, conflicts: 0 } }, text: 'Documento', milliseconds: 3200,
+});
+
+it('stops immediately, keeps completed photos, removes unread photos and ignores the old run during a new import', async () => {
+  vi.mocked(URL.createObjectURL).mockImplementation(source => `blob:${(source as File).name}`);
+  const runs: { args: Parameters<typeof readAiPhotos>; finish: () => void }[] = [];
+  mocks.read.mockImplementation((...args: Parameters<typeof readAiPhotos>) => new Promise<void>(resolve => { runs.push({ args, finish: resolve }); }));
+  render(<ManifestImportDialog open onOpenChange={vi.fn()} manifests={[]} onCreate={() => ({ ok: true, manifests: [] })} />);
+  await waitFor(() => expect(screen.getByLabelText('Enviar várias fotos')).not.toBeDisabled());
+  const files = ['reading.jpg', 'ready.jpg', 'queued.jpg'].map((name, i) => new File([String(i)], name, { type: 'image/jpeg' }));
+  fireEvent.change(screen.getByLabelText('Enviar várias fotos'), { target: { files } });
+  await waitFor(() => expect(runs).toHaveLength(1));
+  await act(async () => { runs[0]!.args[2]?.(0, 'Lendo foto pendente'); runs[0]!.args[1](1, result('DI00000000002', '0000000002', '22-1')); });
+  fireEvent.click(screen.getByRole('button', { name: 'Parar' }));
+  expect(runs[0]!.args[3]?.aborted).toBe(true);
+  expect(screen.queryByRole('button', { name: 'Parar' })).not.toBeInTheDocument();
+  expect(screen.getByLabelText('Enviar várias fotos')).not.toBeDisabled();
+  expect(screen.getByLabelText('NF-série')).toHaveValue('22-1');
+  expect(screen.getByRole('button', { name: 'Cadastrar pré' })).not.toBeDisabled();
+  expect(screen.getAllByRole('button', { name: /Revisar arquivo/ })).toHaveLength(1);
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:reading.jpg');
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:queued.jpg');
+  expect(URL.revokeObjectURL).not.toHaveBeenCalledWith('blob:ready.jpg');
+  const next = new File(['next'], 'next.jpg', { type: 'image/jpeg' });
+  fireEvent.change(screen.getByLabelText('Enviar várias fotos'), { target: { files: [next] } });
+  await waitFor(() => expect(runs).toHaveLength(2));
+  await act(async () => {
+    runs[0]!.args[1](0, result('DI00000000099', '0000000099', '99-1'));
+    runs[0]!.args[2]?.(0, 'Progresso antigo'); runs[0]!.finish();
+  });
+  expect(screen.getByRole('button', { name: 'Parar' })).toBeInTheDocument();
+  expect(screen.queryByText('Progresso antigo')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /DI00000000099/ })).not.toBeInTheDocument();
+  expect(screen.getByLabelText('Enviar várias fotos')).toBeDisabled();
+  await act(async () => { runs[1]!.args[1](0, result('DI00000000003', '0000000003', '33-1')); runs[1]!.finish(); });
+  expect(screen.getByLabelText('NF-série')).toHaveValue('33-1');
+  expect(screen.getByRole('button', { name: 'Cadastrar lote (2)' })).not.toBeDisabled();
+});
+
+it('stops a duplicate check before upload and permits a new import without waiting for that check', async () => {
+  let finishHash: ((value: { files: File[]; duplicates: number }) => void) | undefined;
+  mocks.unique.mockImplementationOnce(() => new Promise(resolve => { finishHash = resolve; }));
+  mocks.read.mockImplementation(async (_files: File[], onResult: Parameters<typeof readAiPhotos>[1]) => onResult(0, result('DI00000000002', '0000000002', '22-1')));
+  render(<ManifestImportDialog open onOpenChange={vi.fn()} manifests={[]} onCreate={() => ({ ok: true, manifests: [] })} />);
+  await waitFor(() => expect(screen.getByLabelText('Enviar várias fotos')).not.toBeDisabled());
+  const first = new File(['a'], 'cancelled.jpg', { type: 'image/jpeg' });
+  fireEvent.change(screen.getByLabelText('Enviar várias fotos'), { target: { files: [first] } });
+  await waitFor(() => expect(finishHash).toBeDefined());
+  const signal = mocks.unique.mock.calls[0]![2] as AbortSignal;
+  fireEvent.click(screen.getByRole('button', { name: 'Parar' }));
+  expect(signal.aborted).toBe(true);
+  expect(screen.getByLabelText('Enviar várias fotos')).not.toBeDisabled();
+  fireEvent.change(screen.getByLabelText('Enviar várias fotos'), { target: { files: [new File(['b'], 'new.jpg', { type: 'image/jpeg' })] } });
+  await screen.findByText('Cabeçalho e números conferidos');
+  await act(async () => { finishHash!({ files: [first], duplicates: 0 }); });
+  expect(mocks.read).toHaveBeenCalledOnce();
+  expect(URL.createObjectURL).toHaveBeenCalledOnce();
+  expect(screen.getByLabelText('NF-série')).toHaveValue('22-1');
+  expect(screen.getByRole('button', { name: 'Cadastrar pré' })).not.toBeDisabled();
+});
+
+it('shows provisional local fields while AI checks, then keeps those fields immediately when stopped', async () => {
+  let callbacks: Parameters<typeof readAiPhotos> | undefined; let finish: (() => void) | undefined;
+  mocks.read.mockImplementation((...args: Parameters<typeof readAiPhotos>) => { callbacks = args; return new Promise<void>(resolve => { finish = resolve; }); });
+  const create = vi.fn((_: ImportDraft[]) => ({ ok: true as const, manifests: [] }));
+  render(<ManifestImportDialog open onOpenChange={vi.fn()} manifests={[]} onCreate={create} />);
+  await waitFor(() => expect(screen.getByLabelText('Enviar várias fotos')).not.toBeDisabled());
+  fireEvent.change(screen.getByLabelText('Enviar várias fotos'), { target: { files: [new File(['a'], 'local.jpg', { type: 'image/jpeg' }), new File(['b'], 'pending.jpg', { type: 'image/jpeg' })] } });
+  await waitFor(() => expect(callbacks).toBeDefined());
+  const local = result('DI00000000001', '0000000001', '11-1');
+  const provisional: PhotoReadResult = { ...local, pendingVerification: true, pre: { ...local.pre, readingSource: 'local', verification: { status: 'unavailable', checkedFields: 0, conflicts: 0 }, headerReview: [LOCAL_HEADER_NOTICE], documents: local.pre.documents.map(row => ({ ...row, review: ['NF', 'volumes', LOCAL_ROW_NOTICE] })) } };
+  await act(async () => { callbacks![1](0, provisional); callbacks![2]?.(0, 'Conferindo dados locais na IA'); });
+  expect(screen.getByText('Leitura local · conferindo por IA')).toBeInTheDocument();
+  expect(screen.getByLabelText('NF-série')).toHaveValue('11-1');
+  expect(screen.getByLabelText('NF-série')).toBeDisabled();
+  expect(screen.getByLabelText('Motorista')).toBeDisabled();
+  expect(screen.getByRole('progressbar', { name: 'Fotos processadas' })).toHaveAttribute('aria-valuenow', '0');
+  expect(screen.getByLabelText('NF-série')).toHaveAccessibleDescription('Confira na foto NF');
+  expect(screen.getByLabelText('Volumes')).toHaveAccessibleDescription('Confira na foto volumes');
+  fireEvent.click(screen.getByRole('button', { name: 'Parar' }));
+  expect(callbacks![3]?.aborted).toBe(true);
+  expect(screen.getByText('Leitura local')).toBeInTheDocument();
+  expect(screen.getByLabelText('NF-série')).not.toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Cadastrar pré' })).not.toBeDisabled();
+  expect(screen.getAllByRole('button', { name: /Revisar arquivo/ })).toHaveLength(1);
+  await act(async () => { callbacks![1](0, result('DI00000000099', '0000000099', '99-1')); callbacks![2]?.(0, 'Progresso tardio'); finish!(); });
+  expect(screen.getByLabelText('NF-série')).toHaveValue('11-1');
+  expect(screen.queryByText('Cabeçalho e números conferidos')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Cadastrar pré' }));
+  expect(create).toHaveBeenCalledWith([expect.objectContaining({ readingSource: 'local', headerReview: [LOCAL_HEADER_NOTICE], rows: [expect.objectContaining({ nf: '11-1', review: ['NF', 'volumes', LOCAL_ROW_NOTICE] })] })]);
+});
+
+it('replaces the provisional fields with the final result at the same index and ignores later progress for that photo', async () => {
+  let callbacks: Parameters<typeof readAiPhotos> | undefined; let finish: (() => void) | undefined;
+  mocks.read.mockImplementation((...args: Parameters<typeof readAiPhotos>) => { callbacks = args; return new Promise<void>(resolve => { finish = resolve; }); });
+  render(<ManifestImportDialog open onOpenChange={vi.fn()} manifests={[]} onCreate={() => ({ ok: true, manifests: [] })} />);
+  await waitFor(() => expect(screen.getByLabelText('Enviar várias fotos')).not.toBeDisabled());
+  fireEvent.change(screen.getByLabelText('Enviar várias fotos'), { target: { files: [new File(['a'], 'local.jpg', { type: 'image/jpeg' })] } });
+  await waitFor(() => expect(callbacks).toBeDefined());
+  const local = result('DI00000000001', '0000000001', '11-1');
+  const provisional: PhotoReadResult = { ...local, pendingVerification: true, pre: { ...local.pre, readingSource: 'local' } };
+  await act(async () => { callbacks![1](0, provisional); });
+  expect(screen.getByLabelText('NF-série')).toBeDisabled();
+  await act(async () => { callbacks![1](0, result('DI00000000001', '0000000001', '12-1')); callbacks![2]?.(0, 'Não deve esconder campos prontos'); finish!(); });
+  expect(screen.getByLabelText('NF-série')).toHaveValue('12-1');
+  expect(screen.getByLabelText('NF-série')).not.toBeDisabled();
+  expect(screen.getByText('Cabeçalho e números conferidos')).toBeInTheDocument();
+  expect(screen.getAllByRole('button', { name: /Revisar arquivo/ })).toHaveLength(1);
+  expect(screen.queryByText('Não deve esconder campos prontos')).not.toBeInTheDocument();
+});
+
+it('preserves the previous Gemini draft and manual changes when a provisional reread is stopped', async () => {
+  mocks.read.mockImplementationOnce(async (_files: File[], onResult: Parameters<typeof readAiPhotos>[1]) => onResult(0, result('DI00000000001', '0000000001', '11-1')));
+  let retry: Parameters<typeof readAiPhotos> | undefined; let finish: (() => void) | undefined;
+  mocks.read.mockImplementationOnce((...args: Parameters<typeof readAiPhotos>) => { retry = args; return new Promise<void>(resolve => { finish = resolve; }); });
+  render(<ManifestImportDialog open onOpenChange={vi.fn()} manifests={[]} onCreate={() => ({ ok: true, manifests: [] })} />);
+  await waitFor(() => expect(screen.getByLabelText('Enviar várias fotos')).not.toBeDisabled());
+  fireEvent.change(screen.getByLabelText('Enviar várias fotos'), { target: { files: [new File(['a'], 'photo.jpg', { type: 'image/jpeg' })] } });
+  await screen.findByText('Cabeçalho e números conferidos');
+  fireEvent.change(screen.getByLabelText('NF-série'), { target: { value: '13-1' } });
+  fireEvent.change(screen.getByLabelText('Motorista'), { target: { value: 'MOTORISTA CONFERIDO' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Reler detalhes desta foto' }));
+  await waitFor(() => expect(retry).toBeDefined());
+  const local = result('DI00000000099', '0000000099', '99-1');
+  const provisional: PhotoReadResult = { ...local, pendingVerification: true, pre: { ...local.pre, readingSource: 'local' } };
+  await act(async () => { retry![1](0, provisional); });
+  expect(screen.getByLabelText('NF-série')).toHaveValue('13-1');
+  expect(screen.getByLabelText('NF-série')).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Parar' }));
+  expect(screen.getByLabelText('NF-série')).not.toBeDisabled();
+  expect(screen.getByLabelText('Motorista')).toHaveValue('MOTORISTA CONFERIDO');
+  expect(screen.getByLabelText('Número do pré')).toHaveValue('DI00000000001');
+  await act(async () => { retry![1](0, result('DI00000000099', '0000000099', '99-1')); finish!(); });
+  expect(screen.getByLabelText('NF-série')).toHaveValue('13-1');
+  expect(screen.queryByText('Leitura local')).not.toBeInTheDocument();
 });
 
 it('keeps each photo attached to its result while two reads finish out of order, and invalidates the agreement badge after editing', async () => {
@@ -101,8 +236,8 @@ it('consolidates the local reader notice while retaining the failure reason and 
   await screen.findByText('Leitura local de reserva');
   expect(screen.getByText('Gemini: O tempo de resposta foi excedido.')).toBeInTheDocument();
   expect(screen.getByText('Total de volumes não confere.')).toBeInTheDocument();
-  expect(screen.getByText('Confira este CTC na foto')).toBeInTheDocument();
-  expect(screen.getByText('NF')).toBeInTheDocument();
+  expect(screen.queryByText('Confira este CTC na foto')).not.toBeInTheDocument();
+  expect(within(screen.getByLabelText('NF-série').closest('label')!).getByText('NF')).toBeInTheDocument();
   expect(screen.queryByText(LOCAL_HEADER_NOTICE)).not.toBeInTheDocument();
   expect(screen.queryByText(LOCAL_ROW_NOTICE)).not.toBeInTheDocument();
   expect(screen.queryByText('Conferir os dados do pré')).not.toBeInTheDocument();

@@ -1,9 +1,21 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanNumericPixels, prepareForOcr } from '@/lib/image-prep';
+import { cleanNumericPixels, prepareForOcr, separateNumericGlyphs } from '@/lib/image-prep';
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('Photo preparation', () => {
+  it('separates touching numeric glyphs without letting a nearby rule join them', () => {
+    const width = 40, height = 40, pixels = new Uint8ClampedArray(width * height * 4).fill(255);
+    const dark = (x: number, y: number) => { for (let c = 0; c < 3; c++) pixels[(y * width + x) * 4 + c] = 0; };
+    for (let y = 8; y < 28; y++) for (let x = 3; x < 23; x++) dark(x, y);
+    for (let x = 0; x < 13; x++) dark(x, 37);
+    const separated = separateNumericGlyphs(pixels, width, height);
+    expect(separated.width).toBe(80);
+    expect(separated.pixels[(15 * separated.width + 25) * 4]).toBe(0);
+    expect(separated.pixels[(15 * separated.width + 40) * 4]).toBe(255);
+    expect(separated.pixels[(15 * separated.width + 55) * 4]).toBe(0);
+    expect(separated.pixels.slice(37 * separated.width * 4, 38 * separated.width * 4).every(value => value === 255)).toBe(true);
+  });
   it('removes a long horizontal table rule while preserving separate printed strokes', () => {
     const width = 20, height = 20, pixels = new Uint8ClampedArray(width * height * 4).fill(255);
     const dark = (x: number, y: number) => { for (let c = 0; c < 3; c++) pixels[(y * width + x) * 4 + c] = 50; };

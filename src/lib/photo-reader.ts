@@ -1,8 +1,13 @@
 import { readAiPhotos } from './photo-ai';
 import { markLocalPhoto } from './local-photo';
+import { correctLocalPhoto } from './photo-local-correction';
+import type { PhotoAngle } from './photo-orientation';
 
 type LocalReader = typeof import('./photo-ocr').readPrePhotos;
-type OnResult = Parameters<LocalReader>[1];
+type LocalResult = Parameters<Parameters<LocalReader>[1]>[1];
+type Success = Exclude<LocalResult, { error: string }>;
+export type PhotoReadResult = (Success & { pendingVerification?: boolean; angle?: PhotoAngle }) | Extract<LocalResult, { error: string }>;
+type OnResult = (index: number, result: PhotoReadResult) => void;
 type OnProgress = NonNullable<Parameters<LocalReader>[2]>;
 
 function safeCause(message: string): string {
@@ -14,59 +19,106 @@ function safeCause(message: string): string {
     .trim().slice(0, 500) || 'Falha na leitura.';
 }
 
-/** Keeps valid AI drafts and retries only unread photos in one local OCR batch. */
+/** Return promptly even when a decoder/worker does not settle after abort. */
+async function untilCancelled(task: Promise<unknown>, signal?: AbortSignal): Promise<void> {
+  if (!signal) { await task; return; }
+  if (signal.aborted) return;
+  let cancel!: () => void;
+  const stopped = new Promise<void>(resolve => { cancel = resolve; signal.addEventListener('abort', cancel, { once: true }); });
+  try { await Promise.race([task, stopped]); }
+  finally { signal.removeEventListener('abort', cancel); }
+}
+
+/** Local OCR fills the draft first. One independent AI read corrects it by CTC.
+ * AI checks overlap the next local photo, with at most two requests in flight.
+ * No photo/draft is stored or registered here; stopping retains only UI drafts.
+ */
 export async function readPhotosWithFallback(files: File[], onResult: OnResult, onProgress: OnProgress = () => {}, signal?: AbortSignal, detailed = false) {
   if (signal?.aborted || !files.length) return;
-  const failures = new Map<number, string>();
-  const completed = new Set<number>();
-  const startedAt = new Map<number, number>();
-  const trackStart = (index: number) => { if (!startedAt.has(index)) startedAt.set(index, performance.now()); };
-  // Authentication/session failures intentionally propagate. A local retry must
-  // never disguise an account or permission failure as a successful AI read.
-  await readAiPhotos(files, (index, result) => {
-    if (signal?.aborted || completed.has(index)) return;
-    if ('error' in result && result.fallback !== false) {
-      trackStart(index);
-      failures.set(index, result.error);
-      onProgress(index, 'Preparando leitura gratuita no navegador…');
-    } else {
-      failures.delete(index); completed.add(index);
-      onResult(index, result);
-    }
-  }, (index, message) => { if (!signal?.aborted && !completed.has(index)) { trackStart(index); onProgress(index, message); } }, signal);
-  if (signal?.aborted || !failures.size) return;
-
-  const retries = [...failures].sort(([a], [b]) => a - b).map(([index, cause]) => ({ index, cause }));
-  const pending = new Map(retries.map(item => [item.index, item.cause]));
-  const finishError = (index: number, cause: string, localError: string) => {
-    if (signal?.aborted || !pending.has(index)) return;
-    pending.delete(index);
-    onResult(index, { error: `IA: ${safeCause(cause)} Leitura gratuita: ${safeCause(localError)}`, fallback: false });
+  const started = performance.now();
+  const local = new Map<number, PhotoReadResult>();
+  const finished = new Set<number>();
+  const queued = new Set<number>();
+  const queue: number[] = [];
+  const tasks = new Set<Promise<void>>();
+  const progress = (index: number, message: string) => { if (!signal?.aborted && !finished.has(index)) onProgress(index, message); };
+  const deliver = (index: number, result: PhotoReadResult) => {
+    if (signal?.aborted || finished.has(index)) return;
+    finished.add(index); onResult(index, result);
   };
+  const elapsed = () => Math.max(0, Math.round(performance.now() - started));
+  const fallback = (index: number, cause: string) => {
+    const reading = local.get(index);
+    if (!reading || 'error' in reading) {
+      deliver(index, { error: `IA: ${safeCause(cause)} Leitura gratuita: ${safeCause(reading && 'error' in reading ? reading.error : 'Não foi possível concluir a leitura local.')}`, fallback: false });
+      return;
+    }
+    const pre = markLocalPhoto(reading.pre);
+    deliver(index, { ...reading, milliseconds: elapsed(), pendingVerification: false, pre: {
+      ...pre, readingFallback: true,
+      headerReview: [...new Set([...(pre.headerReview ?? []), `Gemini: ${safeCause(cause)}`])],
+    } });
+  };
+  const check = async (index: number) => {
+    if (signal?.aborted) return;
+    const reading = local.get(index);
+    const angle = reading && !('error' in reading) ? reading.angle : undefined;
+    progress(index, 'Conferindo e corrigindo os dados pela IA…');
+    try {
+      await readAiPhotos([files[index]!], (_position, result) => {
+        if (signal?.aborted || finished.has(index)) return;
+        if ('error' in result) {
+          if (result.fallback === false) deliver(index, { error: safeCause(result.error), fallback: false });
+          else fallback(index, result.error);
+        } else {
+          const pre = reading && !('error' in reading) ? correctLocalPhoto(reading.pre, result.pre) : result.pre;
+          deliver(index, { ...result, pre, text: JSON.stringify(pre, null, 2), milliseconds: elapsed(), pendingVerification: false });
+        }
+      }, (_position, message) => progress(index, message), signal, { singlePass: true, ...(angle !== undefined ? { orientations: [angle] } : {}) });
+      if (!finished.has(index) && !signal?.aborted) fallback(index, 'A conferência por IA terminou sem retornar os dados.');
+    } catch (error) {
+      if (signal?.aborted) return;
+      if (error instanceof Error && /Entre .*conta|sess[aã]o|autentica/i.test(error.message)) deliver(index, { error: safeCause(error.message), fallback: false });
+      else fallback(index, 'Não foi possível concluir a conferência por IA.');
+    }
+  };
+  const pump = () => {
+    while (!signal?.aborted && queue.length && tasks.size < 2) {
+      const index = queue.shift()!;
+      const task = check(index).finally(() => { tasks.delete(task); pump(); });
+      tasks.add(task);
+    }
+  };
+  const enqueue = (index: number) => {
+    if (queued.has(index) || signal?.aborted) return;
+    queued.add(index); queue.push(index); pump();
+  };
+  const localAbort = new AbortController();
+  const stopLocal = () => localAbort.abort();
+  signal?.addEventListener('abort', stopLocal, { once: true });
+  let localTimedOut = false;
+  let watchdog: ReturnType<typeof setTimeout>;
+  const armWatchdog = () => {
+    clearTimeout(watchdog);
+    watchdog = setTimeout(() => { localTimedOut = true; localAbort.abort(); }, 20000);
+  };
+  armWatchdog();
   try {
     const { readPrePhotos } = await import('./photo-ocr');
     if (signal?.aborted) return;
-    await readPrePhotos(retries.map(item => files[item.index]!), (localIndex, result) => {
-      const item = retries[localIndex];
-      if (signal?.aborted || !item || !pending.has(item.index)) return;
-      if ('error' in result) finishError(item.index, item.cause, result.error);
-      else {
-        pending.delete(item.index);
-        const milliseconds = Math.max(0, Math.round(performance.now() - startedAt.get(item.index)!));
-        const pre = markLocalPhoto(result.pre);
-        onResult(item.index, { ...result, milliseconds, pre: {
-          ...pre, readingFallback: true,
-          headerReview: [...new Set([...(pre.headerReview ?? []), `Gemini: ${safeCause(item.cause)}`])],
-        } });
-      }
-    }, (localIndex, message) => {
-      const item = retries[localIndex];
-      if (!signal?.aborted && item && pending.has(item.index)) onProgress(item.index, `Leitura gratuita · ${message}`);
-    }, signal, detailed);
-    for (const [index, cause] of pending) finishError(index, cause, 'O leitor terminou sem retornar os dados desta foto. Tente novamente.');
-  } catch {
-    // Unexpected loader/worker exceptions may contain URLs or internals. Only
-    // the reader's deliberate user-facing failures are included verbatim.
-    for (const [index, cause] of pending) finishError(index, cause, 'Não foi possível iniciar ou concluir o leitor no navegador. Tente novamente.');
+    await untilCancelled(readPrePhotos(files, (index, result) => {
+      if (signal?.aborted || localAbort.signal.aborted || local.has(index) || !files[index]) return;
+      local.set(index, result);
+      armWatchdog();
+      if (!('error' in result)) onResult(index, { ...result, pre: markLocalPhoto(result.pre), milliseconds: elapsed(), pendingVerification: true });
+      enqueue(index);
+    }, (index, message) => { if (!localAbort.signal.aborted) progress(index, `Leitura local · ${message}`); }, localAbort.signal, detailed), localAbort.signal);
+  } catch { /* AI may recover photos that the local worker could not decode. */ }
+  finally { clearTimeout(watchdog!); signal?.removeEventListener('abort', stopLocal); }
+  if (signal?.aborted) return;
+  for (const index of files.keys()) {
+    if (!local.has(index)) local.set(index, { error: localTimedOut ? 'A leitura local excedeu 20 segundos sem concluir uma foto.' : 'Não foi possível iniciar ou concluir o leitor no navegador.' });
+    enqueue(index);
   }
+  while (tasks.size && !signal?.aborted) await untilCancelled(Promise.race(tasks), signal);
 }
