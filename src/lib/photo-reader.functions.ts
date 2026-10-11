@@ -18,22 +18,22 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
     if (bucket.count >= 30) return { ok: false as const, error: 'Muitas fotos seguidas. Aguarde alguns minutos.' };
     bucket.count++; requests.set(ip, bucket);
     try {
-      const request = (model: string) => fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
+      const request = (model: string) => fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
         method: 'POST', signal: AbortSignal.timeout(55000),
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-        body: JSON.stringify({ model, store: false,
-          system_instruction: 'Faça TRANSCRIÇÃO LITERAL. Não use conhecimento externo para expandir razões sociais. Copie exatamente as abreviações visíveis: por exemplo LABORATORIOS BAGO continua LABORATORIOS BAGO, sem país ou sufixo inventado. NF-Série é a coluna imediatamente ANTES de Nº Pedido; nunca use o pedido como NF. Se houver segunda imagem, ela é uma ampliação da MESMA página, não outro documento. Use a ampliação para ler os números pequenos.',
-          input: [{ type: 'text', text: photoPrompt }, { type: 'image', data: data.data, mime_type: data.mimeType }, ...(data.detail ? [{ type: 'image', data: data.detail, mime_type: data.mimeType }] : [])],
-          response_format: { type: 'text', mime_type: 'application/json', schema: photoJsonSchema },
-          generation_config: { max_output_tokens: 12000, thinking_level: 'low' },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: 'Faça TRANSCRIÇÃO LITERAL. Não use conhecimento externo para expandir razões sociais. Copie exatamente as abreviações visíveis, sem país ou sufixo inventado. NF-Série é a coluna imediatamente ANTES de Nº Pedido; nunca use o pedido como NF. Se houver segunda imagem, ela é uma ampliação da MESMA página, não outro documento. Use a ampliação para ler os números pequenos.' }] },
+          contents: [{ role: 'user', parts: [{ text: photoPrompt }, { inlineData: { data: data.data, mimeType: data.mimeType } }, ...(data.detail ? [{ inlineData: { data: data.detail, mimeType: data.mimeType } }] : [])] }],
+          generationConfig: { responseMimeType: 'application/json', responseJsonSchema: photoJsonSchema, maxOutputTokens: 12000, temperature: 0, mediaResolution: 'MEDIA_RESOLUTION_HIGH' },
         }),
       });
-      let response = await request(process.env['GEMINI_OCR_MODEL'] || 'gemini-3.7-flash');
-      if ([404, 503].includes(response.status)) response = await request('gemini-3.8-flash');
+      let response = await request(process.env['GEMINI_OCR_MODEL'] || 'gemini-3.8-flash');
+      if ([404, 503].includes(response.status)) response = await request('gemini-3.5-flash-lite');
       if (!response.ok) return { ok: false as const, error: response.status === 429 ? 'Limite do Gemini atingido. Aguarde e tente novamente.' : response.status === 403 || response.status === 401 ? 'Chave do Gemini sem acesso. Confira a configuração na Vercel.' : `Gemini indisponível (${response.status}). Tente novamente.` };
-      const result = await response.json() as { status?: string; steps?: { type: string; content?: { type: string; text?: string }[] }[] };
-      if (result.status !== 'completed') return { ok: false as const, error: 'A leitura ficou incompleta. Tente novamente com uma foto por vez.' };
-      const output = result.steps?.filter(s => s.type === 'model_output').flatMap(s => s.content ?? []).filter(c => c.type === 'text').map(c => c.text || '').join('') || '';
+      const result = await response.json() as { candidates?: { finishReason?: string; content?: { parts?: { text?: string; thought?: boolean }[] } }[] };
+      const candidate = result.candidates?.[0];
+      if (candidate?.finishReason !== 'STOP') return { ok: false as const, error: 'A leitura ficou incompleta. Tente novamente com uma foto por vez.' };
+      const output = candidate.content?.parts?.filter(p => !p.thought).map(p => p.text || '').join('') || '';
       const parsed = JSON.parse(output);
       const pre = normalizeGeminiPhoto(parsed);
       const rotation = [90, 180, 270].includes(parsed.clockwiseRotation) ? parsed.clockwiseRotation as number : 0;
