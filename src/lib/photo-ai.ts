@@ -29,9 +29,9 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
     onProgress?.(index, 'Gemini lendo todas as linhas…');
     const start = performance.now();
     try {
-      let result = await readPhotoWithGemini({ data: await photoPayload(file), ...(signal ? { signal } : {}) });
+      let result = await readPhotoWithGemini({ data: { ...await photoPayload(file), orientationOnly: true }, ...(signal ? { signal } : {}) });
       if (signal?.aborted) break;
-      if (result.ok && (result.rotation || result.pre.kind === 'pre')) {
+      if (result.ok) {
         onProgress?.(index, 'Ajustando orientação e conferindo as linhas…');
         result = await readPhotoWithGemini({ data: await photoPayload(file, result.rotation, result.pre.kind === 'pre'), ...(signal ? { signal } : {}) });
       }
