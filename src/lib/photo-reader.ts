@@ -53,7 +53,11 @@ export async function readPhotosWithFallback(files: File[], onResult: OnResult, 
       else {
         pending.delete(item.index);
         const milliseconds = Math.max(0, Math.round(performance.now() - startedAt.get(item.index)!));
-        onResult(item.index, { ...result, milliseconds, pre: { ...markLocalPhoto(result.pre), readingFallback: true } });
+        const pre = markLocalPhoto(result.pre);
+        onResult(item.index, { ...result, milliseconds, pre: {
+          ...pre, readingFallback: true,
+          headerReview: [...new Set([...(pre.headerReview ?? []), `Gemini: ${safeCause(item.cause)}`])],
+        } });
       }
     }, (localIndex, message) => {
       const item = retries[localIndex];

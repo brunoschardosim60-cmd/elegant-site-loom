@@ -87,6 +87,24 @@ describe('photo reader with local fallback', () => {
     receive.mock.calls.forEach(([, result]) => expect(result.pre).toMatchObject({ readingSource: 'local', readingFallback: true, verification: { status: 'unavailable' } }));
   });
 
+  it('shows why Gemini failed after a successful local fallback while hiding credentials', async () => {
+    const apiKey = `AIza${'x'.repeat(35)}`;
+    const jwt = 'eyJsynthetic.payload.signature';
+    const cause = `Cota diária do Gemini esgotada; access_token=private-ai-token; ${apiKey}; Bearer private-authorization; ${jwt}`;
+    mocks.ai.mockImplementation(async (_files: File[], result: OnResult) => result(0, { error: cause }));
+    mocks.local.mockImplementation(async (_files: File[], result: OnResult) => result(0, reading(0, 'local')));
+    const receive = vi.fn();
+    await readPhotosWithFallback([files[0]!], receive);
+    const result = receive.mock.calls[0]![1];
+    expect(result.pre).toMatchObject({ readingSource: 'local', readingFallback: true, verification: { status: 'unavailable' } });
+    expect(result.pre.headerReview).toContain('Leitura local: confira todos os campos.');
+    const warning = result.pre.headerReview.find((message: string) => message.startsWith('Gemini:'));
+    expect(warning).toContain('Gemini: Cota diária do Gemini esgotada');
+    expect(warning).toContain('[credencial oculta]');
+    for (const credential of [apiKey, jwt, 'private-ai-token', 'private-authorization']) expect(warning).not.toContain(credential);
+    expect(result.pre.documents[0].ctc).toBe('0000000001');
+  });
+
   it('does not replace successful AI drafts, including failed verification, with a local read', async () => {
     const partial = reading(0); partial.pre.verification = { status: 'review', checkedFields: 4, conflicts: 1 }; partial.pre.documents[0]!.review = ['Confira NF divergente.'];
     mocks.ai.mockImplementation(async (_files: File[], result: OnResult) => result(0, partial));
