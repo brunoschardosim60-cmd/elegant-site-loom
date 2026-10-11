@@ -18,6 +18,40 @@ const second = () => ({
 type Metadata = { headerReview: string[]; verification: { status: string; conflicts: number; checkedFields: number } };
 const meta = (value: PhotoFields) => value as PhotoFields & Metadata;
 
+describe('pré date verification', () => {
+  it('does not spend another AI request solely because the issue date is missing', () => {
+    expect(needsPhotoVerification(primary())).toBe(false);
+    expect(needsPhotoVerification({ ...primary(), issueDate: '31/02/2026' })).toBe(true);
+  });
+  it('normalizes matching dates and retains compatibility with old compact results', () => {
+    const full = { ...primary(), issueDate: '28/08/2026' };
+    const matched = meta(reconcilePhotoRead(full, { ...second(), issueDate: '2026-08-28' }));
+    expect(matched.issueDate).toBe('2026-08-28');
+    expect(matched.verification.status).toBe('matched');
+    const legacy = meta(reconcilePhotoRead(full, second()));
+    expect(legacy.issueDate).toBe('2026-08-28');
+    expect(legacy.verification.status).toBe('matched');
+    expect(full.issueDate).toBe('28/08/2026');
+  });
+  it('keeps the first plausible date and signals a conflicting independent date', () => {
+    const result = meta(reconcilePhotoRead({ ...primary(), issueDate: '2026-08-28' }, { ...second(), issueDate: '2026-08-29' }));
+    expect(result.issueDate).toBe('2026-08-28');
+    expect(result.verification).toMatchObject({ status: 'review', conflicts: 1 });
+    expect(result.headerReview.join(' ')).toContain('Data de emissão divergente: 28/08/2026 / 29/08/2026');
+  });
+  it('recovers only a valid date for a pré and marks the recovery for review', () => {
+    const result = meta(reconcilePhotoRead(primary(), { ...second(), issueDate: '2026-08-28' }));
+    expect(result.issueDate).toBe('2026-08-28');
+    expect(result.verification.status).toBe('review');
+    expect(result.headerReview.join(' ')).toContain('Data de emissão recuperada');
+    const invalid = meta(reconcilePhotoRead({ ...primary(), issueDate: '31/02/2026' }, { ...second(), issueDate: '31/02/2026' }));
+    expect(invalid).not.toHaveProperty('issueDate');
+    expect(invalid.verification.status).toBe('review');
+    const dacte = reconcilePhotoRead({ ...primary(), kind: 'dacte' }, { ...second(), kind: 'dacte', issueDate: '2026-08-28' });
+    expect(dacte).not.toHaveProperty('issueDate');
+  });
+});
+
 describe('independent photo verification', () => {
   it('compares reordered rows by CTC, preserves zeroes and primary names, and ignores accents/whitespace in driver', () => {
     const result = meta(reconcilePhotoRead(primary(), second()));

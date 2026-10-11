@@ -40,3 +40,18 @@ it('shows a clear error and re-enables PDF export if report generation fails', a
   expect(await screen.findByText('Não foi possível gerar o PDF. Tente novamente.')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'PDF' })).toBeEnabled();
 });
+
+it('saves an explicitly edited issue date through the existing snapshot and retains conference data', async () => {
+  const onSnapshot = vi.fn();
+  render(<ConferenceWorkspace initialState={initialState} onSnapshot={onSnapshot} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Editar data do pré DI00123456789' }));
+  expect(screen.getByLabelText('Data de emissão do pré DI00123456789')).toHaveValue('');
+  fireEvent.change(screen.getByLabelText('Data de emissão do pré DI00123456789'), { target: { value: '2026-08-27' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Salvar data' }));
+  await waitFor(() => expect(onSnapshot.mock.lastCall?.[0].manifests[0]).toMatchObject({ ...initialState.manifests[0], issueDate: '2026-08-27' }));
+  expect(initialState.manifests[0]).not.toHaveProperty('issueDate');
+  expect(screen.getByText(/Emissão 27\/08\/2026/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /Pendências/ }));
+  expect(screen.getByText('Emissão 27/08/2026')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Marcar CTC 0000000001 como recebido' })).toBeInTheDocument();
+});

@@ -35,3 +35,38 @@ it('opens the selected manifest on every new scan, including after collapsing it
   view.rerender(<DriverManifestList {...props} focusedManifest={{ id: 'DI000000003' }} />);
   expect(screen.getByRole('button', { name: 'Marcar CTC 0000000004 como recebido' })).toBeInTheDocument();
 });
+
+it('shows original issue age and labels the fallback date as registration for old records', () => {
+  render(<DriverManifestList {...props} manifests={[{ ...manifests[0]!, issueDate: '2026-08-27' }, manifests[1]!]} now="2026-10-11T14:00:00Z" />);
+  expect(screen.getByText('Emitido há 45 dias')).toBeInTheDocument();
+  expect(screen.getByText('Cadastrado hoje')).toBeInTheDocument();
+  expect(screen.getByText(/Emissão 27\/08\/2026/)).toBeInTheDocument();
+  expect(screen.getByText(/Cadastro 11\/10\/2026/)).toBeInTheDocument();
+});
+
+it('edits a printed date explicitly, starts legacy records blank, and cancels without changes', () => {
+  const onIssueDateChange = vi.fn();
+  render(<DriverManifestList {...props} onIssueDateChange={onIssueDateChange} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Editar data do pré DI000000001' }));
+  const input = screen.getByLabelText('Data de emissão do pré DI000000001');
+  expect(input).toHaveValue('');
+  fireEvent.change(input, { target: { value: '2026-08-27' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
+  expect(onIssueDateChange).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Editar data do pré DI000000001' }));
+  fireEvent.change(screen.getByLabelText('Data de emissão do pré DI000000001'), { target: { value: '2026-08-27' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Salvar data' }));
+  expect(onIssueDateChange).toHaveBeenCalledExactlyOnceWith('DI000000001', '2026-08-27');
+  expect(screen.queryByLabelText('Data de emissão do pré DI000000001')).not.toBeInTheDocument();
+  expect(manifests[0]).not.toHaveProperty('issueDate');
+});
+
+it('allows clearing an explicitly stored issue date to restore registration-based age', () => {
+  const onIssueDateChange = vi.fn();
+  render(<DriverManifestList {...props} manifests={[{ ...manifests[0]!, issueDate: '2026-08-27' }]} onIssueDateChange={onIssueDateChange} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Editar data do pré DI000000001' }));
+  expect(screen.getByLabelText('Data de emissão do pré DI000000001')).toHaveValue('2026-08-27');
+  fireEvent.change(screen.getByLabelText('Data de emissão do pré DI000000001'), { target: { value: '' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Salvar data' }));
+  expect(onIssueDateChange).toHaveBeenCalledExactlyOnceWith('DI000000001', undefined);
+});

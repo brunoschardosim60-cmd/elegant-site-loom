@@ -19,6 +19,19 @@ it('does not derive CTC from a fiscal key and warns about incomplete rows and to
   expect(pre.documents[1]!.review?.join(' ')).toContain('66 volumes');
 });
 
+it('retains a complete issue date from the pre header and rejects impossible or partial dates', () => {
+  expect(normalizeGeminiPhoto({ ...example(), issueDate: '28/08/2026' }).issueDate).toBe('2026-08-28');
+  for (const issueDate of ['2026-02-30', '28/08']) {
+    const pre = normalizeGeminiPhoto({ ...example(), issueDate });
+    expect(pre.issueDate).toBeUndefined();
+    expect(pre.headerReview).toContain('Confira a data de emissão do pré.');
+  }
+});
+
+it('never uses a DACTE issue date as the pre issue date', () => {
+  expect(normalizeGeminiPhoto({ ...example(), kind: 'dacte', issueDate: '2026-08-28' }).issueDate).toBeUndefined();
+});
+
 import { normalizePlate } from '@/lib/gemini-photo';
 describe('placa', () => {
   it('fixes letter/digit swaps by position', () => expect(normalizePlate('1YA-7J3I')).toBe('IYA7J31'));

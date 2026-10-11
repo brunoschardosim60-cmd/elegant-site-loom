@@ -1,6 +1,7 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { DocumentItem, Manifest } from './conference';
+import { compareManifestDates, formatManifestDate, manifestAgeDays, manifestAgeLabel, normalizeIssueDate } from './manifest-date';
 
 type ReportIssue = { title: string; description: string; time: string };
 type ReportView = 'pending' | 'missing' | 'finished' | 'issues';
@@ -13,6 +14,7 @@ const line: [number, number, number] = [217, 226, 232];
 const clean = (value: string | undefined) => (value ?? '').replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').replace(/[\u2010-\u2015]/g, '-').replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"').trim();
 const field = (value: string | undefined) => clean(value) || '-';
 const date = (value: string | Date | undefined, withTime = false) => {
+  if (!withTime && typeof value === 'string' && normalizeIssueDate(value)) return formatManifestDate(value);
   const parsed = value instanceof Date ? value : new Date(value ?? '');
   if (Number.isNaN(parsed.getTime())) return '-';
   return new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', ...(withTime ? { hour: '2-digit', minute: '2-digit' } as const : {}) }).format(parsed);
@@ -24,14 +26,14 @@ export function selectConferenceReport(input: ConferencePdfInput) {
   const query = (input.query ?? '').toLowerCase();
   const now = (input.generatedAt ?? new Date()).getTime();
   const manifests = input.view === 'issues' ? [] : input.manifests.filter(manifest => input.view === 'finished' ? Boolean(manifest.finishedAt) : !manifest.finishedAt)
-    .filter(manifest => input.filter !== 'old' || Math.max(0, Math.floor((now - new Date(manifest.date).getTime()) / 86400000)) >= 2)
+    .filter(manifest => input.filter !== 'old' || manifestAgeDays(manifest, now) >= 2)
     .flatMap(manifest => {
       if (input.view === 'missing') {
         const documents = manifest.documents.filter(doc => !doc.received && searchable(manifest, doc).includes(query));
         return documents.length ? [{ ...manifest, documents }] : [];
       }
       return searchable(manifest).includes(query) ? [manifest] : [];
-    }).sort((a, b) => input.filter === 'new' ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date));
+    }).sort((a, b) => input.filter === 'new' ? compareManifestDates(b, a) : compareManifestDates(a, b));
   return { manifests, issues: input.view === 'issues' ? input.issues : [] };
 }
 
@@ -72,7 +74,7 @@ export function createConferencePdf(input: ConferencePdfInput) {
     text(label!, x + 4, cursor + 4, 7.5, true, muted); text(value!, x + 4, cursor + 14, 17, true, blue);
   });
   cursor += 25;
-  const filters = [input.view !== 'issues' && clean(input.query) ? `Busca: ${clean(input.query)}` : '', input.view !== 'issues' && input.filter === 'old' ? 'Somente cadastros há 2 dias ou mais' : ''].filter(Boolean).join(' | ');
+  const filters = [input.view !== 'issues' && clean(input.query) ? `Busca: ${clean(input.query)}` : '', input.view !== 'issues' && input.filter === 'old' ? 'Há 2 dias ou mais pela emissão; sem emissão, pelo cadastro' : ''].filter(Boolean).join(' | ');
   if (filters) {
     pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8);
     const lines = pdf.splitTextToSize(filters, available);
@@ -107,7 +109,9 @@ export function createConferencePdf(input: ConferencePdfInput) {
         const header = (continuation = false) => {
           pdf.setFillColor(233, 240, 245); pdf.roundedRect(margin, cursor - 1, available, 17, 1.5, 1.5, 'F');
           text(`${field(manifest.id)}${continuation ? ' (continuação)' : ''}`, margin + 3, cursor + 5, 10, true);
-          text(`Placa ${field(manifest.plate)} | Cadastrado em ${date(manifest.date)}`, margin + 3, cursor + 12, 8, false, muted);
+          const issueDate = normalizeIssueDate(manifest.issueDate ?? '');
+          const timing = [issueDate ? `Emissão ${formatManifestDate(issueDate)}` : '', `Cadastro ${date(manifest.date)}`, !manifest.finishedAt ? manifestAgeLabel(manifest, generatedAt) : ''].filter(Boolean).join(' | ');
+          text(`Placa ${field(manifest.plate)} | ${timing}`, margin + 3, cursor + 12, 8, false, muted);
           pdf.setFont('helvetica', 'bold'); pdf.setFontSize(9); pdf.setTextColor(...blue);
           const pending = manifest.documents.filter(doc => !doc.received).length;
           pdf.text(`${manifest.documents.length} CTCs | ${manifest.documents.reduce((sum, doc) => sum + doc.volumes, 0)} volumes | ${pending ? `${pending} pendente(s)` : 'Todos conferidos'}`, width - margin - 3, cursor + 5, { align: 'right' });

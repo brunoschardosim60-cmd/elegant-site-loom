@@ -28,6 +28,18 @@ describe('PDF report scope', () => {
     expect(manifests[0]!.documents).toHaveLength(2);
     expect(selectConferenceReport({ ...base, view: 'finished' }).manifests.map(item => item.driver)).toEqual(['RAFAEL']);
   });
+  it('uses original issue dates for age and ordering without inventing them on legacy records', () => {
+    const withDate = [{ ...manifests[1]!, issueDate: '2026-08-27' }, manifests[0]!];
+    const report = selectConferenceReport({ ...base, manifests: withDate, view: 'missing', filter: 'old' });
+    expect(report.manifests.map(manifest => manifest.driver)).toEqual(['LUCIANO', 'DIOGO']);
+    expect(report.manifests[0]).toMatchObject({ issueDate: '2026-08-27', date: '2026-10-11T14:00:00Z' });
+    expect(report.manifests[1]).not.toHaveProperty('issueDate');
+    const pdf = createConferencePdf({ ...base, manifests: withDate, view: 'missing', filter: 'old' });
+    expect(pdf.getNumberOfPages()).toBe(1);
+    expect(pdf.internal.pages.flat().join('\n')).toContain('27/08/2026');
+    expect(pdf.internal.pages.flat().join('\n')).toContain('11/10/2026');
+    expect(pdf.internal.pages.flat().join('\n')).toContain('45 dias');
+  });
   it('keeps occurrences confined to their own report, without applying a hidden search', () => {
     expect(selectConferenceReport({ ...base, view: 'issues', query: 'not found', filter: 'old' })).toEqual({ manifests: [], issues: base.issues });
   });

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ManifestImportDialog } from '@/components/manifest-import-dialog';
 import type { readAiPhotos } from '@/lib/photo-ai';
 import type { ImportDraft } from '@/lib/manifest-import';
+import { LOCAL_HEADER_NOTICE, LOCAL_ROW_NOTICE } from '@/lib/local-photo';
 
 const mocks = vi.hoisted(() => ({ read: vi.fn(), unique: vi.fn() }));
 vi.mock('@/lib/photo-reader.functions', () => ({ photoReaderStatus: vi.fn(async () => ({ configured: true })) }));
@@ -16,7 +17,7 @@ beforeEach(() => {
   vi.stubGlobal('URL', class extends URL { static override createObjectURL = vi.fn(() => 'blob:photo'); static override revokeObjectURL = vi.fn(); });
 });
 const result = (id: string, ctc: string, nf: string) => ({
-  pre: { id, plate: 'ABC1D23', driver: 'MOTORISTA', kind: 'pre' as const, readingSource: 'gemini' as const, ctcs: [ctc], documents: [{ ctc, nf, volumes: '2', client: 'LAB', recipient: 'CLIENTE' }], expectedRows: 1, totalVolumes: 2, verification: { status: 'matched' as const, checkedFields: 6, conflicts: 0 } }, text: 'Documento', milliseconds: 3200,
+  pre: { id, issueDate: '2026-08-28', plate: 'ABC1D23', driver: 'MOTORISTA', kind: 'pre' as const, readingSource: 'gemini' as const, ctcs: [ctc], documents: [{ ctc, nf, volumes: '2', client: 'LAB', recipient: 'CLIENTE' }], expectedRows: 1, totalVolumes: 2, verification: { status: 'matched' as const, checkedFields: 6, conflicts: 0 } }, text: 'Documento', milliseconds: 3200,
 });
 
 it('keeps each photo attached to its result while two reads finish out of order, and invalidates the agreement badge after editing', async () => {
@@ -66,8 +67,45 @@ it('aborts an in-flight photo and does not refill a reopened draft with its late
   fireEvent.click(screen.getByRole('button', { name: 'Reabrir' }));
   await act(async () => { callbacks![1](0, result('DI00000000001', '0000000001', '11-1')); finish!(); });
   expect(screen.getByLabelText('Número do pré')).toHaveValue('');
+  expect(screen.getByLabelText('Data de emissão do pré')).toHaveValue('');
   expect(screen.getByLabelText('NF-série')).toHaveValue('');
   expect(screen.queryByRole('img', { name: 'Documento enviado para conferência' })).not.toBeInTheDocument();
+});
+
+it('imports the printed issue date and submits a manually corrected date without replacing it with today', async () => {
+  mocks.read.mockImplementation(async (_files: File[], onResult: Parameters<typeof readAiPhotos>[1]) => onResult(0, result('DI00000000001', '0000000001', '11-1')));
+  const create = vi.fn((_: ImportDraft[]) => ({ ok: true as const, manifests: [] }));
+  render(<ManifestImportDialog open onOpenChange={vi.fn()} manifests={[]} onCreate={create} />);
+  await waitFor(() => expect(screen.getByLabelText('Enviar várias fotos')).not.toBeDisabled());
+  expect(screen.getByLabelText('Data de emissão do pré')).toHaveValue('');
+  fireEvent.change(screen.getByLabelText('Enviar várias fotos'), { target: { files: [new File(['a'], 'foto.jpg', { type: 'image/jpeg' })] } });
+  await screen.findByText('Cabeçalho e números conferidos');
+  expect(screen.getByLabelText('Data de emissão do pré')).toHaveValue('2026-08-28');
+  fireEvent.change(screen.getByLabelText('Data de emissão do pré'), { target: { value: '2026-08-27' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Cadastrar pré' }));
+  expect(create).toHaveBeenCalledWith([expect.objectContaining({ issueDate: '2026-08-27' })]);
+});
+
+it('consolidates the local reader notice while retaining the failure reason and specific NF warnings', async () => {
+  mocks.read.mockImplementation(async (_files: File[], onResult: Parameters<typeof readAiPhotos>[1]) => {
+    const local = result('DI00000000001', '0000000001', '11-1');
+    onResult(0, { ...local, pre: { ...local.pre, readingSource: 'local', readingFallback: true,
+      verification: { status: 'unavailable', checkedFields: 0, conflicts: 0 },
+      headerReview: [LOCAL_HEADER_NOTICE, 'Gemini: O tempo de resposta foi excedido.', 'Total de volumes não confere.'],
+      documents: local.pre.documents.map(row => ({ ...row, review: ['NF', LOCAL_ROW_NOTICE] })),
+    } });
+  });
+  render(<ManifestImportDialog open onOpenChange={vi.fn()} manifests={[]} onCreate={() => ({ ok: true, manifests: [] })} />);
+  await waitFor(() => expect(screen.getByLabelText('Enviar várias fotos')).not.toBeDisabled());
+  fireEvent.change(screen.getByLabelText('Enviar várias fotos'), { target: { files: [new File(['a'], 'foto.jpg', { type: 'image/jpeg' })] } });
+  await screen.findByText('Leitura local de reserva');
+  expect(screen.getByText('Gemini: O tempo de resposta foi excedido.')).toBeInTheDocument();
+  expect(screen.getByText('Total de volumes não confere.')).toBeInTheDocument();
+  expect(screen.getByText('Confira este CTC na foto')).toBeInTheDocument();
+  expect(screen.getByText('NF')).toBeInTheDocument();
+  expect(screen.queryByText(LOCAL_HEADER_NOTICE)).not.toBeInTheDocument();
+  expect(screen.queryByText(LOCAL_ROW_NOTICE)).not.toBeInTheDocument();
+  expect(screen.queryByText('Conferir os dados do pré')).not.toBeInTheDocument();
 });
 
 it('identifies a local fallback and never shows automatic double-read agreement for it', async () => {

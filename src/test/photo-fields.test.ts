@@ -1,7 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { parsePhotoFields, type OcrWord } from '@/lib/photo-fields';
+import { parsePhotoFields, tableCtcRepairRegions, type OcrWord } from '@/lib/photo-fields';
 const word = (text: string, x: number, y: number, width = 50): OcrWord => ({ text, confidence: 80, bbox: { x0: x, y0: y, x1: x + width, y1: y + 20 } });
 const page = (words: OcrWord[]) => ({ text: words.map(w => w.text).join('\n'), blocks: [{ paragraphs: [{ lines: [{ words }] }] }] });
+
+it('reads the original pré date from the labelled header rather than delivery rows or DACTE dates', () => {
+  const fields = parsePhotoFields(page([
+    word('PRÉ-MANIFESTO', 200, 20, 200), word('DATA', 200, 60), word('28/08/2026', 200, 85, 100),
+    word('16:48:54', 305, 85, 90), word('Prev. Entrega', 900, 200, 100), word('31/08/2026', 900, 240, 100),
+  ]));
+  expect(fields.issueDate).toBe('2026-08-28');
+  expect(parsePhotoFields({ text: 'PRÉ-MANIFESTO\nDATA 28/08/2026 16:48:54\nCTCs 11\nPrev. Entrega 31/08/2026' }).issueDate).toBe('2026-08-28');
+  expect(parsePhotoFields({ text: 'PRÉ-MANIFESTO\nPrev. Entrega 31/08/2026' })).not.toHaveProperty('issueDate');
+  expect(parsePhotoFields({ text: 'DACTE\nDATA DE EMISSÃO 28/08/2026\nID: 1234567890' })).not.toHaveProperty('issueDate');
+});
 describe('Photo table extraction', () => {
   it('reads CTC identifiers and aligns columns by position', () => {
     const fields = parsePhotoFields(page([
@@ -16,6 +27,41 @@ describe('Photo table extraction', () => {
   it('does not supply default volumes or invent a missing NF series', () => {
     const fields = parsePhotoFields(page([word('CTC', 100, 200), word('NF-Série', 400, 200, 90), word('Vols.', 600, 200), word('1234567890', 100, 240, 100), word('123451', 400, 240, 80)]));
     expect(fields.documents).toMatchObject([{ ctc: '1234567890', nf: '123451', volumes: '' }]);
+  });
+  it('keeps later NF/volume rows aligned when a middle CTC is unreadable', () => {
+    const source = page([
+      word('CTC', 100, 200), word('Remetente', 250, 200), word('NF-Série', 400, 200, 90), word('Vols.', 600, 200),
+      word('0000000001', 100, 240, 100), word('AAQNDASBT75', 100, 290, 100), word('0000000003.', 100, 340, 100),
+      word('11111-1', 400, 238, 80), word('22222-1', 400, 283, 80), word('33333-1', 400, 328, 80),
+      word('20', 610, 235, 20), word('7', 610, 280, 20), word('15', 610, 325, 20),
+    ]);
+    expect(parsePhotoFields(source).documents).toMatchObject([
+      { ctc: '0000000001', nf: '11111-1', volumes: '20' },
+      { ctc: '0000000003', nf: '33333-1', volumes: '15' },
+    ]);
+    expect(tableCtcRepairRegions(source)).toHaveLength(1);
+  });
+  it('reads positive printed header totals independently of partial table rows', () => {
+    const fields = parsePhotoFields(page([
+      word('CTCs', 100, 100), word('NFs', 250, 100), word('VOLS', 400, 100), word('PESO', 550, 100),
+      word('11', 130, 130, 20), word('132', 430, 130, 30), word('368,7', 580, 130),
+      word('CTC', 100, 200), word('Remetente', 250, 200), word('NF-Série', 400, 200, 90), word('Vols.', 600, 200),
+      word('0000000001', 100, 240, 100), word('11111-1', 400, 238, 80), word('20', 610, 235, 20),
+    ]));
+    expect(fields).toMatchObject({ expectedRows: 11, totalVolumes: 132 });
+    expect(fields.documents).toHaveLength(1);
+  });
+  it('uses the complete row grid when only every third CTC is readable', () => {
+    const words = [word('CTC', 100, 200), word('Remetente', 250, 200), word('NF-Série', 400, 200, 90), word('Vols.', 600, 200)];
+    for (let i = 0; i < 7; i++) {
+      words.push(word(i % 3 === 0 ? `000000000${i + 1}` : 'AAQNDASBT75', 100, 240 + i * 50, 100),
+        word(`${101 + i}-1`, 400, 238 + i * 45, 80), word(`${i + 1}`, 610, 235 + i * 45, 20));
+    }
+    expect(parsePhotoFields(page(words)).documents).toMatchObject([
+      { ctc: '0000000001', nf: '101-1', volumes: '1' },
+      { ctc: '0000000004', nf: '104-1', volumes: '4' },
+      { ctc: '0000000007', nf: '107-1', volumes: '7' },
+    ]);
   });
   it('reads the driver from the plate/driver field without taking the vehicle suffix', () => {
     const fields = parsePhotoFields(page([word('PLACA/MOTORISTA', 100, 100, 120), word('ABC1D23-JOSE', 100, 130, 180), word('SILVA', 290, 130), word('-', 350, 130, 10), word('999', 370, 130)]));

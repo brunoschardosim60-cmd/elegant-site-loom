@@ -19,3 +19,14 @@ it('keeps leading-zero CTCs from a partial page as editable, explicitly unverifi
   expect(result.documents).toEqual([expect.objectContaining({ ctc: '0000000001', nf: '', volumes: '', review: expect.any(Array) })]);
   expect(result.headerReview?.join(' ')).toContain('incompleta');
 });
+
+it('explains differences from printed counts and volumes without filling the missing values', () => {
+  const result = markLocalPhoto({ id: '', plate: '', driver: '', kind: 'pre', ctcs: ['0000000001'],
+    expectedRows: 11, totalVolumes: 132, documents: [{ ctc: '0000000001', nf: '', volumes: '20' }] });
+  expect(result.headerReview).toEqual(expect.arrayContaining([
+    'Cabeçalho informa 11 CTCs; a leitura local encontrou 1. Confira todas as linhas.',
+    'Cabeçalho informa 132 volumes; a leitura local somou 20. Confira os volumes na foto.',
+  ]));
+  expect(result.documents).toHaveLength(1);
+  expect(result.documents[0]?.volumes).toBe('20');
+});

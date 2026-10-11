@@ -95,3 +95,75 @@ export async function preparePrintedField(source: Blob, box: { x0: number; y0: n
     return await new Promise<Blob>(resolve => canvas.toBlob(b => resolve(b ?? source), 'image/png'));
   } finally { bitmap.close(); }
 }
+
+type NumericBox = { x0: number; y0: number; x1: number; y1: number };
+
+/** Adapt to the paper's local brightness and remove long rules, keeping glyphs. */
+export function cleanNumericPixels(pixels: Uint8ClampedArray, width: number, height: number): void {
+  const gray = new Uint8Array(width * height);
+  const histogram = new Uint32Array(256);
+  for (let i = 0; i < gray.length; i++) { gray[i] = Math.round((pixels[i * 4]! + pixels[i * 4 + 1]! + pixels[i * 4 + 2]!) / 3); histogram[gray[i]!]!++; }
+  const percentile = (fraction: number) => { let count = 0; for (let value = 0; value < 256; value++) { count += histogram[value]!; if (count >= gray.length * fraction) return value; } return 255; };
+  const ink = percentile(.02); const paper = percentile(.8);
+  const threshold = ink + (paper - ink) * .55;
+  const rules = new Set<number>();
+  for (let y = 0; y < height; y++) {
+    let dark = 0;
+    for (let x = 0; x < width; x++) if (gray[y * width + x]! < threshold) dark++;
+    if (dark > width * .72) rules.add(y);
+  }
+  for (let i = 0; i < gray.length; i++) {
+    const value = rules.has(Math.floor(i / width)) || gray[i]! >= threshold ? 255 : 0;
+    pixels[i * 4] = pixels[i * 4 + 1] = pixels[i * 4 + 2] = value;
+  }
+}
+
+/** One image/recognition for many small fields; positions keep missing reads from shifting rows. */
+export async function prepareNumericMontage(source: Blob, boxes: NumericBox[]) {
+  const bitmap = await createImageBitmap(source);
+  try {
+    const scale = 2; const padding = 16;
+    const clipped = boxes.map(box => ({ x0: Math.max(0, Math.floor(box.x0)), y0: Math.max(0, Math.floor(box.y0)),
+      x1: Math.min(bitmap.width, Math.ceil(box.x1)), y1: Math.min(bitmap.height, Math.ceil(box.y1)) }));
+    if (clipped.some(box => box.x1 <= box.x0 || box.y1 <= box.y0)) throw new Error('Invalid numeric region');
+    const slotHeight = Math.max(80, ...clipped.map(box => (box.y1 - box.y0) * scale + padding * 2));
+    const width = Math.max(100, ...clipped.map(box => (box.x1 - box.x0) * scale + padding * 2));
+    const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = slotHeight * boxes.length;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) throw new Error('Canvas unavailable');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const cells = clipped.map((box, index) => {
+      const w = box.x1 - box.x0, h = box.y1 - box.y0;
+      const cell = document.createElement('canvas'); cell.width = w * scale; cell.height = h * scale;
+      const cellContext = cell.getContext('2d', { willReadFrequently: true });
+      if (!cellContext) throw new Error('Canvas unavailable');
+      cellContext.drawImage(bitmap, box.x0, box.y0, w, h, 0, 0, cell.width, cell.height);
+      const data = cellContext.getImageData(0, 0, cell.width, cell.height); cleanNumericPixels(data.data, cell.width, cell.height); cellContext.putImageData(data, 0, 0);
+      const target = { x0: padding, y0: index * slotHeight + padding, x1: padding + cell.width, y1: index * slotHeight + padding + cell.height };
+      ctx.drawImage(cell, target.x0, target.y0);
+      return { box, target };
+    });
+    const image = await new Promise<Blob>((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Image unavailable')), 'image/png'));
+    return { image, cells };
+  } finally { bitmap.close(); }
+}
+
+/** Keep a whole numeric column in one recognition instead of one call per row. */
+export async function prepareNumericColumn(source: Blob, box: NumericBox) {
+  const bitmap = await createImageBitmap(source);
+  try {
+    const x = Math.max(0, Math.floor(box.x0)), y = Math.max(0, Math.floor(box.y0));
+    const width = Math.min(bitmap.width - x, Math.ceil(box.x1) - x), height = Math.min(bitmap.height - y, Math.ceil(box.y1) - y);
+    if (width <= 0 || height <= 0) throw new Error('Invalid numeric column');
+    const crop = document.createElement('canvas'); crop.width = width; crop.height = height;
+    const context = crop.getContext('2d', { willReadFrequently: true });
+    if (!context) throw new Error('Canvas unavailable');
+    context.drawImage(bitmap, x, y, width, height, 0, 0, width, height);
+    const data = context.getImageData(0, 0, width, height); cleanNumericPixels(data.data, width, height); context.putImageData(data, 0, 0);
+    const padding = 20; const canvas = document.createElement('canvas'); canvas.width = width + padding * 2; canvas.height = height + padding * 2;
+    const ctx = canvas.getContext('2d'); if (!ctx) throw new Error('Canvas unavailable');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.drawImage(crop, padding, padding);
+    const image = await new Promise<Blob>((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Image unavailable')), 'image/png'));
+    return { image, x, y, padding };
+  } finally { bitmap.close(); }
+}

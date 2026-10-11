@@ -1,14 +1,18 @@
 import { useEffect, useState } from 'react';
-import { Check, ChevronDown, Clock3, FileText, Package, Truck, Undo2, UserRound } from 'lucide-react';
+import { CalendarDays, Check, ChevronDown, Clock3, FileText, Package, Truck, Undo2, UserRound } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import type { Manifest } from '@/lib/conference';
+import { formatManifestDate, manifestAgeLabel, manifestReferenceDate, normalizeIssueDate } from '@/lib/manifest-date';
 
 type Props = {
   manifests: Manifest[];
   query: string;
   focusedManifest: { id: string } | null;
-  age: (date: string) => number;
+  age: (manifest: Manifest) => number;
+  now?: string;
   onToggleDocument: (manifest: Manifest, id: string, received: boolean) => void;
+  onIssueDateChange?: (manifestId: string, issueDate: string | undefined) => void;
 };
 
 const driverKey = (name: string) => name.trim().replace(/\s+/g, ' ').toLocaleUpperCase('pt-BR');
@@ -16,8 +20,9 @@ const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2)
 const countVolumes = (manifests: Manifest[], pendingOnly = false) => manifests.reduce((total, manifest) => total + manifest.documents.reduce((sum, doc) => sum + (!pendingOnly || !doc.received ? doc.volumes : 0), 0), 0);
 
 /** Keeps every driver's manifests together while opening only the table being used. */
-export function DriverManifestList({ manifests, query, focusedManifest, age, onToggleDocument }: Props) {
+export function DriverManifestList({ manifests, query, focusedManifest, age, now, onToggleDocument, onIssueDateChange }: Props) {
   const [expanded, setExpanded] = useState(manifests[0]?.id ?? '');
+  const [editingDate, setEditingDate] = useState<{ id: string; value: string; error?: string } | null>(null);
   const groups = new Map<string, { driver: string; manifests: Manifest[] }>();
   for (const manifest of manifests) {
     const key = driverKey(manifest.driver);
@@ -52,16 +57,34 @@ export function DriverManifestList({ manifests, query, focusedManifest, age, onT
             const count = manifest.documents.filter(doc => doc.received).length;
             const remaining = manifest.documents.length - count;
             const pendingVols = countVolumes([manifest], true);
-            const days = age(manifest.date);
+            const days = age(manifest);
+            const dateLabel = normalizeIssueDate(manifest.issueDate ?? '') ? 'Emissão' : 'Cadastro';
             const open = expanded === manifest.id;
             const tableId = `driver-documents-${manifest.id}`;
             const percent = manifest.documents.length ? Math.round(count / manifest.documents.length * 100) : 0;
             return <article className={`driver-manifest ${open ? 'driver-manifest-open' : ''}`} key={manifest.id}>
               <button type="button" className="driver-manifest-trigger" aria-expanded={open} aria-controls={tableId} aria-label={`${open ? 'Recolher' : 'Abrir'} documentos do pré ${manifest.id}`} onClick={() => setExpanded(open ? '' : manifest.id)}>
-                <div className="driver-manifest-title"><span className="driver-manifest-id">{manifest.id}</span><span className="driver-manifest-date">{new Date(manifest.date).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}<span>·</span><span className="plate">{manifest.plate}</span></span></div>
-                <div className="driver-manifest-summary"><span className={`status-badge ${manifest.finishedAt ? 'badge-success' : days >= 2 ? 'badge-warning' : 'badge-pending'}`}>{manifest.finishedAt ? <Check size={11} /> : <Clock3 size={11} />}{manifest.finishedAt ? 'Finalizado' : days === 0 ? 'Hoje' : `Há ${days} ${days === 1 ? 'dia' : 'dias'}`}</span><span className="driver-manifest-missing">{remaining ? <><strong>{remaining}</strong> {remaining === 1 ? 'CTC' : 'CTCs'} · <strong>{pendingVols}</strong> vols. faltando</> : <>{count} {count === 1 ? 'CTC conferido' : 'CTCs conferidos'}</>}</span></div>
+                <div className="driver-manifest-title"><span className="driver-manifest-id">{manifest.id}</span><span className="driver-manifest-date">{dateLabel} {formatManifestDate(manifestReferenceDate(manifest))}<span>·</span><span className="plate">{manifest.plate}</span></span></div>
+                <div className="driver-manifest-summary"><span className={`status-badge ${manifest.finishedAt ? 'badge-success' : days >= 2 ? 'badge-warning' : 'badge-pending'}`}>{manifest.finishedAt ? <Check size={11} /> : <Clock3 size={11} />}{manifest.finishedAt ? 'Finalizado' : manifestAgeLabel(manifest, now)}</span><span className="driver-manifest-missing">{remaining ? <><strong>{remaining}</strong> {remaining === 1 ? 'CTC' : 'CTCs'} · <strong>{pendingVols}</strong> vols. faltando</> : <>{count} {count === 1 ? 'CTC conferido' : 'CTCs conferidos'}</>}</span></div>
                 <ChevronDown className="driver-manifest-chevron" size={17} aria-hidden="true" />
               </button>
+              {onIssueDateChange && <div className="driver-manifest-date-editor px-4 pb-2">
+                {editingDate?.id === manifest.id ? <form className="flex flex-wrap items-center gap-2" onSubmit={event => {
+                  event.preventDefault();
+                  const value = editingDate.value.trim();
+                  const issueDate = normalizeIssueDate(value);
+                  if (value && !issueDate) { setEditingDate({ ...editingDate, error: 'Informe uma data válida.' }); return; }
+                  onIssueDateChange(manifest.id, issueDate);
+                  setEditingDate(null);
+                }}>
+                  <label htmlFor={`issue-date-${manifest.id}`} className="text-[11px] text-muted-foreground">Emissão do pré</label>
+                  <Input id={`issue-date-${manifest.id}`} aria-label={`Data de emissão do pré ${manifest.id}`} type="date" min="1000-01-01" max="9999-12-31" className="h-8 w-40 text-xs" value={editingDate.value} onChange={event => setEditingDate({ id: manifest.id, value: event.target.value })} />
+                  <Button type="submit" size="sm" className="h-8">Salvar data</Button>
+                  <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => setEditingDate(null)}>Cancelar</Button>
+                  <span className="basis-full text-[10px] text-muted-foreground">Use a data impressa no cabeçalho. Em branco, a idade usa o cadastro.</span>
+                  {editingDate.error && <span role="alert" className="basis-full text-xs text-destructive">{editingDate.error}</span>}
+                </form> : <button type="button" className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground" aria-label={`Editar data do pré ${manifest.id}`} onClick={() => setEditingDate({ id: manifest.id, value: normalizeIssueDate(manifest.issueDate ?? '') ?? '' })}><CalendarDays size={12} />Editar data do pré</button>}
+              </div>}
               <div className="driver-manifest-progress"><div className="driver-manifest-progress-label"><span>{count} de {manifest.documents.length} CTCs conferidos</span><strong>{percent}%</strong></div><div className="driver-manifest-progress-track" role="progressbar" aria-label={`Conferência de ${group.driver} · ${manifest.id}`} aria-valuenow={count} aria-valuemin={0} aria-valuemax={manifest.documents.length}><span style={{ width: `${percent}%` }} /></div></div>
               {open && <div className="driver-document-panel" id={tableId}>
                 <table className="document-table driver-document-table"><thead><tr><th>CTC / Cliente</th><th>Nota fiscal</th><th>Vols.</th><th>Status</th><th><span className="sr-only">Ações</span></th></tr></thead><tbody>{[...manifest.documents].sort((a, b) => Number(a.received) - Number(b.received)).map(doc => <tr key={doc.id} className={doc.received ? 'received-row' : ''}>

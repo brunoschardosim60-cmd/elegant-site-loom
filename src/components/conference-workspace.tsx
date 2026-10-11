@@ -8,6 +8,7 @@ import { ManifestImportDialog } from './manifest-import-dialog';
 import { DriverManifestList } from './driver-manifest-list';
 import { applyImports, type ImportDraft } from '@/lib/manifest-import';
 import type { ConferenceState } from '@/lib/conference-state';
+import { compareManifestDates, formatManifestDate, manifestAgeDays, manifestAgeLabel, manifestReferenceDate, normalizeIssueDate } from '@/lib/manifest-date';
 
 type View = 'pending' | 'missing' | 'finished' | 'issues';
 type Activity = { id: number; title: string; description: string; time: string; warning?: boolean | undefined };
@@ -46,7 +47,17 @@ export function ConferenceWorkspace({ initialState, onSnapshot, accountEmail }: 
     } catch { notify('Não foi possível gerar o PDF. Tente novamente.', true); }
     finally { setPdfBusy(false); }
   }
-  useEffect(() => { setNow(new Date().toISOString()); }, []);
+  useEffect(() => {
+    const refreshClock = () => setNow(new Date().toISOString());
+    const refreshVisibleClock = () => { if (document.visibilityState === 'visible') refreshClock(); };
+    refreshClock();
+    const timer = window.setInterval(refreshClock, 60000);
+    document.addEventListener('visibilitychange', refreshVisibleClock);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', refreshVisibleClock);
+    };
+  }, []);
   useEffect(() => { if (!blocked && !newOpen) scanner.current?.focus(); }, [blocked, newOpen]);
 
   function update(next: Manifest[]) { current.current = next; setManifests(next); }
@@ -94,13 +105,28 @@ export function ConferenceWorkspace({ initialState, onSnapshot, accountEmail }: 
     log(received ? 'Documento conferido manualmente' : 'Conferência desfeita', manifest.driver);
     if (changed.finishedAt) notify(`Pré de ${manifest.driver.split(' ')[0]} finalizado!`);
   }
+  function changeIssueDate(manifestId: string, value: string | undefined) {
+    const issueDate = normalizeIssueDate(value ?? '');
+    if (value?.trim() && !issueDate) { notify('Confira a data de emissão do pré.', true); return; }
+    const manifest = current.current.find(item => item.id === manifestId);
+    if (!manifest || manifest.issueDate === issueDate) return;
+    update(current.current.map(item => {
+      if (item.id !== manifestId) return item;
+      const changed = { ...item };
+      if (issueDate) changed.issueDate = issueDate;
+      else delete changed.issueDate;
+      return changed;
+    }));
+    log('Data de emissão atualizada', `${manifestId} · ${issueDate ? formatManifestDate(issueDate) : 'idade pelo cadastro'}`);
+    notify(onSnapshot ? 'Data atualizada. Confira o status de salvamento.' : 'Data de emissão atualizada.');
+  }
   const pending = manifests.filter(item => !item.finishedAt);
   const finished = manifests.filter(item => item.finishedAt);
   const documents = manifests.flatMap(item => item.documents);
   const missing = pending.flatMap(item => item.documents).filter(doc => !doc.received);
-  const age = (date: string) => Math.max(0, Math.floor((new Date(now).getTime() - new Date(date).getTime()) / 86400000));
-  const missingRows = pending.flatMap(manifest => manifest.documents.filter(doc => !doc.received).map(doc => ({ manifest, doc, days: age(manifest.date) }))).filter(({ manifest, doc }) => `${manifest.id} ${manifest.driver} ${manifest.plate} ${doc.ctc} ${doc.nf} ${doc.client || ''} ${doc.recipient || ''}`.toLowerCase().includes(query.toLowerCase())).filter(({ days }) => filter !== 'old' || days >= 2).sort((a, b) => filter === 'new' ? b.manifest.date.localeCompare(a.manifest.date) : a.manifest.date.localeCompare(b.manifest.date));
-  const visible = (view === 'finished' ? finished : pending).filter(item => `${item.driver} ${item.id} ${item.plate} ${item.documents.map(doc => `${doc.ctc} ${doc.nf} ${doc.client || ''} ${doc.recipient || ''}`).join(' ')}`.toLowerCase().includes(query.toLowerCase())).filter(item => filter !== 'old' || age(item.date) >= 2).sort((a, b) => filter === 'new' ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date));
+  const age = (manifest: Manifest) => manifestAgeDays(manifest, now);
+  const missingRows = pending.flatMap(manifest => manifest.documents.filter(doc => !doc.received).map(doc => ({ manifest, doc, days: age(manifest) }))).filter(({ manifest, doc }) => `${manifest.id} ${manifest.driver} ${manifest.plate} ${doc.ctc} ${doc.nf} ${doc.client || ''} ${doc.recipient || ''}`.toLowerCase().includes(query.toLowerCase())).filter(({ days }) => filter !== 'old' || days >= 2).sort((a, b) => filter === 'new' ? compareManifestDates(b.manifest, a.manifest) : compareManifestDates(a.manifest, b.manifest));
+  const visible = (view === 'finished' ? finished : pending).filter(item => `${item.driver} ${item.id} ${item.plate} ${item.documents.map(doc => `${doc.ctc} ${doc.nf} ${doc.client || ''} ${doc.recipient || ''}`).join(' ')}`.toLowerCase().includes(query.toLowerCase())).filter(item => filter !== 'old' || age(item) >= 2).sort((a, b) => filter === 'new' ? compareManifestDates(b, a) : compareManifestDates(a, b));
 
   function importDrafts(drafts: ImportDraft[]) {
     const result = applyImports(current.current, drafts, new Date().toISOString());
@@ -139,7 +165,7 @@ export function ConferenceWorkspace({ initialState, onSnapshot, accountEmail }: 
           <div className="section-heading"><h2 className="mr-auto">{view === 'pending' ? 'Pré-manifestos em aberto' : view === 'missing' ? 'CTCs pendentes' : view === 'finished' ? 'Conferências concluídas' : 'Ocorrências'}<span className="section-count">{view === 'issues' ? issues.length : view === 'missing' ? missingRows.length : visible.length}</span></h2><Button variant="outline" size="sm" onClick={() => void exportPdf()} disabled={pdfBusy} className="text-[11px]">{pdfBusy ? <Loader2 size={12} className="animate-spin" /> : <FileText size={12} />}{pdfBusy ? 'Gerando PDF…' : 'PDF'}</Button></div>
           {view !== 'issues' && <div className="list-tools"><label className="search-wrap"><Search /><input aria-label="Buscar pré-manifesto" placeholder="Pré, motorista, placa, CTC, NF ou cliente" value={query} onChange={event => setQuery(event.target.value)} /></label><select aria-label="Filtrar pré-manifestos" className="filter-select" value={filter} onChange={event => setFilter(event.target.value)}><option value="all">Mais antigos primeiro</option><option value="new">Mais recentes</option><option value="old">Há 2 dias ou mais</option></select></div>}
           <div className="manifest-list">
-            {view === 'missing' ? missingRows.length ? <div className="manifest-card pending-table-wrap"><table className="document-table pending-table" aria-label="CTCs pendentes"><thead><tr><th>CTC</th><th>Pré / Motorista</th><th>NF</th><th>Vols.</th><th>Status</th><th><span className="sr-only">Ações</span></th></tr></thead><tbody>{missingRows.map(({ manifest, doc, days }) => <tr key={doc.id}><td className="ctc-number" data-label="CTC / Cliente">{doc.ctc}{doc.client && <span className="block text-muted-foreground text-[10px] font-sans mt-1">{doc.client}</span>}</td><td data-label="Pré / Motorista"><span className="block font-semibold">{manifest.id}</span><span className="text-muted-foreground">{manifest.driver} · <span className="plate">{manifest.plate}</span></span></td><td className="text-muted-foreground" data-label="Nota fiscal">{doc.nf}</td><td data-label="Volumes">{doc.volumes}</td><td data-label="Status"><span className={`status-badge ${days >= 2 ? 'badge-warning' : 'badge-pending'}`}><Clock3 size={10} />{days === 0 ? 'Pendente · hoje' : `Pendente há ${days} ${days === 1 ? 'dia' : 'dias'}`}</span></td><td data-label="Ações"><Button variant="ghost" size="icon" className="document-action text-muted-foreground" aria-label={`Marcar CTC ${doc.ctc} como recebido`} onClick={() => toggleDocument(manifest, doc.id, true)}><Check /></Button></td></tr>)}</tbody></table></div> : <div className="empty-state"><CheckCheck /><h3>Nada pendente</h3><p className="text-xs mt-2">{query ? 'Nenhum resultado para essa busca.' : 'Todos os CTCs cadastrados já foram conferidos.'}</p></div> : view === 'issues' ? issues.length ? issues.map(issue => <div className="manifest-card p-5 flex gap-3" key={issue.id}><TriangleAlert className="text-warning shrink-0" size={19} /><div><h3 className="font-semibold text-xs">{issue.title}</h3><p className="text-muted-foreground text-xs mt-2">{issue.description}</p><p className="text-muted-foreground text-[10px] mt-2">{issue.time}</p></div></div>) : <div className="empty-state"><ShieldCheck /><h3>Nenhuma ocorrência</h3><p className="text-xs mt-2">Tudo certo com as leituras desta sessão.</p></div> : visible.length ? <DriverManifestList manifests={visible} query={query} focusedManifest={focusedManifest} age={age} onToggleDocument={toggleDocument} /> : <div className="empty-state"><Inbox /><h3>{view === 'finished' ? 'Nenhum pré finalizado' : 'Nenhum pré pendente'}</h3><p className="text-xs mt-2">{query ? 'Nenhum resultado para essa busca.' : 'A lista está em dia.'}</p></div>}
+            {view === 'missing' ? missingRows.length ? <div className="manifest-card pending-table-wrap"><table className="document-table pending-table" aria-label="CTCs pendentes"><thead><tr><th>CTC</th><th>Pré / Motorista</th><th>NF</th><th>Vols.</th><th>Status</th><th><span className="sr-only">Ações</span></th></tr></thead><tbody>{missingRows.map(({ manifest, doc, days }) => <tr key={doc.id}><td className="ctc-number" data-label="CTC / Cliente">{doc.ctc}{doc.client && <span className="block text-muted-foreground text-[10px] font-sans mt-1">{doc.client}</span>}</td><td data-label="Pré / Motorista"><span className="block font-semibold">{manifest.id}</span><span className="text-muted-foreground">{manifest.driver} · <span className="plate">{manifest.plate}</span></span><span className="block text-muted-foreground text-[10px] mt-1">{normalizeIssueDate(manifest.issueDate ?? '') ? 'Emissão' : 'Cadastro'} {formatManifestDate(manifestReferenceDate(manifest))}</span></td><td className="text-muted-foreground" data-label="Nota fiscal">{doc.nf}</td><td data-label="Volumes">{doc.volumes}</td><td data-label="Status"><span className={`status-badge ${days >= 2 ? 'badge-warning' : 'badge-pending'}`}><Clock3 size={10} />{manifestAgeLabel(manifest, now)}</span></td><td data-label="Ações"><Button variant="ghost" size="icon" className="document-action text-muted-foreground" aria-label={`Marcar CTC ${doc.ctc} como recebido`} onClick={() => toggleDocument(manifest, doc.id, true)}><Check /></Button></td></tr>)}</tbody></table></div> : <div className="empty-state"><CheckCheck /><h3>Nada pendente</h3><p className="text-xs mt-2">{query ? 'Nenhum resultado para essa busca.' : 'Todos os CTCs cadastrados já foram conferidos.'}</p></div> : view === 'issues' ? issues.length ? issues.map(issue => <div className="manifest-card p-5 flex gap-3" key={issue.id}><TriangleAlert className="text-warning shrink-0" size={19} /><div><h3 className="font-semibold text-xs">{issue.title}</h3><p className="text-muted-foreground text-xs mt-2">{issue.description}</p><p className="text-muted-foreground text-[10px] mt-2">{issue.time}</p></div></div>) : <div className="empty-state"><ShieldCheck /><h3>Nenhuma ocorrência</h3><p className="text-xs mt-2">Tudo certo com as leituras desta sessão.</p></div> : visible.length ? <DriverManifestList manifests={visible} query={query} focusedManifest={focusedManifest} age={age} now={now} onToggleDocument={toggleDocument} onIssueDateChange={changeIssueDate} /> : <div className="empty-state"><Inbox /><h3>{view === 'finished' ? 'Nenhum pré finalizado' : 'Nenhum pré pendente'}</h3><p className="text-xs mt-2">{query ? 'Nenhum resultado para essa busca.' : 'A lista está em dia.'}</p></div>}
           </div>
         </section><aside className="activity-panel"><div className="activity-heading">Últimas atividades <span className="live-label"><i className="online-dot" />Ao vivo</span></div><div className="activity-date">Hoje</div><div className="activity-list">{activity.slice(0, 5).map(item => <div className="activity-item" key={item.id}><div className={`activity-icon ${item.warning ? 'warning' : ''}`}>{item.warning ? <TriangleAlert /> : item.title.includes('finalizado') ? <CheckCheck /> : item.title.includes('adicionado') ? <Plus /> : <Check />}</div><div><div className="activity-title">{item.title}</div><div className="activity-description">{item.description}</div><div className="activity-time">{item.time}</div></div></div>)}</div><div className="daily-summary"><h3>Resumo da sessão</h3><div className="summary-line"><span>Documentos recebidos</span><strong>{documents.filter(doc => doc.received).length}</strong></div><div className="summary-line"><span>Pré-manifestos concluídos</span><strong>{finished.length}</strong></div><div className="summary-line"><span>Ocorrências registradas</span><strong>{issues.length}</strong></div><div className="flex gap-2 text-success text-[10px] mt-5 items-center"><ShieldCheck size={13} />{issues.length ? 'Confira as ocorrências' : 'Nenhuma ocorrência nesta sessão'}</div></div></aside></div>
         <footer className="page-footer"><span className="flex gap-1.5 items-center"><ShieldCheck size={12} /> {accountEmail ? 'Cadastros na sua conta · confira o status de salvamento' : 'Dados temporários · reiniciam ao atualizar a página'}</span><span>confere. <span className="mx-2">/</span> Controle de retorno de documentos</span></footer>
