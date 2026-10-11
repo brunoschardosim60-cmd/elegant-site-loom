@@ -324,6 +324,18 @@ describe('AI photo import pipeline', () => {
     expect(receive.mock.calls[0]![1].pre.id).toBe('DI000000001');
   });
 
+  it('ignores cached stage quotas from the previous reversed full and verification models', async () => {
+    const { data: { session } } = await mocks.session();
+    for (const stage of ['full', 'verify']) rememberPhotoProviderBlock(`${session.user.id}:photo-model-stages-v2:${stage}`, quotaFailure('daily'));
+    const receive = vi.fn();
+    const batch = readAiPhotos([photo('restored-full-model.jpg')], receive, undefined);
+    (await pendingCall('restored-full-model.jpg', 'full')).pending.resolve(responses(1).full);
+    (await pendingCall('restored-full-model.jpg', 'verify')).pending.resolve(responses(1).verification);
+    await batch;
+    expect(calls.map(call => call.input.data.mode)).toEqual(['full', 'verify']);
+    expect(receive.mock.calls[0]![1].pre).toMatchObject({ id: 'DI000000001', verification: { status: 'matched' } });
+  });
+
   it('goes directly to local fallback on the next import after a known daily quota failure', async () => {
     const first = readAiPhotos([photo('limited.jpg')], vi.fn(), undefined);
     (await pendingCall('limited.jpg', 'full')).pending.resolve(quotaFailure('daily'));

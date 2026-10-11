@@ -9,8 +9,9 @@ type ProviderStage = 'full' | 'verify';
 const temporaryBlocks = new Map<string, { until: number; result: ProviderFailure }>();
 const providerCooldown = 2 * 60 * 1000;
 // Full reading and verification use different models and quota buckets. The
-// version also leaves old, unscoped Flash quota entries behind after a deploy.
-const providerScope = (userId: string, stage: ProviderStage) => `${userId}:photo-model-stages-v2:${stage}`;
+// This version also ignores quotas cached before Flash became the full reader
+// and Lite became the optional verifier; those stage buckets were reversed.
+const providerScope = (userId: string, stage: ProviderStage) => `${userId}:photo-model-stages-v3:${stage}`;
 const verificationQuotaMessage = 'A cota diária da conferência adicional esgotou. A leitura completa foi mantida; confira os campos sinalizados.';
 const verificationUnavailableMessage = 'A conferência adicional está temporariamente indisponível. A leitura completa foi mantida; confira os campos sinalizados.';
 

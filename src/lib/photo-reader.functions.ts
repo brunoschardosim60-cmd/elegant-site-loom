@@ -25,7 +25,7 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
     if (bucket.count >= 80) return { ok: false as const, unavailable: true, error: 'Muitas fotos seguidas. Aguarde alguns minutos.' };
     bucket.count++; requests.set(userId, bucket);
     const compact = data.mode === 'survey' || data.mode === 'verify';
-    const model = data.orientationOnly || data.mode === 'survey' ? 'gemini-3.5-flash-lite' : data.mode === 'verify' ? process.env['GEMINI_OCR_VERIFY_MODEL'] || 'gemini-3.8-flash' : process.env['GEMINI_OCR_MODEL'] || 'gemini-3.5-flash-lite';
+    const model = data.orientationOnly || data.mode === 'survey' ? 'gemini-3.5-flash-lite' : data.mode === 'verify' ? process.env['GEMINI_OCR_VERIFY_MODEL'] || 'gemini-3.5-flash-lite' : process.env['GEMINI_OCR_MODEL'] || 'gemini-3.8-flash';
     const startedAt = performance.now();
     const timeoutMs = data.orientationOnly || data.mode === 'survey' ? 8000 : data.mode === 'verify' ? 10000 : 20000;
     const deadline = AbortSignal.timeout(timeoutMs);

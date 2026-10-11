@@ -35,23 +35,23 @@ beforeEach(() => {
 });
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
-it('uses Flash Lite for the full literal transcription, retaining image detail, all fields and the pre issue date', async () => {
+it('uses Flash for the full literal transcription, retaining image detail, all fields and the pre issue date', async () => {
   mocks.fetch.mockResolvedValue(new Response(JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify(parsedPhoto) }] } }] })));
   const result = await readPhotoWithGemini(input);
   expect(result).toMatchObject({ ok: true, rotation: 0, pre: { issueDate: '2026-08-28', documents: [{ ctc: '0000000001', nf: '100-1', volumes: '2' }] } });
   expect(mocks.fetch).toHaveBeenCalledOnce();
-  expect(mocks.fetch.mock.calls[0]![0]).toContain('/gemini-3.5-flash-lite:generateContent');
+  expect(mocks.fetch.mock.calls[0]![0]).toContain('/gemini-3.8-flash:generateContent');
   const body = JSON.parse(mocks.fetch.mock.calls[0]![1].body);
-  expect(body.generationConfig).toMatchObject({ temperature: 0, mediaResolution: 'MEDIA_RESOLUTION_HIGH', thinkingConfig: { thinkingLevel: 'MINIMAL' } });
+  expect(body.generationConfig).toMatchObject({ temperature: 0, mediaResolution: 'MEDIA_RESOLUTION_HIGH', thinkingConfig: { thinkingLevel: 'LOW' } });
   expect(body.generationConfig.responseJsonSchema.required).toContain('issueDate');
   expect(body.contents[0].parts[1].inlineData).toEqual({ data: input.data.data, mimeType: 'image/jpeg' });
   expect(body.contents[0].parts[0].text).toContain('issueDate sempre vazio');
 });
 
 it.each([
-  ['verify', undefined, 'gemini-3.8-flash', 'LOW'],
-  ['full', 'gemini-3.8-flash', 'gemini-3.8-flash', 'LOW'],
-  ['verify', 'gemini-3.5-flash-lite', 'gemini-3.5-flash-lite', 'MINIMAL'],
+  ['verify', undefined, 'gemini-3.5-flash-lite', 'MINIMAL'],
+  ['full', 'gemini-3.5-flash-lite', 'gemini-3.5-flash-lite', 'MINIMAL'],
+  ['verify', 'gemini-3.8-flash', 'gemini-3.8-flash', 'LOW'],
 ] as const)('selects the independent %s model with an optional server override %s', async (mode, override, model, level) => {
   if (override) vi.stubEnv(mode === 'verify' ? 'GEMINI_OCR_VERIFY_MODEL' : 'GEMINI_OCR_MODEL', override);
   mocks.fetch.mockResolvedValue(new Response(JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify(parsedPhoto) }] } }] })));
