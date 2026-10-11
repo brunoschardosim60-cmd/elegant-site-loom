@@ -17,3 +17,9 @@ it('does not derive CTC from a fiscal key and warns about incomplete rows and to
   expect(pre.documents[1]!.review?.join(' ')).toContain('11 CTCs');
   expect(pre.documents[1]!.review?.join(' ')).toContain('66 volumes');
 });
+
+import { normalizePlate } from '@/lib/gemini-photo';
+describe('placa', () => {
+  it('fixes letter/digit swaps by position', () => expect(normalizePlate('1YA-7J3I')).toBe('IYA7J31'));
+  it('does not invent characters on partial plates', () => expect(normalizePlate('IYA7J')).toBe('IYA7J'));
+});
