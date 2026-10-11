@@ -38,6 +38,7 @@ export function normalizeGeminiPhoto(value: unknown): PhotoFields {
     return { ...row, ctc: /^\d{10}$/.test(ctc) ? ctc : '', volumes: /^\d+$/.test(volumes) && Number(volumes) > 0 ? volumes : '', review };
   });
   const warnings: string[] = [];
+  if (new Set(documents.map(d => d.ctc).filter(Boolean)).size !== documents.length) warnings.push('CTC repetido ou ilegível: confira todas as linhas');
   if (data.expectedRows && data.expectedRows !== documents.length) warnings.push(`Cabeçalho informa ${data.expectedRows} CTCs; foram lidos ${documents.length}`);
   if (data.totalVolumes && documents.reduce((sum, d) => sum + Number(d.volumes), 0) !== data.totalVolumes) warnings.push(`Confira a soma: cabeçalho informa ${data.totalVolumes} volumes`);
   documents.forEach(d => d.review.push(...warnings));

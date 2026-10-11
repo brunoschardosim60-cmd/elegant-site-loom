@@ -28,7 +28,7 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
           generation_config: { max_output_tokens: 12000, thinking_level: 'low' },
         }),
       });
-      let response = await request(process.env['GEMINI_OCR_MODEL'] || 'gemini-3.5-flash-lite');
+      let response = await request(process.env['GEMINI_OCR_MODEL'] || 'gemini-3.7-flash');
       if ([404, 503].includes(response.status)) response = await request('gemini-3.8-flash');
       if (!response.ok) return { ok: false as const, error: response.status === 429 ? 'Limite do Gemini atingido. Aguarde e tente novamente.' : response.status === 403 || response.status === 401 ? 'Chave do Gemini sem acesso. Confira a configuração na Vercel.' : `Gemini indisponível (${response.status}). Tente novamente.` };
       const result = await response.json() as { status?: string; steps?: { type: string; content?: { type: string; text?: string }[] }[] };
