@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { Loader2, Sparkles, ArrowDownToLine, ArrowRight, Barcode, Check, CheckCheck, ChevronRight, CircleCheck, Clock3, FileCheck2, FileText, Inbox, Layers, Plus, Search, ScanLine, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { Loader2, ArrowRight, Barcode, Check, CheckCheck, ChevronRight, CircleCheck, Clock3, FileCheck2, FileText, Inbox, Layers, Plus, Search, ScanLine, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { demoManifests, findMatches, parseReading, setReceived, type Manifest } from '@/lib/conference';
-import { analyzeDivergence } from '@/lib/divergence.functions';
 
 import { ManifestImportDialog } from './manifest-import-dialog';
 import { DriverManifestList } from './driver-manifest-list';
@@ -37,36 +36,15 @@ export function ConferenceWorkspace({ initialState, onSnapshot, accountEmail }: 
   const [now, setNow] = useState('2026-10-09T09:36:00');
   const [prefillId, setPrefillId] = useState('');
   const sequence = useRef(Math.max(10, ...(initialState?.activity ?? []).map(item => item.id), ...(initialState?.issues ?? []).map(item => item.id)));
-  const [divOpen, setDivOpen] = useState(false);
-  const [div, setDiv] = useState({ ctc: '', nf: '', manifest: '', volumesExpected: '', volumesReceived: '', description: '' });
-  const [divBusy, setDivBusy] = useState(false);
-  const [divResult, setDivResult] = useState<{ text?: string; error?: string } | null>(null);
-  async function submitDivergence(event: FormEvent) {
-    event.preventDefault();
-    if (!div.description.trim()) return;
-    setDivBusy(true); setDivResult(null);
-    try { const r = await analyzeDivergence({ data: div }); setDivResult(r.ok ? { text: r.text } : { error: r.error }); if (r.ok) log('Divergência analisada', `CTC ${div.ctc || '—'} · ${div.description.slice(0, 60)}`, true); }
-    catch { setDivResult({ error: 'Não foi possível analisar agora.' }); }
-    finally { setDivBusy(false); }
-  }
+  const [pdfBusy, setPdfBusy] = useState(false);
   async function exportPdf() {
-    const { jsPDF } = await import('jspdf');
-    const { default: autoTable } = await import('jspdf-autotable');
-    const pdf = new jsPDF();
-    const done = manifests.flatMap(m => m.documents.filter(d => d.received).map(d => [m.id, m.driver, d.ctc, d.client || '—', d.nf, String(d.volumes)]));
-    const open = manifests.flatMap(m => m.documents.filter(d => !d.received).map(d => [m.id, m.driver, d.ctc, d.client || '—', d.nf, String(d.volumes)]));
-    pdf.setFontSize(16); pdf.text('Relatório de conferência de CTC', 14, 18);
-    pdf.setFontSize(10); pdf.text(`Gerado em ${new Date().toLocaleString('pt-BR')}`, 14, 25);
-    const status = !manifests.length ? 'Sem pré-manifestos' : open.length ? `Em aberto — ${open.length} pendência(s)` : 'Concluída — todos os CTC conferidos';
-    pdf.text(`Status final: ${status}`, 14, 31);
-    pdf.text(`Pré-manifestos: ${manifests.length} · Finalizados: ${manifests.filter(m => m.finishedAt).length} · Ocorrências: ${issues.length}`, 14, 37);
-    const head = [['Pré', 'Motorista', 'CTC', 'Cliente / laboratório', 'NF', 'Vols.']];
-    autoTable(pdf, { startY: 44, head: [['CTC conferidos (' + done.length + ')', '', '', '', '', '']], body: [], theme: 'plain' });
-    autoTable(pdf, { head, body: done.length ? done : [['—', '', '', '', '', '']], headStyles: { fillColor: [0, 61, 165] } });
-    autoTable(pdf, { head: [['Pendências (' + open.length + ')', '', '', '', '', '']], body: [], theme: 'plain' });
-    autoTable(pdf, { head, body: open.length ? open : [['—', '', '', '', '', '']], headStyles: { fillColor: [200, 120, 0] } });
-    if (issues.length) { autoTable(pdf, { head: [['Ocorrências', 'Detalhe', 'Hora']], body: issues.map(i => [i.title, i.description, i.time]), headStyles: { fillColor: [90, 90, 90] } }); }
-    pdf.save('conferencia.pdf');
+    if (pdfBusy) return;
+    setPdfBusy(true);
+    try {
+      const { exportConferencePdf } = await import('@/lib/conference-pdf');
+      await exportConferencePdf({ manifests, issues, view, query, filter });
+    } catch { notify('Não foi possível gerar o PDF. Tente novamente.', true); }
+    finally { setPdfBusy(false); }
   }
   useEffect(() => { setNow(new Date().toISOString()); }, []);
   useEffect(() => { if (!blocked && !newOpen) scanner.current?.focus(); }, [blocked, newOpen]);
@@ -133,13 +111,6 @@ export function ConferenceWorkspace({ initialState, onSnapshot, accountEmail }: 
     }
     return result;
   }
-  function exportSession() {
-    const rows = [['Pré-manifesto', 'Motorista', 'Placa', 'CTC', 'Cliente / laboratório', 'Destinatário', 'NF', 'Volumes', 'Status'], ...manifests.flatMap(item => item.documents.map(doc => [item.id, item.driver, item.plate, doc.ctc, doc.client || '', doc.recipient || '', doc.nf, String(doc.volumes), doc.received ? 'Conferido' : 'Pendente']))];
-    const text = '\ufeff' + rows.map(row => row.map(value => `"${value.replace(/"/g, '""')}"`).join(';')).join('\r\n');
-    const url = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }));
-    const link = document.createElement('a'); link.href = url; link.download = 'conferencia.csv'; link.click(); URL.revokeObjectURL(url);
-  }
-
   return <div className="workspace workspace-refreshed">
     <aside className="sidebar">
       <div className="brand"><Layers className="brand-symbol" size={30} strokeWidth={2.6} /> <span>confere<span className="text-sidebar-primary">.</span></span></div>
@@ -165,18 +136,18 @@ export function ConferenceWorkspace({ initialState, onSnapshot, accountEmail }: 
         </div>
         <section className="scanner-band" aria-label="Leitor de CTC"><div className="scanner-symbol"><ScanLine size={29} strokeWidth={1.6} /></div><div className="scanner-copy"><h2>Pronto para a próxima leitura</h2><p><span className="online-dot" />Aguardando CTC</p></div><form className="scan-form" onSubmit={scan}><Barcode /><input ref={scanner} aria-label="Código do CTC" className="scan-input" placeholder="Bipe ou digite o código do CTC…" value={code} onChange={event => setCode(event.target.value)} autoComplete="off" disabled={!!blocked || newOpen} /><Button type="submit" size="sm" disabled={!code.trim() || !!blocked || newOpen}>Conferir <ArrowRight size={13} /></Button></form></section>
         <div className="content-grid"><section>
-          <div className="section-heading"><h2 className="mr-auto">{view === 'pending' ? 'Pré-manifestos em aberto' : view === 'missing' ? 'CTCs pendentes' : view === 'finished' ? 'Conferências concluídas' : 'Ocorrências'}<span className="section-count">{view === 'issues' ? issues.length : view === 'missing' ? missingRows.length : visible.length}</span></h2><Button variant="ghost" size="sm" onClick={exportSession} className="text-muted-foreground text-[10px]"><ArrowDownToLine size={12} /> CSV</Button><Button variant="outline" size="sm" onClick={exportPdf} className="text-[11px]"><FileText size={12} /> PDF</Button><Button size="sm" onClick={() => { setDivResult(null); setDivOpen(true); }} className="text-[11px]"><Sparkles size={12} /> Divergência</Button></div>
+          <div className="section-heading"><h2 className="mr-auto">{view === 'pending' ? 'Pré-manifestos em aberto' : view === 'missing' ? 'CTCs pendentes' : view === 'finished' ? 'Conferências concluídas' : 'Ocorrências'}<span className="section-count">{view === 'issues' ? issues.length : view === 'missing' ? missingRows.length : visible.length}</span></h2><Button variant="outline" size="sm" onClick={() => void exportPdf()} disabled={pdfBusy} className="text-[11px]">{pdfBusy ? <Loader2 size={12} className="animate-spin" /> : <FileText size={12} />}{pdfBusy ? 'Gerando PDF…' : 'PDF'}</Button></div>
           {view !== 'issues' && <div className="list-tools"><label className="search-wrap"><Search /><input aria-label="Buscar pré-manifesto" placeholder="Pré, motorista, placa, CTC, NF ou cliente" value={query} onChange={event => setQuery(event.target.value)} /></label><select aria-label="Filtrar pré-manifestos" className="filter-select" value={filter} onChange={event => setFilter(event.target.value)}><option value="all">Mais antigos primeiro</option><option value="new">Mais recentes</option><option value="old">Há 2 dias ou mais</option></select></div>}
           <div className="manifest-list">
             {view === 'missing' ? missingRows.length ? <div className="manifest-card overflow-x-auto"><table className="document-table pending-table"><thead><tr><th>CTC</th><th>Pré / Motorista</th><th>NF</th><th>Vols.</th><th>Status</th><th><span className="sr-only">Ações</span></th></tr></thead><tbody>{missingRows.map(({ manifest, doc, days }) => <tr key={doc.id}><td className="ctc-number">{doc.ctc}{doc.client && <span className="block text-muted-foreground text-[10px] font-sans mt-1">{doc.client}</span>}</td><td><span className="block font-semibold">{manifest.id}</span><span className="text-muted-foreground">{manifest.driver} · <span className="plate">{manifest.plate}</span></span></td><td className="text-muted-foreground">{doc.nf}</td><td>{doc.volumes}</td><td><span className={`status-badge ${days >= 2 ? 'badge-warning' : 'badge-pending'}`}><Clock3 size={10} />{days === 0 ? 'Pendente · hoje' : `Pendente há ${days} ${days === 1 ? 'dia' : 'dias'}`}</span></td><td><Button variant="ghost" size="icon" className="document-action text-muted-foreground" aria-label={`Marcar CTC ${doc.ctc} como recebido`} onClick={() => toggleDocument(manifest, doc.id, true)}><Check /></Button></td></tr>)}</tbody></table></div> : <div className="empty-state"><CheckCheck /><h3>Nada pendente</h3><p className="text-xs mt-2">{query ? 'Nenhum resultado para essa busca.' : 'Todos os CTCs cadastrados já foram conferidos.'}</p></div> : view === 'issues' ? issues.length ? issues.map(issue => <div className="manifest-card p-5 flex gap-3" key={issue.id}><TriangleAlert className="text-warning shrink-0" size={19} /><div><h3 className="font-semibold text-xs">{issue.title}</h3><p className="text-muted-foreground text-xs mt-2">{issue.description}</p><p className="text-muted-foreground text-[10px] mt-2">{issue.time}</p></div></div>) : <div className="empty-state"><ShieldCheck /><h3>Nenhuma ocorrência</h3><p className="text-xs mt-2">Tudo certo com as leituras desta sessão.</p></div> : visible.length ? <DriverManifestList manifests={visible} query={query} focusedManifest={focusedManifest} age={age} onToggleDocument={toggleDocument} /> : <div className="empty-state"><Inbox /><h3>{view === 'finished' ? 'Nenhum pré finalizado' : 'Nenhum pré pendente'}</h3><p className="text-xs mt-2">{query ? 'Nenhum resultado para essa busca.' : 'A lista está em dia.'}</p></div>}
           </div>
-        </section><aside className="activity-panel"><div className="activity-heading">Últimas atividades <span className="live-label"><i className="online-dot" />Ao vivo</span></div><div className="activity-date">Hoje</div><div className="activity-list">{activity.slice(0, 5).map(item => <div className="activity-item" key={item.id}><div className={`activity-icon ${item.warning ? 'warning' : ''}`}>{item.warning ? <TriangleAlert /> : item.title.includes('finalizado') ? <CheckCheck /> : item.title.includes('adicionado') ? <Plus /> : <Check />}</div><div><div className="activity-title">{item.title}</div><div className="activity-description">{item.description}</div><div className="activity-time">{item.time}</div></div></div>)}</div><div className="daily-summary"><h3>Resumo da sessão</h3><div className="summary-line"><span>Documentos recebidos</span><strong>{documents.filter(doc => doc.received).length}</strong></div><div className="summary-line"><span>Pré-manifestos concluídos</span><strong>{finished.length}</strong></div><div className="summary-line"><span>Ocorrências registradas</span><strong>{issues.length}</strong></div><div className="flex gap-2 text-success text-[10px] mt-5 items-center"><ShieldCheck size={13} />{issues.length ? 'Confira as ocorrências' : 'Nenhuma divergência nesta sessão'}</div></div></aside></div>
+        </section><aside className="activity-panel"><div className="activity-heading">Últimas atividades <span className="live-label"><i className="online-dot" />Ao vivo</span></div><div className="activity-date">Hoje</div><div className="activity-list">{activity.slice(0, 5).map(item => <div className="activity-item" key={item.id}><div className={`activity-icon ${item.warning ? 'warning' : ''}`}>{item.warning ? <TriangleAlert /> : item.title.includes('finalizado') ? <CheckCheck /> : item.title.includes('adicionado') ? <Plus /> : <Check />}</div><div><div className="activity-title">{item.title}</div><div className="activity-description">{item.description}</div><div className="activity-time">{item.time}</div></div></div>)}</div><div className="daily-summary"><h3>Resumo da sessão</h3><div className="summary-line"><span>Documentos recebidos</span><strong>{documents.filter(doc => doc.received).length}</strong></div><div className="summary-line"><span>Pré-manifestos concluídos</span><strong>{finished.length}</strong></div><div className="summary-line"><span>Ocorrências registradas</span><strong>{issues.length}</strong></div><div className="flex gap-2 text-success text-[10px] mt-5 items-center"><ShieldCheck size={13} />{issues.length ? 'Confira as ocorrências' : 'Nenhuma ocorrência nesta sessão'}</div></div></aside></div>
         <footer className="page-footer"><span className="flex gap-1.5 items-center"><ShieldCheck size={12} /> {accountEmail ? 'Cadastros na sua conta · confira o status de salvamento' : 'Dados temporários · reiniciam ao atualizar a página'}</span><span>confere. <span className="mx-2">/</span> Controle de retorno de documentos</span></footer>
       </div>
     </main>
     <div className="toast-stack" aria-live="polite">{notices.map(notice => <div className={`scan-toast ${notice.warning ? 'warning' : ''}`} key={notice.id}>{notice.warning ? <TriangleAlert className="text-warning shrink-0" size={17} /> : <CircleCheck className="text-success shrink-0" size={17} />}<span>{notice.text}</span></div>)}</div>
     <Dialog open={!!blocked} onOpenChange={open => { if (!open) setBlocked(null); }}><DialogContent><DialogHeader><div className="text-warning mb-2"><TriangleAlert size={30} /></div><DialogTitle>Este CTC precisa de atenção</DialogTitle><DialogDescription className="pt-2">{blocked}</DialogDescription></DialogHeader><p className="text-xs text-muted-foreground">Confira o documento e os CTCs cadastrados antes de continuar.</p><Button onClick={() => setBlocked(null)}>Entendido, continuar <ArrowRight /></Button></DialogContent></Dialog>
     {newOpen && <ManifestImportDialog open onOpenChange={open => { setNewOpen(open); if (!open) setPrefillId(''); }} manifests={manifests} onCreate={importDrafts} initialId={prefillId} />}
-    <Dialog open={divOpen} onOpenChange={setDivOpen}><DialogContent className="max-h-[90dvh] overflow-y-auto"><DialogHeader><DialogTitle>Registrar divergência</DialogTitle><DialogDescription>Informe os dados do CTC e descreva o problema. A IA aponta inconsistências e sugere a ação.</DialogDescription></DialogHeader><form onSubmit={submitDivergence} className="grid gap-4"><div className="form-grid">{([['ctc', 'CTC', 'numeric'], ['nf', 'Nota fiscal', 'text'], ['manifest', 'Pré-manifesto', 'text'], ['volumesExpected', 'Vols. esperados', 'numeric'], ['volumesReceived', 'Vols. recebidos', 'numeric']] as const).map(([k, l, m]) => <label className="form-field" key={k}>{l}<input inputMode={m} value={div[k]} onChange={e => setDiv(d => ({ ...d, [k]: e.target.value }))} /></label>)}</div><label className="form-field">Descrição da divergência<textarea required rows={4} className="div-text" placeholder="Ex.: chegaram 25 volumes, CTC indica 27; caixa avariada…" value={div.description} onChange={e => setDiv(d => ({ ...d, description: e.target.value }))} /></label><Button type="submit" disabled={divBusy || !div.description.trim()}>{divBusy ? <><Loader2 className="animate-spin" /> Analisando…</> : <><Sparkles /> Analisar divergência</>}</Button></form>{divResult?.error && <p className="text-destructive text-xs" role="alert">{divResult.error}</p>}{divResult?.text && <div className="ai-result">{divResult.text}</div>}</DialogContent></Dialog>
+
   </div>;
 }

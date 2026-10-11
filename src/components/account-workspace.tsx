@@ -90,7 +90,7 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
       if (mounted.current) {
         const collision = String((error as { message?: string }).message).includes('CONFERENCE_CONFLICT');
         setConflict(collision); setStatus('Alterações ainda não salvas');
-        setSaveError(collision ? 'Outro dispositivo salvou alterações. Exporte seu CSV antes de recarregar para recuperar a versão do banco.' : 'Não foi possível salvar. Mantenha esta página aberta e tente novamente.');
+        setSaveError(collision ? 'Outro dispositivo salvou alterações. Gere o PDF desta página antes de recarregar para guardar uma cópia das alterações locais.' : 'Não foi possível salvar. Mantenha esta página aberta e tente novamente.');
       }
     } finally { saving.current = false; }
   }

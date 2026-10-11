@@ -6,7 +6,7 @@ Controle de retorno de CTCs e pré-manifestos, com leitura de fotos pelo Gemini 
 
 - Login por e-mail e senha, com confirmação de e-mail pelo Supabase.
 - Cadastros, conferências, atividades e ocorrências ficam em `conference_states`, isolados por usuário com RLS.
-- A mesma conta pode carregar os cadastros em outros dispositivos. Alterações concorrentes são rejeitadas por revisão; a interface pede exportar o CSV e recarregar em caso de conflito.
+- A mesma conta pode carregar os cadastros em outros dispositivos. Alterações concorrentes são rejeitadas por revisão; a interface pede gerar um PDF para guardar uma cópia das alterações locais antes de recarregar em caso de conflito.
 - O status no topo confirma quando o banco terminou de salvar. Falhas mantêm os dados na tela e oferecem nova tentativa.
 - Fotos e rascunhos de importação não são armazenados no banco; fechar o formulário os descarta.
 - A configuração publicável do projeto está em `src/lib/supabase-config.ts`. `SUPABASE_URL` e `SUPABASE_PUBLISHABLE_KEY` podem substituí-la no servidor. Nunca use uma chave secret/service-role nessa configuração.
@@ -14,6 +14,8 @@ Controle de retorno de CTCs e pré-manifestos, com leitura de fotos pelo Gemini 
 - Migração: `supabase/migrations/20261011040000_conference.sql`. Testes transacionais de permissões: `supabase/tests/conference-security.sql` (fixtures desfeitas com rollback).
 
 ## Leitura e revisão
+
+- O PDF usa A4 na horizontal, agrupa os prés por motorista e mostra placa, CTC, NF, volumes, cliente/laboratório, destinatário e situação. Respeita a tela, a busca e o filtro selecionados; tabelas longas repetem os cabeçalhos, com numeração de páginas e horário de Brasília. A exportação CSV e a análise manual de divergências por IA foram removidas.
 
 - Lotes processam até duas fotos ao mesmo tempo, preservando a posição de cada arquivo. Uma única decodificação gera as imagens de leitura e a ampliação.
 - A leitura completa transcreve todas as linhas e nomes. Uma segunda leitura independente, na imagem orientada e ampliada, confere cabeçalho, placa, CTC, NF e volumes com o mesmo modelo de maior precisão. Só diferenças numéricas ou de cabeçalho acionam uma conferência adicional.
