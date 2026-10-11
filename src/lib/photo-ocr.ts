@@ -2,6 +2,7 @@ import { createWorker, PSM, type Worker } from 'tesseract.js';
 import { parsePhotoFields, photoScore, pageWords, tableCellRegions, type OcrPage, type PhotoFields } from './photo-fields';
 import { buildDigitTemplates, matchPrintedNumber } from './printed-digits';
 import { prepareForOcr, preparePrintedField, prepareTableCells, readGrayImage } from './image-prep';
+import { markLocalPhoto } from './local-photo';
 
 type Result = { text: string; pre: PhotoFields; milliseconds: number };
 type Angle = 0 | 90 | 180 | 270;
@@ -87,20 +88,22 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
 }
 
 /** One language download and worker initialization for the entire batch. */
-export async function readPrePhotos(files: File[], onResult: (index: number, result: Result | { error: string }) => void, progress: (index: number, message: string) => void = () => {}, signal?: AbortSignal, detailed = false) {
+export async function readPrePhotos(files: File[], onResult: (index: number, result: Result | { error: string; fallback?: boolean }) => void, progress: (index: number, message: string) => void = () => {}, signal?: AbortSignal, detailed = false) {
+  if (signal?.aborted || !files.length) return;
   progress(0, 'Preparando leitor…');
   const worker = await createWorker('por');
   let preferred: Angle | undefined;
   const cancel = () => { void worker.terminate().catch(() => {}); };
   signal?.addEventListener('abort', cancel, { once: true });
   try {
+    if (signal?.aborted) return;
     for (const [index, file] of files.entries()) {
       if (signal?.aborted) break;
       try {
         const result = await readWithWorker(worker, file, message => progress(index, message), preferred, detailed);
         if (signal?.aborted) break;
         if (result.pre.kind === 'pre') preferred = result.angle;
-        onResult(index, result);
+        onResult(index, { ...result, pre: markLocalPhoto(result.pre) });
       } catch { if (signal?.aborted) break; onResult(index, { error: 'Não foi possível ler esta foto. Tente outra foto ou preencha os dados.' }); }
     }
   } finally { signal?.removeEventListener('abort', cancel); await worker.terminate().catch(() => {}); }

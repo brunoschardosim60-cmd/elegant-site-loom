@@ -7,7 +7,7 @@ import type { ImportDraft } from '@/lib/manifest-import';
 
 const mocks = vi.hoisted(() => ({ read: vi.fn() }));
 vi.mock('@/lib/photo-reader.functions', () => ({ photoReaderStatus: vi.fn(async () => ({ configured: true })) }));
-vi.mock('@/lib/photo-ai', () => ({ readAiPhotos: mocks.read }));
+vi.mock('@/lib/photo-reader', () => ({ readPhotosWithFallback: mocks.read }));
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 beforeEach(() => {
   mocks.read.mockReset();
@@ -66,4 +66,21 @@ it('aborts an in-flight photo and does not refill a reopened draft with its late
   expect(screen.getByLabelText('Número do pré')).toHaveValue('');
   expect(screen.getByLabelText('NF-série')).toHaveValue('');
   expect(screen.queryByRole('img', { name: 'Documento enviado para conferência' })).not.toBeInTheDocument();
+});
+
+it('identifies a local fallback and never shows automatic double-read agreement for it', async () => {
+  mocks.read.mockImplementation(async (_files: File[], onResult: Parameters<typeof readAiPhotos>[1]) => {
+    const local = result('DI00000000001', '0000000001', '11-1');
+    onResult(0, { ...local, pre: { ...local.pre, readingSource: 'local', readingFallback: true, verification: { status: 'unavailable', checkedFields: 0, conflicts: 0 }, headerReview: ['Leitura de reserva: confira todas as linhas.'] } });
+  });
+  render(<ManifestImportDialog open onOpenChange={vi.fn()} manifests={[]} onCreate={() => ({ ok: true, manifests: [] })} />);
+  await waitFor(() => expect(screen.getByLabelText('Enviar várias fotos')).not.toBeDisabled());
+  fireEvent.change(screen.getByLabelText('Enviar várias fotos'), { target: { files: [new File(['a'], 'foto.jpg', { type: 'image/jpeg' })] } });
+  expect(await screen.findByText('Leitura local de reserva')).toBeInTheDocument();
+  expect(screen.getByText(/Os dados foram lidos no navegador, sem conferência pela IA/)).toBeInTheDocument();
+  expect(screen.queryByText('Cabeçalho e números conferidos')).not.toBeInTheDocument();
+  expect(screen.queryByText('A segunda leitura não foi concluída')).not.toBeInTheDocument();
+  expect(screen.getByLabelText('NF-série')).toHaveValue('11-1');
+  fireEvent.change(screen.getByLabelText('Leitor de fotos'), { target: { value: 'local' } });
+  expect(screen.getByText('Leitura local de reserva')).toBeInTheDocument();
 });

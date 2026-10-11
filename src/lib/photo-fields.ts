@@ -5,6 +5,8 @@ export type PhotoDocument = { ctc: string; nf: string; volumes: string; client?:
 export type PhotoFields = ReturnType<typeof parsePreText> & {
   kind: 'pre' | 'dacte' | 'unknown'; driver: string; documents: PhotoDocument[];
   rawPlate?: string; expectedRows?: number; totalVolumes?: number; headerReview?: string[];
+  readingSource?: 'gemini' | 'local';
+  readingFallback?: boolean;
   verification?: { status: 'matched' | 'review' | 'unavailable'; checkedFields: number; conflicts: number };
 };
 export type OcrPage = { text: string; blocks?: { paragraphs: { lines: { words: OcrWord[] }[] }[] }[] | null };

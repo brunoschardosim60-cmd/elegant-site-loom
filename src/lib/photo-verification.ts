@@ -17,8 +17,8 @@ export const verificationJsonSchema = {
     kind: { type: 'string', enum: ['pre', 'dacte', 'unknown'] },
     clockwiseRotation: { type: 'integer', enum: [0, 90, 180, 270] },
     ...Object.fromEntries(['id', 'plate', 'driver'].map(key => [key, { type: 'string' }])),
-    expectedRows: { type: 'integer', minimum: 0, maximum: 300 }, totalVolumes: { type: 'integer', minimum: 0, maximum: 1000000 },
-    documents: { type: 'array', maxItems: 300, items: { type: 'object', properties: {
+    expectedRows: { type: 'integer' }, totalVolumes: { type: 'integer' },
+    documents: { type: 'array', items: { type: 'object', properties: {
       ...Object.fromEntries(['ctc', 'nf', 'volumes'].map(key => [key, { type: 'string' }])),
     }, required: ['ctc', 'nf', 'volumes'] } },
   }, required: ['kind', 'clockwiseRotation', 'id', 'plate', 'driver', 'expectedRows', 'totalVolumes', 'documents'],

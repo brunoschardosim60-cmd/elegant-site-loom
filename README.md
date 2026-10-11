@@ -21,6 +21,8 @@ Controle de retorno de CTCs e pré-manifestos, com leitura de fotos pelo Gemini 
 - Limites: 45 segundos para a leitura completa, 25 por conferência compacta e 75 por foto. Uma falha HTTP transitória recebe uma nova tentativa; timeout não reinicia outra espera longa. Se apenas a conferência falhar, os dados já lidos continuam disponíveis com aviso.
 - Fechar ou parar cancela as requisições e impede resultados tardios de preencher outro formulário. O servidor combina o cancelamento com seu timeout e limita requisições por usuário autenticado.
 - Cotas do Google são distintas dos limites do aplicativo. O servidor diferencia bloqueios por minuto e por dia usando os metadados do Gemini. Ao esgotar a cota diária, o lote não inicia novas leituras e mantém os resultados concluídos; fotos na fila recebem o motivo do bloqueio. Uma leitura dupla normalmente consome duas solicitações por foto, e divergências podem consumir uma terceira. Confira o limite efetivo no Google AI Studio antes de usar lotes em produção.
+- Quando uma foto não obtém nenhum resultado válido do Gemini, o modo automático usa o leitor gratuito no navegador (Tesseract). Apenas essas fotos são relidas, em uma fila local que preserva os índices e usa um worker para o lote. Falhas de autenticação continuam pedindo novo login. Dados Gemini já obtidos são preservados se somente a conferência adicional falhar.
+- A reserva local não envia a foto a outra API nem tem cobrança por leitura. Ela exige baixar o leitor e o idioma no primeiro uso e pode ser mais lenta e menos precisa. Todo resultado local fica identificado e todos os CTCs recebem aviso de revisão; não há promessa de leitura completa nem cadastro automático.
 
 This project was built with [Lovable](https://lovable.dev).
 

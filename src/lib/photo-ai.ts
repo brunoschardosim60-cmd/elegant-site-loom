@@ -58,7 +58,7 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
         const full = await quotaAwareRequest({ data: { ...photoPayload(image), accessToken, mode: 'full' }, signal: photoSignal }, retryProgress);
         if (full.ok) completedPhoto = reconcilePhotoRead(full.pre, null);
         if (photoSignal.aborted) throw new Error('Leitura interrompida.');
-        if (!full.ok) { if (!signal?.aborted) onResult(index, { error: full.error }); continue; }
+        if (!full.ok) { if (!signal?.aborted) onResult(index, { error: full.error, ...('fallback' in full && full.fallback === false ? { fallback: false } : {}) }); continue; }
         const payload = photoPayload(image, full.rotation, full.pre.kind === 'pre');
         progress('2/2 · Conferindo placa, CTCs, NFs e volumes…');
         const check = await quotaAwareRequest({ data: { ...payload, accessToken, mode: 'verify' }, signal: photoSignal }, retryProgress);
