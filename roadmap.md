@@ -1,4 +1,4 @@
-# Conferência de documentos
-- [ ] Criar visual operacional e navegação de pendentes, finalizados e ocorrências.
-- [ ] Implementar leitura de CT-e, cadastro manual e conferência temporária, sem persistência.
-- [ ] Testar regras de leitura e conferir a tela no navegador.
+# Ajustes de layout
+- [ ] Melhorar seleção de uma foto, várias fotos e acompanhamento da leitura.
+- [ ] Organizar pré-manifestos abertos por motorista sem alterar a conferência.
+- [ ] Validar importação, formulários e layout no navegador e nos testes existentes.
