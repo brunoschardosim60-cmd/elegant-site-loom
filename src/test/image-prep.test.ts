@@ -35,4 +35,26 @@ describe('Photo preparation', () => {
     expect(await prepareForOcr(file)).toBe(file);
     expect(close).toHaveBeenCalledOnce();
   });
+  it('skips decoding an already canceled preparation', async () => {
+    const decode = vi.fn(); vi.stubGlobal('createImageBitmap', decode);
+    const abort = new AbortController(); abort.abort();
+    const file = new File(['image'], 'photo.jpg');
+    expect(await prepareForOcr(file, 0, 1400, abort.signal)).toBe(file);
+    expect(decode).not.toHaveBeenCalled();
+  });
+  it('closes a bitmap that arrives after cancellation without creating or encoding a canvas', async () => {
+    let finish!: (value: ImageBitmap) => void;
+    vi.stubGlobal('createImageBitmap', vi.fn(() => new Promise<ImageBitmap>(resolve => { finish = resolve; })));
+    const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext');
+    const encode = vi.spyOn(HTMLCanvasElement.prototype, 'toBlob');
+    const close = vi.fn(), abort = new AbortController();
+    const file = new File(['image'], 'photo.jpg');
+    const result = prepareForOcr(file, 270, 1400, abort.signal);
+    abort.abort();
+    finish({ width: 1000, height: 2000, close } as unknown as ImageBitmap);
+    expect(await result).toBe(file);
+    expect(close).toHaveBeenCalledOnce();
+    expect(getContext).not.toHaveBeenCalled();
+    expect(encode).not.toHaveBeenCalled();
+  });
 });

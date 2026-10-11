@@ -1,8 +1,10 @@
 /** Preserve small printed digits while resizing and rotating the photo. */
-export async function prepareForOcr(file: File, rotation: 0 | 90 | 180 | 270 = 0, maxSize = 3840): Promise<Blob> {
+export async function prepareForOcr(file: File, rotation: 0 | 90 | 180 | 270 = 0, maxSize = 3840, signal?: AbortSignal): Promise<Blob> {
   let bitmap: ImageBitmap | undefined;
   try {
+    signal?.throwIfAborted();
     bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    signal?.throwIfAborted();
     const longest = Math.max(bitmap.width, bitmap.height);
     const scale = Math.min(3, maxSize / longest);
     const canvas = document.createElement('canvas');
@@ -20,7 +22,10 @@ export async function prepareForOcr(file: File, rotation: 0 | 90 | 180 | 270 = 0
     ctx.translate(canvas.width / 2, canvas.height / 2);
     ctx.rotate(rotation * Math.PI / 180);
     ctx.drawImage(bitmap, -width / 2, -height / 2, width, height);
-    return await new Promise<Blob>(resolve => canvas.toBlob(b => resolve(b ?? file), 'image/png'));
+    signal?.throwIfAborted();
+    const prepared = await new Promise<Blob>(resolve => canvas.toBlob(b => resolve(b ?? file), 'image/png'));
+    signal?.throwIfAborted();
+    return prepared;
   } catch { return file; }
   finally { bitmap?.close(); }
 }

@@ -2,13 +2,14 @@ import { requestAiPhoto } from './photo-ai-request';
 import { getSupabaseClient } from './supabase-client';
 import { needsPhotoVerification, reconcilePhotoRead } from './photo-verification';
 import { getPhotoProviderBlock, rememberPhotoProviderBlock } from './photo-provider-block';
+import { detectPhotoOrientations, type PhotoAngle } from './photo-orientation';
 import type { PhotoFields } from './photo-fields';
 
 type ProviderFailure = Extract<Awaited<ReturnType<typeof requestAiPhoto>>, { ok: false }>;
 type ProviderStage = 'full' | 'verify';
 const temporaryBlocks = new Map<string, { until: number; result: ProviderFailure }>();
 const providerCooldown = 2 * 60 * 1000;
-// Full reading and verification use different models and quota buckets. The
+// Full reading and verification use different models and quota buckets.
 // This version also ignores quotas cached before Flash became the full reader
 // and Lite became the optional verifier; those stage buckets were reversed.
 const providerScope = (userId: string, stage: ProviderStage) => `${userId}:photo-model-stages-v3:${stage}`;
@@ -67,6 +68,13 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
     }
     return;
   }
+  const preparationStarted = performance.now();
+  let orientations: PhotoAngle[] = [];
+  try {
+    orientations = await detectPhotoOrientations(files, (index, message) => { if (!signal?.aborted) onProgress?.(index, message); }, signal);
+  } catch { /* An unavailable orientation worker must not prevent AI reading. */ }
+  if (signal?.aborted) return;
+  const preparationMilliseconds = performance.now() - preparationStarted;
   const getBlockedError = () => providerBlocks.full;
   const providerAwareRequest = async (input: Parameters<typeof requestAiPhoto>[0]) => {
     const stage: ProviderStage = input.data.mode === 'verify' ? 'verify' : 'full';
@@ -84,7 +92,8 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
     while (next < files.length && !signal?.aborted && !providerBlocks.full) {
       const index = next++;
       const file = files[index]!;
-      const start = performance.now();
+      const start = performance.now() - preparationMilliseconds;
+      const orientation = orientations[index] ?? 0;
       const deadline = AbortSignal.timeout(35000);
       const photoSignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
       let image: ImageBitmap | undefined;
@@ -94,7 +103,7 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
         progress('Lendo todas as linhas e laboratórios…');
         image = await createImageBitmap(file);
         if (photoSignal.aborted) throw new Error('Leitura interrompida.');
-        const full = await providerAwareRequest({ data: { ...photoPayload(image), accessToken, mode: 'full' }, signal: photoSignal });
+        const full = await providerAwareRequest({ data: { ...photoPayload(image, orientation, true), accessToken, mode: 'full' }, signal: photoSignal });
         if (full.ok) completedPhoto = { ...full.pre, verification: { status: 'single', checkedFields: 0, conflicts: 0 } };
         if (photoSignal.aborted) throw new Error('Leitura interrompida.');
         if (!full.ok) { if (!signal?.aborted) onResult(index, { error: full.error, ...('fallback' in full && full.fallback === false ? { fallback: false } : {}) }); continue; }
@@ -102,7 +111,7 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
         if (needsPhotoVerification(full.pre)) {
           if (!providerBlocks.verify) progress('Conferindo campos sinalizados em uma segunda leitura…');
           // Keep the whole page so every CTC retains its NF, quantities and names.
-          const check = providerBlocks.verify ?? await providerAwareRequest({ data: { ...photoPayload(image, full.rotation, full.pre.kind === 'pre'), accessToken, mode: 'verify' }, signal: photoSignal });
+          const check = providerBlocks.verify ?? await providerAwareRequest({ data: { ...photoPayload(image, (orientation + full.rotation) % 360, full.pre.kind === 'pre'), accessToken, mode: 'verify' }, signal: photoSignal });
           if (photoSignal.aborted) throw new Error('Leitura interrompida.');
           pre = reconcilePhotoRead(full.pre, check.ok ? check.check : null);
           completedPhoto = pre;

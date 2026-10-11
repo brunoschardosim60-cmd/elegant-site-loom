@@ -5,9 +5,10 @@ import { readAiPhotos } from '@/lib/photo-ai';
 import type { requestAiPhoto } from '@/lib/photo-ai-request';
 import { rememberPhotoProviderBlock } from '@/lib/photo-provider-block';
 
-const mocks = vi.hoisted(() => ({ request: vi.fn(), session: vi.fn(), decode: vi.fn(), rotate: vi.fn() }));
+const mocks = vi.hoisted(() => ({ request: vi.fn(), session: vi.fn(), decode: vi.fn(), rotate: vi.fn(), orient: vi.fn() }));
 vi.mock('@/lib/photo-ai-request', () => ({ requestAiPhoto: mocks.request }));
 vi.mock('@/lib/supabase-client', () => ({ getSupabaseClient: async () => ({ auth: { getSession: mocks.session } }) }));
+vi.mock('@/lib/photo-orientation', () => ({ detectPhotoOrientations: mocks.orient }));
 
 type RequestInput = Parameters<typeof requestAiPhoto>[0];
 type Response = Awaited<ReturnType<typeof requestAiPhoto>>;
@@ -49,6 +50,7 @@ async function pendingCall(name: string, mode: 'full' | 'verify', occurrence = 0
 beforeEach(() => {
   vi.clearAllMocks();
   bitmaps = []; calls = []; activeRequests = 0; peakRequests = 0;
+  mocks.orient.mockImplementation(async (files: File[]) => files.map(() => 0));
   mocks.session.mockResolvedValue({ data: { session: { user: { id: `photo-ai-test-${++testUser}` }, access_token: 'test-session-token-kept-out-of-results' } } });
   mocks.decode.mockImplementation(async (file: File) => { const image = bitmap(file.name); bitmaps.push(image); return image; });
   vi.stubGlobal('createImageBitmap', mocks.decode);
@@ -90,6 +92,7 @@ describe('AI photo import pipeline', () => {
     (await pendingCall('complete.jpg', 'full')).pending.resolve(responses(1, 0, false).full);
     await batch;
     expect(calls.map(call => call.input.data.mode)).toEqual(['full']);
+    expect(atob(calls[0]!.input.data.detail!)).toContain('800x780');
     expect(receive).toHaveBeenCalledOnce();
     const result = receive.mock.calls[0]![1];
     expect(result.pre.verification).toEqual({ status: 'single', checkedFields: 0, conflicts: 0 });
@@ -98,6 +101,75 @@ describe('AI photo import pipeline', () => {
     expect(JSON.parse(result.text).verification.status).toBe('single');
     expect(progress).toHaveBeenCalledOnce();
     expect(bitmaps[0]!.close).toHaveBeenCalledOnce();
+  });
+
+  it.each([[270, 90, 0], [180, 270, 90]] as const)('orients the complete image by %s degrees and combines the additional %s-degree correction for verification', async (orientation, additional, combined) => {
+    mocks.orient.mockResolvedValue([orientation]);
+    const receive = vi.fn(); const progress = vi.fn(); const result = responses(1, additional);
+    const batch = readAiPhotos([photo('oriented.jpg')], receive, progress);
+    const full = await pendingCall('oriented.jpg', 'full');
+    expect(atob(full.input.data.data)).toContain(orientation === 270 ? '1200x800' : '800x1200');
+    expect(atob(full.input.data.detail!)).toContain(orientation === 270 ? '1200x520' : '800x780');
+    full.pending.resolve(result.full);
+    const verification = await pendingCall('oriented.jpg', 'verify');
+    expect(atob(verification.input.data.data)).toContain(combined === 90 ? '1200x800' : '800x1200');
+    expect(atob(verification.input.data.detail!)).toContain(combined === 90 ? '1200x520' : '800x780');
+    verification.pending.resolve(result.verification);
+    await batch;
+    expect(mocks.rotate.mock.calls.map(call => call[0])).toEqual([orientation * Math.PI / 180, combined * Math.PI / 180]);
+    expect(calls.map(call => call.input.data.mode)).toEqual(['full', 'verify']);
+    expect(mocks.decode).toHaveBeenCalledOnce();
+    expect(receive.mock.calls[0]![1].pre.verification.status).toBe('matched');
+  });
+
+  it('waits for local orientation, suppresses its late callbacks after closing and sends no photo', async () => {
+    const orientation = deferred<(0 | 90 | 180 | 270)[]>();
+    mocks.orient.mockReturnValue(orientation.promise);
+    const abort = new AbortController(); const receive = vi.fn(); const progress = vi.fn();
+    const files = [photo('before-upload.jpg')];
+    const batch = readAiPhotos(files, receive, progress, abort.signal);
+    await waitFor(() => expect(mocks.orient).toHaveBeenCalledOnce());
+    const [selected, report, signal] = mocks.orient.mock.calls[0]!;
+    expect(selected).toBe(files); expect(signal).toBe(abort.signal);
+    report(0, 'Ajustando orientação da foto…');
+    expect(progress).toHaveBeenCalledWith(0, 'Ajustando orientação da foto…');
+    expect(mocks.decode).not.toHaveBeenCalled(); expect(mocks.request).not.toHaveBeenCalled();
+    abort.abort();
+    report(0, 'Callback tardio');
+    orientation.resolve([270]);
+    await batch;
+    expect(progress).toHaveBeenCalledOnce();
+    expect(receive).not.toHaveBeenCalled();
+    expect(mocks.decode).not.toHaveBeenCalled(); expect(mocks.request).not.toHaveBeenCalled();
+  });
+
+  it('reads the original orientation with detail when local orientation fails', async () => {
+    mocks.orient.mockRejectedValue(new Error('Orientation worker unavailable'));
+    const receive = vi.fn();
+    const batch = readAiPhotos([photo('orientation-failed.jpg')], receive, undefined);
+    const full = await pendingCall('orientation-failed.jpg', 'full');
+    expect(atob(full.input.data.data)).toContain('800x1200');
+    expect(atob(full.input.data.detail!)).toContain('800x780');
+    full.pending.resolve(responses(1, 0, false).full);
+    await batch;
+    expect(calls).toHaveLength(1);
+    expect(receive.mock.calls[0]![1].pre.verification.status).toBe('single');
+  });
+
+  it('includes local preparation in elapsed time while keeping the separate 35-second AI budget and one consistent full read', async () => {
+    let now = 100;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    mocks.orient.mockImplementation(async () => { now = 6100; return [270]; });
+    const receive = vi.fn();
+    const batch = readAiPhotos([photo('timed-preparation.jpg')], receive, undefined);
+    const full = await pendingCall('timed-preparation.jpg', 'full');
+    now = 7100;
+    full.pending.resolve(responses(1, 0, false).full);
+    await batch;
+    expect(receive.mock.calls[0]![1].milliseconds).toBe(7000);
+    expect(AbortSignal.timeout).toHaveBeenCalledWith(35000);
+    expect(calls.map(call => call.input.data.mode)).toEqual(['full']);
+    expect(receive.mock.calls[0]![1].pre.verification.status).toBe('single');
   });
 
   it('requests the second reading for missing names and recovers them by CTC identity', async () => {
@@ -343,6 +415,7 @@ describe('AI photo import pipeline', () => {
     const receive = vi.fn(); const progress = vi.fn();
     await readAiPhotos([photo('next-batch.jpg'), photo('next-batch-2.jpg')], receive, progress);
     expect(calls).toHaveLength(1);
+    expect(mocks.orient).toHaveBeenCalledOnce();
     expect(mocks.decode).toHaveBeenCalledOnce();
     expect(receive.mock.calls.map(([index, result]) => [index, 'error' in result])).toEqual([[0, true], [1, true]]);
     expect(progress).toHaveBeenCalledTimes(2);
