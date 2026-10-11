@@ -208,4 +208,33 @@ describe('photo reader with local fallback', () => {
     expect(receive.mock.calls[0]![1].error).toContain('IA: Gemini sem cota');
     expect(receive.mock.calls[0]![1].error).toContain('O leitor terminou sem retornar os dados desta foto');
   });
+
+  it('reports AI plus local queue time for fallback photos while leaving valid AI timing unchanged', async () => {
+    let clock = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    const valid = reading(2); valid.milliseconds = 19;
+    mocks.ai.mockImplementation(async (_files: File[], result: OnResult, progress: OnProgress) => {
+      clock = 1000; progress(0, 'Primeira leitura A');
+      clock = 2000; progress(1, 'Primeira leitura B');
+      clock = 3000; progress(2, 'Primeira leitura C');
+      clock = 20000; progress(0, 'Segunda etapa A');
+      clock = 46000; result(0, { error: 'Quota A' });
+      clock = 47000; result(1, { error: 'Quota B' });
+      clock = 48000; result(2, valid);
+      clock = 49000; result(3, { error: 'Foto na fila sem progresso anterior' });
+    });
+    mocks.local.mockImplementation(async (_files: File[], result: OnResult, progress: OnProgress) => {
+      clock = 63000; progress(0, 'OCR A'); clock = 64000; result(0, reading(0, 'local'));
+      clock = 80000; progress(1, 'OCR B'); clock = 82000; result(1, reading(1, 'local'));
+      clock = 99000; progress(2, 'OCR D'); clock = 100000; result(2, reading(3, 'local'));
+    });
+    const receive = vi.fn();
+    await readPhotosWithFallback(files, receive);
+    const results = new Map(receive.mock.calls.map(([index, result]) => [index, result]));
+    expect(results.get(0).milliseconds).toBe(63000);
+    expect(results.get(1).milliseconds).toBe(80000);
+    expect(results.get(3).milliseconds).toBe(51000);
+    expect(results.get(2)).toBe(valid);
+    expect(results.get(2).milliseconds).toBe(19);
+  });
 });

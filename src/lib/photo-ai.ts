@@ -31,17 +31,19 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
   if (signal?.aborted) return;
   const accessToken = session.access_token;
   let next = 0;
-  let dailyQuotaError = '';
-  const quotaAwareRequest = async (input: Parameters<typeof requestAiPhoto>[0], onRetry: () => void) => {
+  const providerBlock: { result?: Extract<Awaited<ReturnType<typeof requestAiPhoto>>, { ok: false }> } = {};
+  const getBlockedError = () => providerBlock.result;
+  const providerAwareRequest = async (input: Parameters<typeof requestAiPhoto>[0], onRetry: () => void) => {
     // A photo already being decoded can finish after another worker hits the
-    // daily limit. Preserve its valid data, but do not make doomed new calls.
-    if (dailyQuotaError) return { ok: false as const, error: dailyQuotaError, quota: 'daily' as const, retryable: false as const };
+    // daily limit or finds the provider unavailable. Preserve its valid data,
+    // but do not make doomed new calls after the request helper has retried.
+    if (providerBlock.result) return providerBlock.result;
     const result = await requestAiPhoto(input, onRetry);
-    if (!result.ok && 'quota' in result && result.quota === 'daily') dailyQuotaError = result.error;
+    if (!result.ok && (('quota' in result && result.quota === 'daily') || ('unavailable' in result && result.unavailable === true))) providerBlock.result = result;
     return result;
   };
   const worker = async () => {
-    while (next < files.length && !signal?.aborted && !dailyQuotaError) {
+    while (next < files.length && !signal?.aborted && !providerBlock.result) {
       const index = next++;
       const file = files[index]!;
       const start = performance.now();
@@ -55,13 +57,13 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
         progress('1/2 · Lendo todas as linhas e laboratórios…');
         image = await createImageBitmap(file);
         if (photoSignal.aborted) throw new Error('Leitura interrompida.');
-        const full = await quotaAwareRequest({ data: { ...photoPayload(image), accessToken, mode: 'full' }, signal: photoSignal }, retryProgress);
+        const full = await providerAwareRequest({ data: { ...photoPayload(image), accessToken, mode: 'full' }, signal: photoSignal }, retryProgress);
         if (full.ok) completedPhoto = reconcilePhotoRead(full.pre, null);
         if (photoSignal.aborted) throw new Error('Leitura interrompida.');
         if (!full.ok) { if (!signal?.aborted) onResult(index, { error: full.error, ...('fallback' in full && full.fallback === false ? { fallback: false } : {}) }); continue; }
         const payload = photoPayload(image, full.rotation, full.pre.kind === 'pre');
         progress('2/2 · Conferindo placa, CTCs, NFs e volumes…');
-        const check = await quotaAwareRequest({ data: { ...payload, accessToken, mode: 'verify' }, signal: photoSignal }, retryProgress);
+        const check = await providerAwareRequest({ data: { ...payload, accessToken, mode: 'verify' }, signal: photoSignal }, retryProgress);
         if (photoSignal.aborted) throw new Error('Leitura interrompida.');
         let pre = reconcilePhotoRead(full.pre, check.ok ? check.check : null);
         completedPhoto = pre;
@@ -69,7 +71,7 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
         if (check.ok && needsVerificationRecheck(pre)) {
           progress('Conferindo diferenças entre as leituras…');
           // Keep the whole page: a long table may extend beyond the detail crop.
-          const verification = await quotaAwareRequest({ data: { ...payload, accessToken, mode: 'verify' }, signal: photoSignal }, retryProgress);
+          const verification = await providerAwareRequest({ data: { ...payload, accessToken, mode: 'verify' }, signal: photoSignal }, retryProgress);
           if (photoSignal.aborted) throw new Error('Leitura interrompida.');
           if (verification.ok) pre = reconcileThreePhotoReads(full.pre, check.check, verification.check);
           else pre = { ...pre, headerReview: [...(pre.headerReview ?? []), `Conferência adicional: ${verification.error}`], verification: { status: 'review', checkedFields: pre.verification?.checkedFields ?? 0, conflicts: pre.verification?.conflicts ?? 0 } };
@@ -86,7 +88,8 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
         image?.close();
         // Resolve every waiting slot once, with its original index. Already
         // running workers retain their own result and can finish normally.
-        while (dailyQuotaError && next < files.length && !signal?.aborted) onResult(next++, { error: dailyQuotaError });
+        const blocked = getBlockedError();
+        while (blocked && next < files.length && !signal?.aborted) onResult(next++, { error: blocked.error, ...('fallback' in blocked && blocked.fallback === false ? { fallback: false } : {}) });
       }
     }
   };

@@ -14,7 +14,7 @@ beforeEach(() => {
   vi.stubGlobal('URL', class extends URL { static override createObjectURL = vi.fn(() => 'blob:photo'); static override revokeObjectURL = vi.fn(); });
 });
 const result = (id: string, ctc: string, nf: string) => ({
-  pre: { id, plate: 'ABC1D23', driver: 'MOTORISTA', kind: 'pre' as const, ctcs: [ctc], documents: [{ ctc, nf, volumes: '2', client: 'LAB', recipient: 'CLIENTE' }], expectedRows: 1, totalVolumes: 2, verification: { status: 'matched' as const, checkedFields: 6, conflicts: 0 } }, text: 'Documento', milliseconds: 3200,
+  pre: { id, plate: 'ABC1D23', driver: 'MOTORISTA', kind: 'pre' as const, readingSource: 'gemini' as const, ctcs: [ctc], documents: [{ ctc, nf, volumes: '2', client: 'LAB', recipient: 'CLIENTE' }], expectedRows: 1, totalVolumes: 2, verification: { status: 'matched' as const, checkedFields: 6, conflicts: 0 } }, text: 'Documento', milliseconds: 3200,
 });
 
 it('keeps each photo attached to its result while two reads finish out of order, and invalidates the agreement badge after editing', async () => {
@@ -83,4 +83,51 @@ it('identifies a local fallback and never shows automatic double-read agreement 
   expect(screen.getByLabelText('NF-série')).toHaveValue('11-1');
   fireEvent.change(screen.getByLabelText('Leitor de fotos'), { target: { value: 'local' } });
   expect(screen.getByText('Leitura local de reserva')).toBeInTheDocument();
+});
+
+it.each(['local fallback', 'partial Gemini', 'error'] as const)('preserves all previous Gemini rows and manual edits when rereading returns %s', async outcome => {
+  const original = result('DI00000000001', '0000000001', '11-1');
+  const secondRow = { ctc: '0000000002', nf: '22-1', volumes: '3', client: 'LAB 2', recipient: 'CLIENTE 2' };
+  mocks.read.mockImplementationOnce(async (_files: File[], onResult: Parameters<typeof readAiPhotos>[1]) => {
+    onResult(0, { ...original, pre: { ...original.pre, ctcs: ['0000000001', '0000000002'], documents: [...original.pre.documents, secondRow], expectedRows: 2, totalVolumes: 5 } });
+  });
+  let retryCallbacks: Parameters<typeof readAiPhotos> | undefined;
+  let finishRetry: (() => void) | undefined;
+  mocks.read.mockImplementationOnce((...args: Parameters<typeof readAiPhotos>) => { retryCallbacks = args; return new Promise<void>(resolve => { finishRetry = resolve; }); });
+  const create = vi.fn((_: ImportDraft[]) => ({ ok: true as const, manifests: [] }));
+  render(<ManifestImportDialog open onOpenChange={vi.fn()} manifests={[]} onCreate={create} />);
+  await waitFor(() => expect(screen.getByLabelText('Enviar várias fotos')).not.toBeDisabled());
+  fireEvent.change(screen.getByLabelText('Enviar várias fotos'), { target: { files: [new File(['a'], 'foto.jpg', { type: 'image/jpeg' })] } });
+  await screen.findByText('Cabeçalho e números conferidos');
+  fireEvent.change(screen.getByLabelText('NF-série'), { target: { value: '12-1' } });
+  fireEvent.change(screen.getByLabelText('Cliente / laboratório'), { target: { value: 'LAB CONFERIDO' } });
+  fireEvent.change(screen.getByLabelText('Motorista'), { target: { value: 'MOTORISTA CONFERIDO' } });
+  fireEvent.change(screen.getByLabelText('Placa'), { target: { value: 'ABC1D24' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Reler detalhes desta foto' }));
+  await waitFor(() => expect(retryCallbacks).toBeDefined());
+  expect(screen.getByRole('button', { name: 'Cadastrar pré' })).toBeDisabled();
+  await act(async () => {
+    if (outcome === 'error') retryCallbacks![1](0, { error: 'Leitor indisponível.' });
+    else {
+      const partial = result('DI00000000099', '0000000099', '99-9');
+      retryCallbacks![1](0, { ...partial, pre: { ...partial.pre, readingSource: outcome === 'local fallback' ? 'local' : 'gemini', readingFallback: outcome === 'local fallback', verification: { status: 'unavailable', checkedFields: 0, conflicts: 0 } } });
+    }
+    finishRetry!();
+  });
+  expect(screen.getByText('A nova tentativa não melhorou a leitura. Os dados anteriores foram preservados.')).toBeInTheDocument();
+  expect(screen.getByLabelText('Número do pré')).toHaveValue('DI00000000001');
+  expect(screen.getByLabelText('Placa')).toHaveValue('ABC1D24');
+  expect(screen.getByLabelText('Motorista')).toHaveValue('MOTORISTA CONFERIDO');
+  expect(screen.getByLabelText('NF-série')).toHaveValue('12-1');
+  expect(screen.getByLabelText('Cliente / laboratório')).toHaveValue('LAB CONFERIDO');
+  expect(screen.queryByText('Leitura local de reserva')).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText('Selecionar CTC'), { target: { value: '1' } });
+  expect(screen.getByLabelText('CTC')).toHaveValue('0000000002');
+  expect(screen.getByLabelText('NF-série')).toHaveValue('22-1');
+  expect(screen.getByLabelText('Volumes')).toHaveValue(3);
+  fireEvent.click(screen.getByRole('button', { name: 'Cadastrar pré' }));
+  expect(create).toHaveBeenCalledWith([expect.objectContaining({
+    id: 'DI00000000001', driver: 'MOTORISTA CONFERIDO', plate: 'ABC1D24', readingSource: 'gemini', edited: true,
+    rows: [expect.objectContaining({ ctc: '0000000001', nf: '12-1', client: 'LAB CONFERIDO' }), secondRow],
+  })]);
 });

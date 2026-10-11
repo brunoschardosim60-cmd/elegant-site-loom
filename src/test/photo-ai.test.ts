@@ -187,7 +187,7 @@ describe('AI photo import pipeline', () => {
     const receive = vi.fn(); const result = responses(1);
     const batch = readAiPhotos([photo('second-offline.jpg')], receive, undefined);
     (await pendingCall('second-offline.jpg', 'full')).pending.resolve(result.full);
-    (await pendingCall('second-offline.jpg', 'verify')).pending.resolve({ ok: false, retryable: true, error: 'Gemini indisponível (503). Tente novamente.' });
+    (await pendingCall('second-offline.jpg', 'verify')).pending.resolve({ ok: false, retryable: true, unavailable: true, error: 'Gemini indisponível (503). Tente novamente.' });
     await batch;
     expect(calls.map(call => call.input.data.mode)).toEqual(['full', 'verify']);
     expect(receive).toHaveBeenCalledOnce();
@@ -286,6 +286,49 @@ describe('AI photo import pipeline', () => {
     expect(calls).toHaveLength(4);
     expect(receive).toHaveBeenCalledTimes(3);
     expect(mocks.decode).toHaveBeenCalledTimes(2);
+    bitmaps.forEach(image => expect(image.close).toHaveBeenCalledOnce());
+  });
+
+  it('stops unavailable-provider calls for ten photos after the request helper returns, preserving a valid in-flight full read', async () => {
+    const receive = vi.fn();
+    const files = Array.from({ length: 10 }, (_, index) => photo(`provider-${index}.jpg`));
+    const batch = readAiPhotos(files, receive, undefined);
+    const failed = await pendingCall('provider-0.jpg', 'full');
+    const active = await pendingCall('provider-1.jpg', 'full');
+    const message = 'O Gemini está indisponível. A leitura local pode ser usada.';
+    // requestAiPhoto already owns the retry; the batch receives its final result.
+    failed.pending.resolve({ ok: false, error: message, unavailable: true, retryable: true } as Response);
+    await waitFor(() => expect(receive).toHaveBeenCalledTimes(9));
+    active.pending.resolve(responses(2).full);
+    await batch;
+    const results = new Map(receive.mock.calls.map(([index, result]) => [index, result]));
+    expect([...results.keys()].sort((a, b) => a - b)).toEqual(Array.from({ length: 10 }, (_, index) => index));
+    for (const index of [0, 2, 3, 4, 5, 6, 7, 8, 9]) expect(results.get(index)).toEqual({ error: message });
+    expect(results.get(1)).not.toHaveProperty('error');
+    expect(results.get(1).pre).toMatchObject({ id: 'DI000000002', verification: { status: 'unavailable' }, documents: [{ ctc: '0000000002', nf: '102-1', volumes: '3', client: 'LAB TESTE' }] });
+    expect(results.get(1).pre.headerReview).toContain(message);
+    expect(calls.map(call => [call.name, call.input.data.mode])).toEqual([['provider-0.jpg', 'full'], ['provider-1.jpg', 'full']]);
+    expect(peakRequests).toBe(2);
+    expect(activeRequests).toBe(0);
+    expect(receive).toHaveBeenCalledTimes(10);
+    expect(mocks.decode).toHaveBeenCalledTimes(2);
+    bitmaps.forEach(image => expect(image.close).toHaveBeenCalledOnce());
+  });
+
+  it('blocks queued calls when verification finds the provider unavailable without discarding either full read', async () => {
+    const receive = vi.fn(); const result = responses(1);
+    const batch = readAiPhotos([photo('verify-unavailable.jpg'), photo('in-flight.jpg'), photo('queued.jpg')], receive, undefined);
+    (await pendingCall('verify-unavailable.jpg', 'full')).pending.resolve(result.full);
+    (await pendingCall('verify-unavailable.jpg', 'verify')).pending.resolve({ ok: false, error: 'Gemini indisponível (503).', unavailable: true, retryable: true } as Response);
+    await waitFor(() => expect(receive).toHaveBeenCalledTimes(2));
+    (await pendingCall('in-flight.jpg', 'full')).pending.resolve(responses(2).full);
+    await batch;
+    const results = new Map(receive.mock.calls.map(([index, reading]) => [index, reading]));
+    expect(results.get(0).pre).toMatchObject({ id: 'DI000000001', verification: { status: 'unavailable' } });
+    expect(results.get(1).pre).toMatchObject({ id: 'DI000000002', verification: { status: 'unavailable' } });
+    expect(results.get(2)).toEqual({ error: 'Gemini indisponível (503).' });
+    expect(calls.map(call => [call.name, call.input.data.mode])).toEqual([['verify-unavailable.jpg', 'full'], ['in-flight.jpg', 'full'], ['verify-unavailable.jpg', 'verify']]);
+    expect(receive).toHaveBeenCalledTimes(3);
     bitmaps.forEach(image => expect(image.close).toHaveBeenCalledOnce());
   });
 

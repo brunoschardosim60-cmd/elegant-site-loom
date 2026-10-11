@@ -16,13 +16,13 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
     const { data: user, error: authError } = await auth.auth.getUser(data.accessToken);
     if (authError || !user.user) return { ok: false as const, fallback: false, error: 'Entre novamente na sua conta para ler fotos.' };
     const key = process.env['GEMINI_API_KEY'];
-    if (!key) return { ok: false as const, error: 'Configure GEMINI_API_KEY na Vercel para ativar a leitura por IA.' };
+    if (!key) return { ok: false as const, unavailable: true, error: 'Configure GEMINI_API_KEY na Vercel para ativar a leitura por IA.' };
     const { getRequest } = await import('@tanstack/react-start/server');
     const now = Date.now();
     for (const [ip, value] of requests) if (value.until < now) requests.delete(ip);
     const userId = user.user.id;
     const bucket = requests.get(userId) || { count: 0, until: now + 600000 };
-    if (bucket.count >= 80) return { ok: false as const, error: 'Muitas fotos seguidas. Aguarde alguns minutos.' };
+    if (bucket.count >= 80) return { ok: false as const, unavailable: true, error: 'Muitas fotos seguidas. Aguarde alguns minutos.' };
     bucket.count++; requests.set(userId, bucket);
     const compact = data.mode === 'survey' || data.mode === 'verify';
     let stage = 'connection';
@@ -44,9 +44,12 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
         // Log only a fixed category, never the provider's message or input data.
         const category = /schema|constraint/i.test(message) ? 'schema' : /thinking|resolution|output.?tokens/i.test(message) ? 'model-options' : /api.?key|expired|credential/i.test(message) ? 'credentials' : /image|inline.?data|mime|base64/i.test(message) ? 'image' : 'request';
         console.warn('ocr_provider_failure', { status: 400, category });
-        return { ok: false as const, retryable: false, error: 'O Gemini rejeitou a solicitação de leitura. A reserva local pode ser usada para esta foto.' };
+        return { ok: false as const, unavailable: category === 'schema' || category === 'model-options' || category === 'credentials', retryable: false, error: 'O Gemini rejeitou a solicitação de leitura. A reserva local pode ser usada para esta foto.' };
       }
-      if (!response.ok) return { ok: false as const, retryable: [500, 502, 503, 504].includes(response.status), error: response.status === 402 ? 'O Gemini está sem créditos. Confira o faturamento no Google AI Studio.' : response.status === 403 || response.status === 401 ? 'Chave do Gemini sem acesso. Confira a configuração na Vercel.' : `Gemini indisponível (${response.status}). Tente novamente.` };
+      if (!response.ok) {
+        console.warn('ocr_provider_failure', { status: response.status });
+        return { ok: false as const, unavailable: true, retryable: [500, 502, 503, 504].includes(response.status), error: response.status === 402 ? 'O Gemini está sem créditos. Confira o faturamento no Google AI Studio.' : response.status === 403 || response.status === 401 ? 'Chave do Gemini sem acesso. Confira a configuração na Vercel.' : `Gemini indisponível (${response.status}). Tente novamente.` };
+      }
       stage = 'provider-json';
       const result = await response.json() as { candidates?: { finishReason?: string; content?: { parts?: { text?: string; thought?: boolean }[] } }[] };
       const candidate = result.candidates?.[0];

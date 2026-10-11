@@ -6,6 +6,7 @@ const example = () => ({ kind: 'pre', id: 'DI00123456789', plate: 'ABC1D23', dri
 });
 it('retains all eleven rows, leading zeroes, NF, volumes and laboratories', () => {
   const pre = normalizeGeminiPhoto(example());
+  expect(pre.readingSource).toBe('gemini');
   expect(pre.documents).toHaveLength(11);
   expect(pre.documents[10]).toMatchObject({ ctc: '0000000011', nf: '110-1', volumes: '11', client: 'LAB 10', recipient: 'CLIENTE 10', review: [] });
 });

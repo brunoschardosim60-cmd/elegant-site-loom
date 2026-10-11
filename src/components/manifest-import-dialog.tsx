@@ -59,12 +59,20 @@ export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, 
     if (!files.length) { if (selected.length) setError('Envie uma foto em JPG, PNG ou WebP. Arquivos PDF ainda não são aceitos.'); return; }
     setError(selected.length !== files.length ? 'Alguns arquivos foram ignorados. Envie fotos em JPG, PNG ou WebP.' : '');
     setBusy(true); setSelectedRow(0); setPreviewRotation(0);
+    const previous = items.find(item => item.key === replaceKey);
+    const recoverable = previous?.status === 'read' && hasManualContent(previous);
+    const protectedAi = recoverable && previous.readingSource === 'gemini' && previous.rows.some(row => /^\d{10}$/.test(row.ctc));
+    const preservedMessage = 'A nova tentativa não melhorou a leitura. Os dados anteriores foram preservados.';
+    const preservePrevious = (item: Draft): Draft => previous ? {
+      ...previous, key: item.key, filename: item.filename, ...(item.file ? { file: item.file } : {}), ...(item.url ? { url: item.url } : {}),
+      headerReview: [...new Set([...(previous.headerReview ?? []), preservedMessage])], message: preservedMessage,
+      verification: previous.verification ? { ...previous.verification, status: 'review' } : undefined,
+    } : item;
     const additions: Draft[] = files.map(file => {
       const url = URL.createObjectURL(file); urls.current.push(url);
-      return { ...(items.find(item => item.key === replaceKey) ?? blank()), key: crypto.randomUUID(), file, filename: file.name, url, status: 'waiting', rows: [{ ctc: '', nf: '', volumes: '' }], verification: undefined, headerReview: undefined, readingSource: undefined, readingFallback: undefined, edited: false };
+      return { ...(previous ?? blank()), key: crypto.randomUUID(), file, filename: file.name, url, status: 'waiting', rows: previous?.rows ?? [{ ctc: '', nf: '', volumes: '' }], verification: undefined, headerReview: undefined, readingSource: undefined, readingFallback: undefined, edited: false };
     });
-    const replaced = items.find(item => item.key === replaceKey);
-    if (replaced) releaseUrl(replaced.url);
+    if (previous) releaseUrl(previous.url);
     const keep = items.filter(item => item.key !== replaceKey && (item.status !== 'manual' || hasManualContent(item)));
     setItems([...keep, ...additions]); setActive(keep.length);
     const abort = new AbortController(); controller.current = abort;
@@ -73,13 +81,19 @@ export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, 
       await readPrePhotos(files, (index, result) => {
         if (abort.signal.aborted) return;
         const key = additions[index]!.key;
-        setItems(list => list.map(item => item.key !== key ? item : 'error' in result ? { ...item, status: 'error', message: result.error } : {
+        setItems(list => list.map(item => {
+          if (item.key !== key) return item;
+          if ('error' in result) return recoverable ? preservePrevious(item) : { ...item, status: 'error', message: result.error };
+          const validCtcCount = result.pre.documents.length ? result.pre.documents.filter(row => /^\d{10}$/.test(row.ctc)).length : result.pre.ctcs.filter(ctc => /^\d{10}$/.test(ctc)).length;
+          if (protectedAi && ((result.pre.readingSource === 'local' && result.pre.readingFallback) || validCtcCount < previous.rows.filter(row => /^\d{10}$/.test(row.ctc)).length)) return preservePrevious(item);
+          return {
           ...item, id: result.pre.id || item.id, plate: result.pre.plate || item.plate, driver: result.pre.driver || item.driver, kind: result.pre.kind, status: 'read', text: result.text,
           rows: result.pre.documents.length ? result.pre.documents : result.pre.ctcs.length ? result.pre.ctcs.map(ctc => ({ ctc, nf: '', volumes: '' })) : [{ ctc: '', nf: '', volumes: '' }],
-          verification: result.pre.verification, headerReview: result.pre.headerReview, readingSource: result.pre.readingSource ?? (reader === 'local' ? 'local' : undefined), readingFallback: result.pre.readingFallback,
+          verification: result.pre.verification, headerReview: result.pre.headerReview, readingSource: result.pre.readingSource ?? (reader === 'local' ? 'local' : 'gemini'), readingFallback: result.pre.readingFallback,
           expectedRows: result.pre.expectedRows, totalVolumes: result.pre.totalVolumes,
           seconds: result.milliseconds / 1000,
           message: result.pre.documents.length ? `${result.pre.documents.length} CTC(s) identificados.` : 'Não identifiquei CTCs. Confira a foto e complete os campos.',
+          };
         }));
       }, (index, message) => {
         if (abort.signal.aborted) return;
@@ -90,7 +104,7 @@ export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, 
     finally {
       if (controller.current === abort) {
         setBusy(false); controller.current = null; setProgress('');
-        setItems(list => list.map(item => item.status === 'waiting' || item.status === 'reading' ? { ...item, status: 'error', message: 'Leitura interrompida. Tente ler esta foto novamente.' } : item));
+        setItems(list => list.map(item => item.status === 'waiting' || item.status === 'reading' ? recoverable && additions.some(addition => addition.key === item.key) ? preservePrevious(item) : { ...item, status: 'error', message: 'Leitura interrompida. Tente ler esta foto novamente.' } : item));
       }
     }
   }
