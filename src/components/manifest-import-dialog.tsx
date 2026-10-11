@@ -5,6 +5,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { ManifestDocumentsEditor } from './manifest-documents-editor';
 import type { Manifest } from '@/lib/conference';
 import type { ImportDraft, ImportOutcome } from '@/lib/manifest-import';
+import { photoReaderStatus } from '@/lib/photo-reader.functions';
 
 type Draft = ImportDraft & { key: string; filename: string; file?: File; url?: string; text?: string; status: 'manual' | 'waiting' | 'reading' | 'read' | 'error'; kind?: 'pre' | 'dacte' | 'unknown'; message?: string; seconds?: number };
 const blank = (): Draft => ({ key: crypto.randomUUID(), filename: 'Cadastro manual', status: 'manual', id: '', plate: '', driver: '', rows: [{ ctc: '', nf: '', volumes: '1' }] });
@@ -18,8 +19,11 @@ export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, 
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState('');
   const [error, setError] = useState('');
+  const [reader, setReader] = useState<'checking' | 'ai' | 'local'>('checking');
+  const [aiAvailable, setAiAvailable] = useState(false);
   const controller = useRef<AbortController | null>(null);
   const urls = useRef<string[]>([]);
+  useEffect(() => { let mounted = true; void photoReaderStatus().then(status => { if (mounted) { setAiAvailable(status.configured); setReader(status.configured ? 'ai' : 'local'); } }).catch(() => { if (mounted) setReader('local'); }); return () => { mounted = false; }; }, []);
   useEffect(() => { if (open && !items.length) setItems([blank()]); }, [open, items.length]);
   useEffect(() => { if (open && initialId) { setItems(list => [...list.filter(item => item.status !== 'manual' || item.id), { ...blank(), id: initialId }]); setActive(items.length && items[0]?.id ? items.length : 0); setSelectedRow(0); } }, [open, initialId]);
   useEffect(() => () => { controller.current?.abort(); urls.current.forEach(url => URL.revokeObjectURL(url)); }, []);
@@ -27,7 +31,7 @@ export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, 
   const update = (change: Partial<Draft>) => setItems(list => list.map((item, i) => i === active ? { ...item, ...change } : item));
   async function readFiles(input: FileList | File[] | null, detailed = false, replaceKey?: string) {
     const files = Array.from(input ?? []).filter(file => file.type.startsWith('image/'));
-    if (!files.length || busy) return;
+    if (!files.length || busy || reader === 'checking') return;
     setError(''); setBusy(true); setSelectedRow(0);
     const additions: Draft[] = files.map(file => {
       const url = URL.createObjectURL(file); urls.current.push(url);
@@ -37,16 +41,18 @@ export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, 
     setItems([...keep, ...additions]); setActive(keep.length);
     const abort = new AbortController(); controller.current = abort;
     try {
-      const { readPrePhotos } = await import('@/lib/photo-ocr');
+      const readPrePhotos = reader === 'ai' ? (await import('@/lib/photo-ai')).readAiPhotos : (await import('@/lib/photo-ocr')).readPrePhotos;
       await readPrePhotos(files, (index, result) => {
+        if (abort.signal.aborted) return;
         const key = additions[index]!.key;
         setItems(list => list.map(item => item.key !== key ? item : 'error' in result ? { ...item, status: 'error', message: result.error } : {
           ...item, id: result.pre.id || item.id, plate: result.pre.plate || item.plate, driver: result.pre.driver || item.driver, kind: result.pre.kind, status: 'read', text: result.text,
           rows: result.pre.documents.length ? result.pre.documents : result.pre.ctcs.length ? result.pre.ctcs.map(ctc => ({ ctc, nf: '', volumes: '' })) : [{ ctc: '', nf: '', volumes: '' }],
           seconds: result.milliseconds / 1000,
-          message: result.pre.documents.length ? `${result.pre.documents.length} CTC(s) lidos. Revise os campos sinalizados.` : 'Não identifiquei CTCs. Confira a foto e complete os campos.',
+          message: result.pre.documents.length ? `${result.pre.documents.length} CTC(s) identificados. Revise os campos sinalizados em cada CTC.` : 'Não identifiquei CTCs. Confira a foto e complete os campos.',
         }));
       }, (index, message) => {
+        if (abort.signal.aborted) return;
         setProgress(`Foto ${index + 1} de ${files.length} · ${message}`);
         setItems(list => list.map(item => item.key === additions[index]!.key ? { ...item, status: 'reading' } : item));
       }, abort.signal, detailed);
@@ -64,10 +70,13 @@ export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, 
     if (!remaining.length) onOpenChange(false);
   }
   const waiting = draft?.status === 'waiting' || draft?.status === 'reading';
+  const filled = draft?.rows.filter(row => row.ctc && row.nf && Number(row.volumes) > 0 && row.client && row.recipient).length ?? 0;
   const targets = [...manifests.map(item => ({ id: item.id, driver: item.driver })), ...items.filter(item => item.kind === 'pre' && item.id && !manifests.some(m => m.id === item.id)).map(item => ({ id: item.id, driver: item.driver }))];
   return <Dialog open={open} onOpenChange={value => { if (!value) controller.current?.abort(); onOpenChange(value); }}><DialogContent className="max-h-[92dvh] overflow-y-auto"><DialogHeader>
     <DialogTitle>Importar pré-manifestos</DialogTitle><DialogDescription>Selecione as fotos dos seus prés de uma vez. A leitura rápida preenche os dados; revise os campos sinalizados.</DialogDescription>
   </DialogHeader>
+    <label className="form-field">Leitor<select aria-label="Leitor de fotos" disabled={busy || reader === 'checking'} value={reader} onChange={e => setReader(e.target.value as 'ai' | 'local')}><option value="checking" disabled>Verificando leitor…</option><option value="ai" disabled={!aiAvailable}>Gemini · leitura por IA{!aiAvailable && ' (chave não configurada)'}</option><option value="local">Leitura no navegador</option></select></label>
+    <p className="text-xs text-muted-foreground">{reader === 'ai' ? 'As fotos são enviadas ao Google Gemini para extrair todas as linhas. Revise os dados antes de cadastrar.' : reader === 'checking' ? 'Verificando disponibilidade da IA…' : 'Leitura local pode deixar números pequenos incompletos. A IA exige GEMINI_API_KEY no servidor.'}</p>
     <div className="grid grid-cols-2 gap-2">
       <label className="photo-pick"><input type="file" accept="image/*" multiple className="sr-only" disabled={busy} aria-label="Enviar várias fotos" onChange={event => { void readFiles(event.target.files); event.target.value = ''; }} /><Images size={20} /><span>Enviar fotos<small>Selecione todos os prés</small></span></label>
       <label className="photo-pick"><input type="file" accept="image/*" capture="environment" className="sr-only" disabled={busy} aria-label="Tirar foto" onChange={event => { void readFiles(event.target.files); event.target.value = ''; }} /><Camera size={20} /><span>Tirar foto<small>Adicionar à lista</small></span></label>
@@ -82,6 +91,7 @@ export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, 
         <label className="form-field">Placa<input aria-label="Placa" disabled={waiting} value={draft.plate} maxLength={8} placeholder="ABC1D23" onChange={event => update({ plate: event.target.value })} /></label>
         <label className="form-field col-span-2">Motorista<input aria-label="Motorista" disabled={waiting} value={draft.driver} onChange={event => update({ driver: event.target.value })} /></label>
       </div>}
+      {draft.status === 'read' && <p className="text-xs rounded-md bg-primary/5 p-3" role="status">{filled} de {draft.rows.length} CTC(s) com NF, volumes, cliente e destinatário preenchidos. Use Próximo CTC para conferir todas as linhas.</p>}
       <ManifestDocumentsEditor rows={draft.rows} onChange={rows => update({ rows })} selectedIndex={selectedRow} onSelect={setSelectedRow} disabled={waiting} />
       {draft.message && <p className="text-xs text-muted-foreground" role="status">{draft.message}{draft.seconds !== undefined && ` (${draft.seconds.toFixed(1)} s)`}</p>}
       {draft.file && <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => { void readFiles([draft.file!], true, draft.key); }}>Reler detalhes desta foto</Button>}

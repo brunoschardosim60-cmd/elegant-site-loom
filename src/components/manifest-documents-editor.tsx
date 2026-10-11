@@ -1,4 +1,4 @@
-import { Plus, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 export type ManifestDraftRow = { ctc: string; nf: string; volumes: string; client?: string; recipient?: string; review?: string[] };
@@ -15,6 +15,10 @@ export function ManifestDocumentsEditor({ rows, onChange, selectedIndex, onSelec
       <select aria-label="Selecionar CTC" className="rounded-md border border-border bg-background p-2" disabled={disabled} value={index} onChange={event => onSelect(Number(event.target.value))}>
         {rows.map((item, i) => <option key={i} value={i}>{i + 1}. {item.ctc || 'Novo CTC'}</option>)}
       </select>
+      <div className="flex justify-between gap-2 mt-2">
+        <Button type="button" variant="outline" size="sm" disabled={disabled || index === 0} onClick={() => onSelect(index - 1)}><ChevronLeft />CTC anterior</Button>
+        <Button type="button" variant="outline" size="sm" disabled={disabled || index === rows.length - 1} onClick={() => onSelect(index + 1)}>Próximo CTC<ChevronRight /></Button>
+      </div>
     </label>}
     <div className="new-document-row">
       {(['ctc', 'nf', 'volumes'] as const).map(field => <label className="form-field" key={field}>{field === 'ctc' ? 'CTC' : field === 'nf' ? 'NF-série' : 'Vols.'}
