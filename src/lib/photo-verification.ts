@@ -41,6 +41,10 @@ const validPlate = (value: string) => /^[A-Z]{3}\d[A-Z0-9]\d{2}$/.test(value);
 const driverKey = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().replace(/\s+/g, ' ').toUpperCase();
 const unique = (values: string[]) => [...new Set(values)];
 const plateText = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+// Model-written notes may mention several fields. Clear only the exact numeric
+// notices emitted by our normalizers; a confirmed NF cannot resolve a name.
+const nfNotices = new Set(['nf', 'confira nf e série']);
+const volumeNotices = new Set(['volumes', 'confira volumes']);
 function canRecoverCell(primary: string, secondary: string, field: 'nf' | 'volumes'): boolean {
   if (!primary || !/\d/.test(primary)) return true;
   if (field === 'volumes') return primary.match(/\d+/g)?.length === 1 && Number(primary.match(/\d+/)?.[0]) === Number(secondary);
@@ -207,11 +211,11 @@ export function reconcileThreePhotoReads(full: PhotoFields, firstCheck: unknown,
     if (!a || !b) continue;
     if (validNf(a.nf) && validNf(b.nf) && a.nf.trim() === b.nf.trim()) {
       row.nf = b.nf.trim();
-      row.review = row.review!.filter(message => !/^(?:Confira\s+)?NF(?:\b|\s|$)/i.test(message));
+      row.review = row.review!.filter(message => !nfNotices.has(message.trim().toLowerCase()));
     }
     if (validVolume(a.volumes) && validVolume(b.volumes) && a.volumes.trim() === b.volumes.trim()) {
       row.volumes = b.volumes.trim();
-      row.review = row.review!.filter(message => !/^(?:Confira\s+)?volumes(?:\b|\s|$)/i.test(message));
+      row.review = row.review!.filter(message => !volumeNotices.has(message.trim().toLowerCase()));
     }
   }
   if (first.data.expectedRows > 0 && first.data.expectedRows === final.data.expectedRows) result.expectedRows = final.data.expectedRows;

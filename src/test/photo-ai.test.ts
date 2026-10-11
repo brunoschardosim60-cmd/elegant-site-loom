@@ -24,6 +24,8 @@ let activeRequests: number;
 let peakRequests: number;
 const photo = (name: string) => new File(['fake image'], name, { type: 'image/jpeg' });
 const bitmap = (name: string): FakeBitmap => ({ name, width: 800, height: 1200, close: vi.fn() }) as unknown as FakeBitmap;
+const quotaMessages = { daily: 'A cota diária do Gemini terminou. Tente novamente amanhã.', minute: 'Limite de leitura por minuto atingido.', unknown: 'Limite do Gemini atingido.' };
+const quotaFailure = (quota: keyof typeof quotaMessages) => ({ ok: false as const, error: quotaMessages[quota], quota, retryable: false as const });
 
 function responses(number: number, rotation: 0 | 90 | 180 | 270 = 0) {
   const check = {
@@ -216,6 +218,95 @@ describe('AI photo import pipeline', () => {
     expect(JSON.parse(reading.text).verification.status).toBe('review');
     expect(bitmaps[0]!.close).toHaveBeenCalledOnce();
     expect(activeRequests).toBe(0);
+  });
+
+  it('stops queued photos on a daily full-read limit while preserving completed and in-flight results', async () => {
+    const receive = vi.fn();
+    const batch = readAiPhotos([photo('ready.jpg'), photo('limited.jpg'), photo('in-flight.jpg'), photo('queued.jpg')], receive, undefined);
+    const ready = responses(1); const inFlight = responses(3);
+    (await pendingCall('ready.jpg', 'full')).pending.resolve(ready.full);
+    (await pendingCall('ready.jpg', 'verify')).pending.resolve(ready.verification);
+    const active = await pendingCall('in-flight.jpg', 'full');
+    expect(receive.mock.calls[0]![1].pre.verification.status).toBe('matched');
+    (await pendingCall('limited.jpg', 'full')).pending.resolve(quotaFailure('daily'));
+    await waitFor(() => expect(receive.mock.calls.map(call => call[0])).toEqual([0, 1, 3]));
+    active.pending.resolve(inFlight.full);
+    await batch;
+    const results = new Map(receive.mock.calls.map(([index, result]) => [index, result]));
+    expect(results.get(0).pre.verification.status).toBe('matched');
+    expect(results.get(1)).toEqual({ error: quotaMessages.daily });
+    expect(results.get(3)).toEqual({ error: quotaMessages.daily });
+    expect(results.get(2)).not.toHaveProperty('error');
+    expect(results.get(2).pre).toMatchObject({ id: 'DI000000003', verification: { status: 'unavailable' }, documents: [{ ctc: '0000000003', nf: '103-1', volumes: '3' }] });
+    expect(results.get(2).pre.headerReview).toContain(quotaMessages.daily);
+    expect(calls).toHaveLength(4);
+    expect(calls.some(call => call.name === 'queued.jpg')).toBe(false);
+    expect(calls.some(call => call.name === 'in-flight.jpg' && call.input.data.mode === 'verify')).toBe(false);
+    expect(receive).toHaveBeenCalledTimes(4);
+    bitmaps.forEach(image => expect(image.close).toHaveBeenCalledOnce());
+    expect(activeRequests).toBe(0);
+  });
+
+  it('keeps a full read when daily quota is reached by its second read and resolves every waiting slot', async () => {
+    const receive = vi.fn();
+    const batch = readAiPhotos([photo('check-limit.jpg'), photo('in-flight.jpg'), photo('queued.jpg')], receive, undefined);
+    (await pendingCall('check-limit.jpg', 'full')).pending.resolve(responses(1).full);
+    (await pendingCall('check-limit.jpg', 'verify')).pending.resolve(quotaFailure('daily'));
+    await waitFor(() => expect(receive).toHaveBeenCalledTimes(2));
+    (await pendingCall('in-flight.jpg', 'full')).pending.resolve(responses(2).full);
+    await batch;
+    const results = new Map(receive.mock.calls.map(([index, result]) => [index, result]));
+    expect(results.get(0)).not.toHaveProperty('error');
+    expect(results.get(0).pre).toMatchObject({ id: 'DI000000001', verification: { status: 'unavailable' }, documents: [{ nf: '101-1', volumes: '3' }] });
+    expect(results.get(0).pre.headerReview).toContain(quotaMessages.daily);
+    expect(results.get(1).pre.headerReview).toContain(quotaMessages.daily);
+    expect(results.get(2)).toEqual({ error: quotaMessages.daily });
+    expect(calls.map(call => [call.name, call.input.data.mode])).toEqual([['check-limit.jpg', 'full'], ['in-flight.jpg', 'full'], ['check-limit.jpg', 'verify']]);
+    expect(receive).toHaveBeenCalledTimes(3);
+    expect(mocks.decode).toHaveBeenCalledTimes(2);
+    bitmaps.forEach(image => expect(image.close).toHaveBeenCalledOnce());
+  });
+
+  it('retains disagreements when daily quota stops a third reading, without leaving queued photos pending', async () => {
+    const receive = vi.fn(); const result = responses(1);
+    const batch = readAiPhotos([photo('third-limit.jpg'), photo('in-flight.jpg'), photo('queued.jpg')], receive, undefined);
+    const conflicting: Response = { ...result.verification, check: { ...result.verification.check!, documents: [{ ctc: '0000000001', nf: '999-1', volumes: '3' }] } };
+    (await pendingCall('third-limit.jpg', 'full')).pending.resolve(result.full);
+    (await pendingCall('third-limit.jpg', 'verify')).pending.resolve(conflicting);
+    (await pendingCall('third-limit.jpg', 'verify', 1)).pending.resolve(quotaFailure('daily'));
+    await waitFor(() => expect(receive).toHaveBeenCalledTimes(2));
+    (await pendingCall('in-flight.jpg', 'full')).pending.resolve(responses(2).full);
+    await batch;
+    const results = new Map(receive.mock.calls.map(([index, reading]) => [index, reading]));
+    expect(results.get(0)).not.toHaveProperty('error');
+    expect(results.get(0).pre).toMatchObject({ verification: { status: 'review', conflicts: 1 }, documents: [{ ctc: '0000000001', nf: '101-1', volumes: '3' }] });
+    expect(results.get(0).pre.headerReview).toContain(`Conferência adicional: ${quotaMessages.daily}`);
+    expect(results.get(0).pre.documents[0].review).toContain('NF e série divergente no CTC 0000000001: 101-1 / 999-1.');
+    expect(results.get(2)).toEqual({ error: quotaMessages.daily });
+    expect(calls).toHaveLength(4);
+    expect(receive).toHaveBeenCalledTimes(3);
+    expect(mocks.decode).toHaveBeenCalledTimes(2);
+    bitmaps.forEach(image => expect(image.close).toHaveBeenCalledOnce());
+  });
+
+  it.each(['minute', 'unknown'] as const)('continues queued photos after a %s quota response without retrying the failed photo', async quota => {
+    const receive = vi.fn();
+    const batch = readAiPhotos([photo('limited.jpg'), photo('other.jpg'), photo('queued.jpg')], receive, undefined);
+    (await pendingCall('limited.jpg', 'full')).pending.resolve(quotaFailure(quota));
+    const queued = await pendingCall('queued.jpg', 'full');
+    (await pendingCall('other.jpg', 'full')).pending.resolve(responses(2).full);
+    (await pendingCall('other.jpg', 'verify')).pending.resolve(responses(2).verification);
+    queued.pending.resolve(responses(3).full);
+    (await pendingCall('queued.jpg', 'verify')).pending.resolve(responses(3).verification);
+    await batch;
+    const results = new Map(receive.mock.calls.map(([index, result]) => [index, result]));
+    expect(results.get(0)).toEqual({ error: quotaMessages[quota] });
+    expect(results.get(1).pre.verification.status).toBe('matched');
+    expect(results.get(2).pre.verification.status).toBe('matched');
+    expect(calls.filter(call => call.name === 'limited.jpg')).toHaveLength(1);
+    expect(calls).toHaveLength(5);
+    expect(receive).toHaveBeenCalledTimes(3);
+    bitmaps.forEach(image => expect(image.close).toHaveBeenCalledOnce());
   });
 
   it('requires a signed-in session before decoding or sending photos', async () => {

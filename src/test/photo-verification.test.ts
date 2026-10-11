@@ -177,4 +177,13 @@ describe('independent photo verification', () => {
     const check = second(); check.kind = 'dacte'; check.expectedRows = 0; check.totalVolumes = 0;
     expect(meta(reconcilePhotoRead(full, check)).verification.status).toBe('matched');
   });
+  it('keeps composite name doubts when numeric consensus clears recognized NF/volume notices', () => {
+    const full = primary();
+    const nameDoubts = ['NF e destinatário ilegíveis', 'Volumes e cliente/laboratório precisam ser conferidos'];
+    full.documents[0]!.review = [...nameDoubts, 'NF', 'Confira NF e série', 'volumes', 'Confira volumes'];
+    const result = meta(reconcileThreePhotoReads(full, second(), second()));
+    expect(result.documents[0]!.review).toEqual(nameDoubts);
+    expect(result.documents[0]).toMatchObject({ client: 'LAB A', recipient: 'CLIENTE A' });
+    expect(result.verification.status).toBe('review');
+  });
 });

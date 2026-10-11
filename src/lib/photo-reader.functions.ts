@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { normalizeGeminiPhoto, photoJsonSchema, photoPrompt } from './gemini-photo';
 import { verificationJsonSchema, verificationPrompt, verificationSchema } from './photo-verification';
 import { supabaseConfig } from './supabase-config';
+import { photoQuotaFailure } from './photo-quota';
 const requests = new Map<string, { count: number; until: number }>();
 
 export const photoReaderStatus = createServerFn({ method: 'GET' }).handler(async () => ({ configured: Boolean(process.env['GEMINI_API_KEY']) }));
@@ -36,7 +37,8 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
         }),
       });
       const response = await request(data.orientationOnly || data.mode === 'survey' ? 'gemini-3.5-flash-lite' : process.env['GEMINI_OCR_MODEL'] || 'gemini-3.8-flash');
-      if (!response.ok) return { ok: false as const, retryable: [500, 502, 503, 504].includes(response.status), error: response.status === 429 ? 'Limite do Gemini atingido. Aguarde e tente novamente.' : response.status === 403 || response.status === 401 ? 'Chave do Gemini sem acesso. Confira a configuração na Vercel.' : `Gemini indisponível (${response.status}). Tente novamente.` };
+      if (response.status === 429) return photoQuotaFailure(await response.json().catch(() => null));
+      if (!response.ok) return { ok: false as const, retryable: [500, 502, 503, 504].includes(response.status), error: response.status === 402 ? 'O Gemini está sem créditos. Confira o faturamento no Google AI Studio.' : response.status === 403 || response.status === 401 ? 'Chave do Gemini sem acesso. Confira a configuração na Vercel.' : `Gemini indisponível (${response.status}). Tente novamente.` };
       stage = 'provider-json';
       const result = await response.json() as { candidates?: { finishReason?: string; content?: { parts?: { text?: string; thought?: boolean }[] } }[] };
       const candidate = result.candidates?.[0];
