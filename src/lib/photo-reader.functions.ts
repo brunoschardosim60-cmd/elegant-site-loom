@@ -33,7 +33,9 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
       const result = await response.json() as { status?: string; steps?: { type: string; content?: { type: string; text?: string }[] }[] };
       if (result.status !== 'completed') return { ok: false as const, error: 'A leitura ficou incompleta. Tente novamente com uma foto por vez.' };
       const output = result.steps?.filter(s => s.type === 'model_output').flatMap(s => s.content ?? []).filter(c => c.type === 'text').map(c => c.text || '').join('') || '';
-      const pre = normalizeGeminiPhoto(JSON.parse(output));
-      return { ok: true as const, pre, text: JSON.stringify(pre, null, 2) };
+      const parsed = JSON.parse(output);
+      const pre = normalizeGeminiPhoto(parsed);
+      const rotation = [90, 180, 270].includes(parsed.clockwiseRotation) ? parsed.clockwiseRotation as number : 0;
+      return { ok: true as const, pre, rotation, text: JSON.stringify(pre, null, 2) };
     } catch { return { ok: false as const, error: 'Não foi possível concluir a leitura por IA. Tente novamente; nenhum cadastro foi feito.' }; }
   });
