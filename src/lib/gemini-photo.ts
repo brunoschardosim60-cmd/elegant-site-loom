@@ -25,6 +25,15 @@ export const photoPrompt = `Transcreva esta foto de documento de transporte bras
 Pré-manifesto Luft: id é DI seguido dos dígitos sob o código de barras. Preserve todos os zeros. plate e driver vêm de PLACA/MOTORISTA; exclua código numérico do motorista após o nome. Cada linha tem CTC (identificador interno de exatamente 10 dígitos), Remetente (client/laboratório), Destinatário (recipient), NF-Série (nf, preserve hífen e série) e Vols (volumes, inteiro em string). Não confunda Vols com Peso, Pedido, NF ou total do cabeçalho. Não junte linhas diferentes. Copie nomes como impressos, inclusive abreviações. expectedRows é o total CTCs do cabeçalho; totalVolumes é VOLS do cabeçalho, zero se ausente. Confira a quantidade de linhas e a soma de volumes; revise a imagem se divergirem.
 DACTE: kind=dacte, CTC é o ID interno de 10 dígitos no quadro superior CT-E, NÃO o número fiscal abaixo nem trecho de chave de 44 dígitos. NF vem de documentos originários, volumes de QTD.VOL. Remetente é client e destinatário recipient. Não invente pré, placa ou motorista ausentes. Documento desconhecido: kind=unknown e campos ausentes vazios. Retorne apenas o JSON solicitado.`;
 
+const toLetter: Record<string, string> = { '0': 'O', '1': 'I', '2': 'Z', '4': 'A', '5': 'S', '6': 'G', '8': 'B' };
+const toDigit: Record<string, string> = { O: '0', Q: '0', D: '0', I: '1', L: '1', Z: '2', A: '4', S: '5', G: '6', B: '8', T: '7' };
+/** Fixes letter/digit confusion by Brazilian plate position (AAA9A99 / AAA9999). Never adds characters. */
+export function normalizePlate(raw: string): string {
+  const v = raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (v.length !== 7) return v;
+  return v.split('').map((c, i) => i < 3 ? toLetter[c] ?? c : i === 4 ? c : toDigit[c] ?? c).join('');
+}
+
 export function normalizeGeminiPhoto(value: unknown): PhotoFields {
   const data = documentSchema.parse(value);
   const documents = data.documents.map(row => {
@@ -38,10 +47,11 @@ export function normalizeGeminiPhoto(value: unknown): PhotoFields {
     return { ...row, ctc: /^\d{10}$/.test(ctc) ? ctc : '', volumes: /^\d+$/.test(volumes) && Number(volumes) > 0 ? volumes : '', review };
   });
   const warnings: string[] = [];
-  if (data.kind === 'pre' && !/^[A-Z]{3}\d[A-Z0-9]\d{2}$/.test(data.plate.trim().toUpperCase())) warnings.push('Confira placa: possível confusão entre letra e número');
+  const plate = normalizePlate(data.plate);
+  if (data.kind === 'pre' && !/^[A-Z]{3}\d[A-Z0-9]\d{2}$/.test(plate)) warnings.push('Confira placa: possível confusão entre letra e número');
   if (new Set(documents.map(d => d.ctc).filter(Boolean)).size !== documents.length) warnings.push('CTC repetido ou ilegível: confira todas as linhas');
   if (data.expectedRows && data.expectedRows !== documents.length) warnings.push(`Cabeçalho informa ${data.expectedRows} CTCs; foram lidos ${documents.length}`);
   if (data.totalVolumes && documents.reduce((sum, d) => sum + Number(d.volumes), 0) !== data.totalVolumes) warnings.push(`Confira a soma: cabeçalho informa ${data.totalVolumes} volumes`);
   documents.forEach(d => d.review.push(...warnings));
-  return { kind: data.kind, id: /^DI\d{8,12}$/.test(data.id.trim().toUpperCase()) ? data.id.trim().toUpperCase() : '', plate: data.plate.trim().toUpperCase(), driver: data.driver.trim(), ctcs: documents.map(d => d.ctc).filter(Boolean), documents };
+  return { kind: data.kind, id: /^DI\d{8,12}$/.test(data.id.trim().toUpperCase()) ? data.id.trim().toUpperCase() : '', plate, driver: data.driver.trim(), ctcs: documents.map(d => d.ctc).filter(Boolean), documents };
 }
