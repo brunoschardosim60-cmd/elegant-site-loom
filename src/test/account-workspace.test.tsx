@@ -39,3 +39,10 @@ it('blocks a stale device from silently overwriting another revision', async () 
   expect(screen.queryByRole('button', { name: 'Tentar salvar novamente' })).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Sair da conta' })).toBeDisabled();
 });
+it('never replaces saved data with an empty workspace after a load error', async () => {
+  mocks.read.mockResolvedValue({ data: null, error: { message: 'network' } });
+  render(<AccountWorkspace />);
+  expect(await screen.findByRole('alert')).toHaveTextContent('Nenhum dado foi substituído');
+  expect(mocks.rpc).not.toHaveBeenCalled();
+  expect(screen.queryByRole('button', { name: /Novo pré/ })).not.toBeInTheDocument();
+});

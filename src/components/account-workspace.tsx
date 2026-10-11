@@ -63,13 +63,13 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
-    client.from('conference_states').select('data,revision').eq('user_id', session.user.id).maybeSingle().then(({ data, error }) => {
+    Promise.resolve(client.from('conference_states').select('data,revision').eq('user_id', session.user.id).maybeSingle()).then(({ data, error }) => {
       if (!mounted.current) return;
       if (error) { setLoadError('Não foi possível carregar seus cadastros. Nenhum dado foi substituído.'); return; }
       const parsed = conferenceStateSchema.safeParse(data?.data ?? emptyConference);
       if (!parsed.success) { setLoadError('Os dados salvos precisam de revisão. Nenhum dado foi substituído.'); return; }
       revision.current = data?.revision ?? 0; saved.current = JSON.stringify(parsed.data); latest.current = parsed.data; setInitial(parsed.data);
-    });
+    }).catch(() => { if (mounted.current) setLoadError('Sem conexão com o banco. Tente novamente; nenhum dado foi substituído.'); });
     const preventLoss = (event: BeforeUnloadEvent) => { if (saving.current || failed.current || (latest.current && JSON.stringify(latest.current) !== saved.current)) { event.preventDefault(); event.returnValue = ''; } };
     window.addEventListener('beforeunload', preventLoss);
     return () => { mounted.current = false; window.removeEventListener('beforeunload', preventLoss); };

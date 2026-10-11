@@ -1,6 +1,17 @@
 # Elegant Site Loom
 
-essa foi minha conversa com o claude, ele fez, masssss, nao ficou legal o layout.... vamos fazer um site top, sem banco de dados por enquanto.... Vamos fazer o site
+Controle de retorno de CTCs e pré-manifestos, com leitura de fotos pelo Gemini e cadastros vinculados à conta no Supabase.
+
+## Dados e acesso
+
+- Login por e-mail e senha, com confirmação de e-mail pelo Supabase.
+- Cadastros, conferências, atividades e ocorrências ficam em `conference_states`, isolados por usuário com RLS.
+- A mesma conta pode carregar os cadastros em outros dispositivos. Alterações concorrentes são rejeitadas por revisão; a interface pede exportar o CSV e recarregar em caso de conflito.
+- O status no topo confirma quando o banco terminou de salvar. Falhas mantêm os dados na tela e oferecem nova tentativa.
+- Fotos e rascunhos de importação não são armazenados no banco; fechar o formulário os descarta.
+- A configuração publicável do projeto está em `src/lib/supabase-config.ts`. `SUPABASE_URL` e `SUPABASE_PUBLISHABLE_KEY` podem substituí-la no servidor. Nunca use uma chave secret/service-role nessa configuração.
+- `GEMINI_API_KEY` permanece exclusivamente no servidor da Vercel. A leitura por IA exige sessão Supabase válida.
+- Migração: `supabase/migrations/20261011040000_conference.sql`. Testes transacionais de permissões: `supabase/tests/conference-security.sql` (fixtures desfeitas com rollback).
 
 This project was built with [Lovable](https://lovable.dev).
 
