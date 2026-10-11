@@ -92,7 +92,7 @@ describe('AI photo import pipeline', () => {
     (await pendingCall('complete.jpg', 'full')).pending.resolve(responses(1, 0, false).full);
     await batch;
     expect(calls.map(call => call.input.data.mode)).toEqual(['full']);
-    expect(atob(calls[0]!.input.data.detail!)).toContain('800x780');
+    expect(calls[0]!.input.data).not.toHaveProperty('detail');
     expect(receive).toHaveBeenCalledOnce();
     const result = receive.mock.calls[0]![1];
     expect(result.pre.verification).toEqual({ status: 'single', checkedFields: 0, conflicts: 0 });
@@ -109,7 +109,7 @@ describe('AI photo import pipeline', () => {
     const batch = readAiPhotos([photo('oriented.jpg')], receive, progress);
     const full = await pendingCall('oriented.jpg', 'full');
     expect(atob(full.input.data.data)).toContain(orientation === 270 ? '1200x800' : '800x1200');
-    expect(atob(full.input.data.detail!)).toContain(orientation === 270 ? '1200x520' : '800x780');
+    expect(full.input.data).not.toHaveProperty('detail');
     full.pending.resolve(result.full);
     const verification = await pendingCall('oriented.jpg', 'verify');
     expect(atob(verification.input.data.data)).toContain(combined === 90 ? '1200x800' : '800x1200');
@@ -143,13 +143,13 @@ describe('AI photo import pipeline', () => {
     expect(mocks.decode).not.toHaveBeenCalled(); expect(mocks.request).not.toHaveBeenCalled();
   });
 
-  it('reads the original orientation with detail when local orientation fails', async () => {
+  it('reads one original image when local orientation fails', async () => {
     mocks.orient.mockRejectedValue(new Error('Orientation worker unavailable'));
     const receive = vi.fn();
     const batch = readAiPhotos([photo('orientation-failed.jpg')], receive, undefined);
     const full = await pendingCall('orientation-failed.jpg', 'full');
     expect(atob(full.input.data.data)).toContain('800x1200');
-    expect(atob(full.input.data.detail!)).toContain('800x780');
+    expect(full.input.data).not.toHaveProperty('detail');
     full.pending.resolve(responses(1, 0, false).full);
     await batch;
     expect(calls).toHaveLength(1);

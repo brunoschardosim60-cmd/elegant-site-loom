@@ -103,7 +103,7 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
         progress('Lendo todas as linhas e laboratórios…');
         image = await createImageBitmap(file);
         if (photoSignal.aborted) throw new Error('Leitura interrompida.');
-        const full = await providerAwareRequest({ data: { ...photoPayload(image, orientation, true), accessToken, mode: 'full' }, signal: photoSignal });
+        const full = await providerAwareRequest({ data: { ...photoPayload(image, orientation), accessToken, mode: 'full' }, signal: photoSignal });
         if (full.ok) completedPhoto = { ...full.pre, verification: { status: 'single', checkedFields: 0, conflicts: 0 } };
         if (photoSignal.aborted) throw new Error('Leitura interrompida.');
         if (!full.ok) { if (!signal?.aborted) onResult(index, { error: full.error, ...('fallback' in full && full.fallback === false ? { fallback: false } : {}) }); continue; }
