@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { ConferenceWorkspace } from "@/components/conference-workspace";
+import { AccountWorkspace } from "@/components/account-workspace";
 
 export const Route = createFileRoute("/")({
   head: () => ({ meta: [
@@ -10,5 +10,5 @@ export const Route = createFileRoute("/")({
     { property: "og:type", content: "website" },
     { name: "twitter:card", content: "summary_large_image" },
   ] }),
-  component: ConferenceWorkspace,
+  component: AccountWorkspace,
 });

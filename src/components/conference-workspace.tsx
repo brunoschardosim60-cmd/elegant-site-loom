@@ -7,31 +7,35 @@ import { analyzeDivergence } from '@/lib/divergence.functions';
 
 import { ManifestImportDialog } from './manifest-import-dialog';
 import { applyImports, type ImportDraft } from '@/lib/manifest-import';
+import type { ConferenceState } from '@/lib/conference-state';
 
 type View = 'pending' | 'missing' | 'finished' | 'issues';
-type Activity = { id: number; title: string; description: string; time: string; warning?: boolean };
+type Activity = { id: number; title: string; description: string; time: string; warning?: boolean | undefined };
 type Notice = { id: number; text: string; warning?: boolean };
 const initialActivity: Activity[] = [];
 const titles: Record<View, string> = { pending: 'Conferência de documentos', missing: 'Pendências de conferência', finished: 'Pré-manifestos finalizados', issues: 'Ocorrências da conferência' };
 const initials = (name: string) => name.split(' ').filter(Boolean).slice(0, 2).map(word => word[0]).join('');
 const timeNow = () => new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
-export function ConferenceWorkspace() {
-  const [manifests, setManifests] = useState<Manifest[]>(demoManifests);
+export function ConferenceWorkspace({ initialState, onSnapshot, accountEmail }: { initialState?: ConferenceState; onSnapshot?: (state: ConferenceState) => void; accountEmail?: string } = {}) {
+  const [manifests, setManifests] = useState<Manifest[]>(initialState?.manifests ?? demoManifests);
   const current = useRef(manifests);
   const [view, setView] = useState<View>('pending');
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('all');
   const [code, setCode] = useState('');
   const scanner = useRef<HTMLInputElement>(null);
-  const [activity, setActivity] = useState(initialActivity);
-  const [issues, setIssues] = useState<Activity[]>([]);
+  const [activity, setActivity] = useState(initialState?.activity ?? initialActivity);
+  const [issues, setIssues] = useState<Activity[]>(initialState?.issues ?? []);
+  const snapshotCallback = useRef(onSnapshot);
+  snapshotCallback.current = onSnapshot;
+  useEffect(() => { snapshotCallback.current?.({ manifests, activity, issues }); }, [manifests, activity, issues]);
   const [notices, setNotices] = useState<Notice[]>([]);
   const [blocked, setBlocked] = useState<string | null>(null);
   const [newOpen, setNewOpen] = useState(false);
   const [now, setNow] = useState('2026-10-09T09:36:00');
   const [prefillId, setPrefillId] = useState('');
-  const sequence = useRef(10);
+  const sequence = useRef(Math.max(10, ...(initialState?.activity ?? []).map(item => item.id), ...(initialState?.issues ?? []).map(item => item.id)));
   const [divOpen, setDivOpen] = useState(false);
   const [div, setDiv] = useState({ ctc: '', nf: '', manifest: '', volumesExpected: '', volumesReceived: '', description: '' });
   const [divBusy, setDivBusy] = useState(false);
@@ -123,7 +127,7 @@ export function ConferenceWorkspace() {
     if (result.ok) {
       update(result.manifests); setView('pending'); setQuery(''); setFilter('all');
       log('Documentos importados', `${drafts.length} foto(s) / pré(s) revisados`);
-      notify(`${drafts.length} cadastro(s) concluídos.`);
+      notify(onSnapshot ? `${drafts.length} cadastro(s) adicionados. Confira o status de salvamento.` : `${drafts.length} cadastro(s) concluídos.`);
     }
     return result;
   }
@@ -146,7 +150,7 @@ export function ConferenceWorkspace() {
         <Button variant="ghost" className={`nav-item ${view === 'issues' ? 'active' : ''}`} onClick={() => setView('issues')}><TriangleAlert /> Ocorrências {issues.length > 0 && <span className="nav-count">{issues.length}</span>}</Button>
       </nav>
       <div className="sidebar-bottom">
-        <div className="session-note"><div className="flex items-center gap-2 text-sidebar-foreground font-semibold mb-1"><ShieldCheck size={14} /> Sessão de demonstração</div>Os dados são temporários e serão reiniciados ao atualizar a página.</div>
+        <div className="session-note"><div className="flex items-center gap-2 text-sidebar-foreground font-semibold mb-1"><ShieldCheck size={14} /> {accountEmail ? 'Sua conta' : 'Sessão de demonstração'}</div>{accountEmail ? `Cadastros vinculados a ${accountEmail}. Rascunhos são descartados ao fechar.` : 'Os dados são temporários e serão reiniciados ao atualizar a página.'}</div>
         <div className="profile"><div className="avatar">BS</div><div><div className="text-[11px] font-semibold">Bruno Schardosim</div><div className="text-[9px] text-sidebar-muted mt-1">Operação · Porto Alegre</div></div><span className="ml-auto text-sidebar-muted"><ChevronRight size={14} /></span></div>
       </div>
     </aside>
@@ -173,7 +177,7 @@ export function ConferenceWorkspace() {
             }) : <div className="empty-state"><Inbox /><h3>{view === 'finished' ? 'Nenhum pré finalizado' : 'Nenhum pré pendente'}</h3><p className="text-xs mt-2">{query ? 'Nenhum resultado para essa busca.' : 'A lista está em dia.'}</p></div>}
           </div>
         </section><aside className="activity-panel"><div className="activity-heading">Últimas atividades <span className="live-label"><i className="online-dot" />Ao vivo</span></div><div className="activity-date">Hoje</div><div className="activity-list">{activity.slice(0, 5).map(item => <div className="activity-item" key={item.id}><div className={`activity-icon ${item.warning ? 'warning' : ''}`}>{item.warning ? <TriangleAlert /> : item.title.includes('finalizado') ? <CheckCheck /> : item.title.includes('adicionado') ? <Plus /> : <Check />}</div><div><div className="activity-title">{item.title}</div><div className="activity-description">{item.description}</div><div className="activity-time">{item.time}</div></div></div>)}</div><div className="daily-summary"><h3>Resumo da sessão</h3><div className="summary-line"><span>Documentos recebidos</span><strong>{documents.filter(doc => doc.received).length}</strong></div><div className="summary-line"><span>Pré-manifestos concluídos</span><strong>{finished.length}</strong></div><div className="summary-line"><span>Ocorrências registradas</span><strong>{issues.length}</strong></div><div className="flex gap-2 text-success text-[10px] mt-5 items-center"><ShieldCheck size={13} />{issues.length ? 'Confira as ocorrências' : 'Nenhuma divergência nesta sessão'}</div></div></aside></div>
-        <footer className="page-footer"><span className="flex gap-1.5 items-center"><ShieldCheck size={12} /> Dados temporários · reiniciam ao atualizar a página</span><span>confere. <span className="mx-2">/</span> Controle de retorno de documentos</span></footer>
+        <footer className="page-footer"><span className="flex gap-1.5 items-center"><ShieldCheck size={12} /> {accountEmail ? 'Cadastros na sua conta · confira o status de salvamento' : 'Dados temporários · reiniciam ao atualizar a página'}</span><span>confere. <span className="mx-2">/</span> Controle de retorno de documentos</span></footer>
       </div>
     </main>
     <div className="toast-stack" aria-live="polite">{notices.map(notice => <div className={`scan-toast ${notice.warning ? 'warning' : ''}`} key={notice.id}>{notice.warning ? <TriangleAlert className="text-warning shrink-0" size={17} /> : <CircleCheck className="text-success shrink-0" size={17} />}<span>{notice.text}</span></div>)}</div>

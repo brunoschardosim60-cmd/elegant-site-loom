@@ -1,13 +1,18 @@
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { normalizeGeminiPhoto, photoJsonSchema, photoPrompt } from './gemini-photo';
+import { supabaseConfig } from './supabase-config';
 const requests = new Map<string, { count: number; until: number }>();
 
 export const photoReaderStatus = createServerFn({ method: 'GET' }).handler(async () => ({ configured: Boolean(process.env['GEMINI_API_KEY']) }));
 
 export const readPhotoWithGemini = createServerFn({ method: 'POST' })
-  .inputValidator(z.object({ data: z.string().min(100).max(2800000).regex(/^[A-Za-z0-9+/=]+$/), detail: z.string().max(1000000).regex(/^[A-Za-z0-9+/=]+$/).optional(), mimeType: z.literal('image/jpeg'), orientationOnly: z.boolean().optional() }))
+  .inputValidator(z.object({ accessToken: z.string().min(20).max(10000), data: z.string().min(100).max(2800000).regex(/^[A-Za-z0-9+/=]+$/), detail: z.string().max(1000000).regex(/^[A-Za-z0-9+/=]+$/).optional(), mimeType: z.literal('image/jpeg'), orientationOnly: z.boolean().optional() }))
   .handler(async ({ data }) => {
+    const { createClient } = await import('@supabase/supabase-js');
+    const auth = createClient(process.env['SUPABASE_URL'] || supabaseConfig.url, process.env['SUPABASE_PUBLISHABLE_KEY'] || supabaseConfig.key, { auth: { persistSession: false, autoRefreshToken: false } });
+    const { data: user, error: authError } = await auth.auth.getUser(data.accessToken);
+    if (authError || !user.user) return { ok: false as const, error: 'Entre novamente na sua conta para ler fotos.' };
     const key = process.env['GEMINI_API_KEY'];
     if (!key) return { ok: false as const, error: 'Configure GEMINI_API_KEY na Vercel para ativar a leitura por IA.' };
     const { getRequestIP } = await import('@tanstack/react-start/server');
