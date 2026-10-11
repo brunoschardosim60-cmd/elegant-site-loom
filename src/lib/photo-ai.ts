@@ -1,4 +1,4 @@
-import { readPhotoWithGemini } from './photo-reader.functions';
+import { requestAiPhoto } from './photo-ai-request';
 import { getSupabaseClient } from './supabase-client';
 
 async function photoPayload(file: File, rotation = 0, detail = false) {
@@ -33,11 +33,12 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
       const { data: { session } } = await (await getSupabaseClient()).auth.getSession();
       if (!session) throw new Error('Entre na sua conta para ler fotos.');
       const accessToken = session.access_token;
-      let result = await readPhotoWithGemini({ data: { ...await photoPayload(file), accessToken, orientationOnly: true }, ...(signal ? { signal } : {}) });
+      const retryProgress = () => onProgress?.(index, 'Gemini ocupado. Tentando esta foto novamente…');
+      let result = await requestAiPhoto({ data: { ...await photoPayload(file), accessToken, orientationOnly: true }, ...(signal ? { signal } : {}) }, retryProgress);
       if (signal?.aborted) break;
       if (result.ok) {
         onProgress?.(index, 'Ajustando orientação e conferindo as linhas…');
-        result = await readPhotoWithGemini({ data: { ...await photoPayload(file, result.rotation, result.pre.kind === 'pre'), accessToken }, ...(signal ? { signal } : {}) });
+        result = await requestAiPhoto({ data: { ...await photoPayload(file, result.rotation, result.pre.kind === 'pre'), accessToken }, ...(signal ? { signal } : {}) }, retryProgress);
       }
       if (signal?.aborted) break;
       onResult(index, result.ok ? { pre: result.pre, text: result.text, milliseconds: performance.now() - start } : { error: result.error });

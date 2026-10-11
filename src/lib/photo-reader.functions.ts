@@ -33,7 +33,7 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
         }),
       });
       const response = await request(data.orientationOnly ? 'gemini-3.5-flash-lite' : process.env['GEMINI_OCR_MODEL'] || 'gemini-3.8-flash');
-      if (!response.ok) return { ok: false as const, error: response.status === 429 ? 'Limite do Gemini atingido. Aguarde e tente novamente.' : response.status === 403 || response.status === 401 ? 'Chave do Gemini sem acesso. Confira a configuração na Vercel.' : `Gemini indisponível (${response.status}). Tente novamente.` };
+      if (!response.ok) return { ok: false as const, retryable: [500, 502, 503, 504].includes(response.status), error: response.status === 429 ? 'Limite do Gemini atingido. Aguarde e tente novamente.' : response.status === 403 || response.status === 401 ? 'Chave do Gemini sem acesso. Confira a configuração na Vercel.' : `Gemini indisponível (${response.status}). Tente novamente.` };
       const result = await response.json() as { candidates?: { finishReason?: string; content?: { parts?: { text?: string; thought?: boolean }[] } }[] };
       const candidate = result.candidates?.[0];
       if (candidate?.finishReason !== 'STOP') return { ok: false as const, error: 'A leitura ficou incompleta. Tente novamente com uma foto por vez.' };
@@ -42,5 +42,5 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
       const pre = normalizeGeminiPhoto(data.orientationOnly ? { ...parsed, id: '', plate: '', driver: '', expectedRows: 0, totalVolumes: 0, documents: [] } : parsed);
       const rotation = [90, 180, 270].includes(parsed.clockwiseRotation) ? parsed.clockwiseRotation as number : 0;
       return { ok: true as const, pre, rotation, text: JSON.stringify(pre, null, 2) };
-    } catch { return { ok: false as const, error: 'Não foi possível concluir a leitura por IA. Tente novamente; nenhum cadastro foi feito.' }; }
+    } catch { return { ok: false as const, retryable: true, error: 'Não foi possível concluir a leitura por IA. Tente novamente; nenhum cadastro foi feito.' }; }
   });
