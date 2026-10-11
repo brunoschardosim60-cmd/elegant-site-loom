@@ -27,8 +27,7 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
           generationConfig: { responseMimeType: 'application/json', responseJsonSchema: data.orientationOnly ? { type: 'object', properties: { kind: { type: 'string', enum: ['pre', 'dacte', 'unknown'] }, clockwiseRotation: { type: 'integer', enum: [0, 90, 180, 270] } }, required: ['kind', 'clockwiseRotation'] } : photoJsonSchema, maxOutputTokens: data.orientationOnly ? 512 : 12000, temperature: 0, mediaResolution: 'MEDIA_RESOLUTION_HIGH', thinkingConfig: { thinkingLevel: 'LOW' } },
         }),
       });
-      let response = await request(data.orientationOnly ? 'gemini-3.5-flash-lite' : process.env['GEMINI_OCR_MODEL'] || 'gemini-3.8-flash');
-      if ([404, 503].includes(response.status)) response = await request('gemini-3.5-flash-lite');
+      const response = await request(data.orientationOnly ? 'gemini-3.5-flash-lite' : process.env['GEMINI_OCR_MODEL'] || 'gemini-3.8-flash');
       if (!response.ok) return { ok: false as const, error: response.status === 429 ? 'Limite do Gemini atingido. Aguarde e tente novamente.' : response.status === 403 || response.status === 401 ? 'Chave do Gemini sem acesso. Confira a configuração na Vercel.' : `Gemini indisponível (${response.status}). Tente novamente.` };
       const result = await response.json() as { candidates?: { finishReason?: string; content?: { parts?: { text?: string; thought?: boolean }[] } }[] };
       const candidate = result.candidates?.[0];
