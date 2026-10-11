@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { Loader2, ArrowRight, Barcode, Check, CheckCheck, ChevronRight, CircleCheck, Clock3, FileCheck2, FileText, Inbox, Layers, Plus, Search, ScanLine, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { Loader2, ArrowRight, Barcode, Check, CheckCheck, ChevronRight, CircleCheck, Clock3, FileCheck2, FileText, Inbox, Layers, PanelLeftClose, PanelLeftOpen, Plus, Search, ScanLine, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { demoManifests, findMatches, parseReading, setReceived, type Manifest } from '@/lib/conference';
 
 import { ManifestImportDialog } from './manifest-import-dialog';
@@ -21,6 +22,7 @@ export function ConferenceWorkspace({ initialState, onSnapshot, accountEmail }: 
   const [manifests, setManifests] = useState<Manifest[]>(initialState?.manifests ?? demoManifests);
   const current = useRef(manifests);
   const [view, setView] = useState<View>('pending');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [query, setQuery] = useState('');
   const [focusedManifest, setFocusedManifest] = useState<{ id: string } | null>(null);
   const [filter, setFilter] = useState('all');
@@ -137,20 +139,23 @@ export function ConferenceWorkspace({ initialState, onSnapshot, accountEmail }: 
     }
     return result;
   }
-  return <div className="workspace workspace-refreshed">
+  const navigation = [
+    { view: 'pending' as const, label: 'Conferência', count: pending.length, Icon: ScanLine },
+    { view: 'missing' as const, label: 'Pendências', count: missing.length, Icon: Clock3 },
+    { view: 'finished' as const, label: 'Finalizados', count: finished.length, Icon: FileCheck2 },
+    { view: 'issues' as const, label: 'Ocorrências', count: issues.length, Icon: TriangleAlert },
+  ];
+  return <TooltipProvider delayDuration={150}><div className={`workspace workspace-refreshed ${sidebarCollapsed ? 'workspace-sidebar-collapsed' : ''}`}>
     <aside className="sidebar">
-      <div className="brand"><Layers className="brand-symbol" size={30} strokeWidth={2.6} /> <span>confere<span className="text-sidebar-primary">.</span></span></div>
+      <div className="workspace-sidebar-heading"><div className="brand" aria-label="confere."><Layers className="brand-symbol" size={30} strokeWidth={2.6} /> <span className="workspace-sidebar-brand-name">confere<span className="text-sidebar-primary">.</span></span></div><Button type="button" variant="ghost" size="icon" className="workspace-sidebar-toggle" aria-label={sidebarCollapsed ? 'Expandir menu lateral' : 'Recolher menu lateral'} title={sidebarCollapsed ? 'Expandir menu lateral' : 'Recolher menu lateral'} aria-expanded={!sidebarCollapsed} aria-controls="workspace-navigation" onClick={() => setSidebarCollapsed(collapsed => !collapsed)}>{sidebarCollapsed ? <PanelLeftOpen /> : <PanelLeftClose />}</Button></div>
       <p className="brand-subtitle text-sidebar-muted text-[10px] mt-2 ml-10">Cada documento no seu lugar.</p>
       <div className="sidebar-label">Operação</div>
-      <nav aria-label="Navegação principal">
-        <Button variant="ghost" className={`nav-item ${view === 'pending' ? 'active' : ''}`} onClick={() => { setView('pending'); setQuery(''); }}><ScanLine /> Conferência <span className="nav-count">{pending.length}</span></Button>
-        <Button variant="ghost" className={`nav-item ${view === 'missing' ? 'active' : ''}`} onClick={() => { setView('missing'); setQuery(''); }}><Clock3 /> Pendências <span className="nav-count">{missing.length}</span></Button>
-        <Button variant="ghost" className={`nav-item ${view === 'finished' ? 'active' : ''}`} onClick={() => { setView('finished'); setQuery(''); }}><FileCheck2 /> Finalizados <span className="nav-count">{finished.length}</span></Button>
-        <Button variant="ghost" className={`nav-item ${view === 'issues' ? 'active' : ''}`} onClick={() => setView('issues')}><TriangleAlert /> Ocorrências {issues.length > 0 && <span className="nav-count">{issues.length}</span>}</Button>
+      <nav id="workspace-navigation" aria-label="Navegação principal">
+        {navigation.map(({ view: target, label, count, Icon }) => <Tooltip key={target}><TooltipTrigger asChild><Button variant="ghost" className={`nav-item ${view === target ? 'active' : ''}`} aria-label={label} aria-current={view === target ? 'page' : undefined} onClick={() => { setView(target); if (target !== 'issues') setQuery(''); }}><Icon /><span className="workspace-sidebar-nav-label">{label}</span>{(target !== 'issues' || count > 0) && <span className="nav-count">{count}</span>}</Button></TooltipTrigger><TooltipContent side="right" sideOffset={12} hidden={!sidebarCollapsed} className="workspace-sidebar-tooltip">{label}{target !== 'issues' || count > 0 ? ` · ${count}` : ''}</TooltipContent></Tooltip>)}
       </nav>
       <div className="sidebar-bottom">
         <div className="session-note"><div className="flex items-center gap-2 text-sidebar-foreground font-semibold mb-1"><ShieldCheck size={14} /> {accountEmail ? 'Sua conta' : 'Sessão de demonstração'}</div>{accountEmail ? `Cadastros vinculados a ${accountEmail}. Rascunhos são descartados ao fechar.` : 'Os dados são temporários e serão reiniciados ao atualizar a página.'}</div>
-        <div className="profile"><div className="avatar">BS</div><div><div className="text-[11px] font-semibold">Bruno Schardosim</div><div className="text-[9px] text-sidebar-muted mt-1">Operação · Porto Alegre</div></div><span className="ml-auto text-sidebar-muted"><ChevronRight size={14} /></span></div>
+        <div className="profile" title={accountEmail || 'Bruno Schardosim · Operação · Porto Alegre'}><div className="avatar">BS</div><div className="workspace-sidebar-profile-text"><div className="text-[11px] font-semibold">Bruno Schardosim</div><div className="text-[9px] text-sidebar-muted mt-1">Operação · Porto Alegre</div></div><span className="workspace-sidebar-profile-chevron ml-auto text-sidebar-muted"><ChevronRight size={14} /></span></div>
       </div>
     </aside>
     <main className="main">
@@ -175,5 +180,5 @@ export function ConferenceWorkspace({ initialState, onSnapshot, accountEmail }: 
     <Dialog open={!!blocked} onOpenChange={open => { if (!open) setBlocked(null); }}><DialogContent><DialogHeader><div className="text-warning mb-2"><TriangleAlert size={30} /></div><DialogTitle>Este CTC precisa de atenção</DialogTitle><DialogDescription className="pt-2">{blocked}</DialogDescription></DialogHeader><p className="text-xs text-muted-foreground">Confira o documento e os CTCs cadastrados antes de continuar.</p><Button onClick={() => setBlocked(null)}>Entendido, continuar <ArrowRight /></Button></DialogContent></Dialog>
     {newOpen && <ManifestImportDialog open onOpenChange={open => { setNewOpen(open); if (!open) setPrefillId(''); }} manifests={manifests} onCreate={importDrafts} initialId={prefillId} />}
 
-  </div>;
+  </div></TooltipProvider>;
 }

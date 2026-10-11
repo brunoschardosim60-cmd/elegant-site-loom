@@ -42,7 +42,7 @@ it('uses Flash for the full literal transcription, retaining image detail, all f
   expect(mocks.fetch).toHaveBeenCalledOnce();
   expect(mocks.fetch.mock.calls[0]![0]).toContain('/gemini-3.8-flash:generateContent');
   const body = JSON.parse(mocks.fetch.mock.calls[0]![1].body);
-  expect(body.generationConfig).toMatchObject({ temperature: 0, mediaResolution: 'MEDIA_RESOLUTION_HIGH', thinkingConfig: { thinkingLevel: 'LOW' } });
+  expect(body.generationConfig).toMatchObject({ temperature: 1, mediaResolution: 'MEDIA_RESOLUTION_HIGH', thinkingConfig: { thinkingLevel: 'LOW' } });
   expect(body.generationConfig.responseJsonSchema.required).toContain('issueDate');
   expect(body.contents[0].parts[1].inlineData).toEqual({ data: input.data.data, mimeType: 'image/jpeg' });
   expect(body.contents[0].parts[0].text).toContain('issueDate sempre vazio');
