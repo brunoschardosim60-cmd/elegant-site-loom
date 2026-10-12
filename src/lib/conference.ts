@@ -1,5 +1,5 @@
 export type DocumentItem = { id: string; ctc: string; nf: string; client?: string | undefined; recipient?: string | undefined; volumes: number; received: boolean; receivedAt?: string | undefined };
-export type Manifest = { id: string; driver: string; plate: string; date: string; issueDate?: string | undefined; documents: DocumentItem[]; finishedAt?: string | undefined };
+export type Manifest = { id: string; driver: string; plate: string; date: string; issueDate?: string | undefined; sourcePhotoHashes?: string[] | undefined; documents: DocumentItem[]; finishedAt?: string | undefined };
 export type Reading = { kind: 'ctc'; number: string } | { kind: 'nfe' } | { kind: 'invalid' };
 
 export function parseReading(value: string): Reading {

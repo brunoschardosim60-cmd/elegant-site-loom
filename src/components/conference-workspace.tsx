@@ -102,10 +102,13 @@ export function ConferenceWorkspace({ initialState, onSnapshot, accountEmail }: 
     log(changed.finishedAt ? 'Pré-manifesto finalizado' : `CTC ${reading.number} conferido`, manifest.driver);
   }
   function toggleDocument(manifest: Manifest, id: string, received: boolean) {
-    const changed = setReceived(manifest, id, received, new Date().toISOString());
-    update(current.current.map(item => item.id === manifest.id ? changed : item));
-    log(received ? 'Documento conferido manualmente' : 'Conferência desfeita', manifest.driver);
-    if (changed.finishedAt) notify(`Pré de ${manifest.driver.split(' ')[0]} finalizado!`);
+    const latest = current.current.find(item => item.id === manifest.id);
+    const doc = latest?.documents.find(item => item.id === id);
+    if (!latest || !doc || doc.received === received) return;
+    const changed = setReceived(latest, id, received, new Date().toISOString());
+    update(current.current.map(item => item.id === latest.id ? changed : item));
+    log(received ? 'Documento conferido manualmente' : 'Conferência desfeita', latest.driver);
+    if (changed.finishedAt) notify(`Pré de ${latest.driver.split(' ')[0]} finalizado!`);
   }
   function changeIssueDate(manifestId: string, value: string | undefined) {
     const issueDate = normalizeIssueDate(value ?? '');

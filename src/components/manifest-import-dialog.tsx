@@ -1,14 +1,14 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { AlertCircle, Camera, CheckCheck, CheckCircle2, ChevronLeft, ChevronRight, FileImage, Images, Loader2, Plus, RotateCw, ScanLine, Trash2, UploadCloud } from 'lucide-react';
 import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 import { ManifestDocumentsEditor } from './manifest-documents-editor';
 import type { Manifest } from '@/lib/conference';
-import type { ImportDraft, ImportOutcome } from '@/lib/manifest-import';
+import { findImportConflicts, type ImportDraft, type ImportOutcome } from '@/lib/manifest-import';
 import type { PhotoFields } from '@/lib/photo-fields';
 import type { PhotoReadResult } from '@/lib/photo-reader';
 import { photoReaderStatus } from '@/lib/photo-reader.functions';
-import { uniquePhotoFiles } from '@/lib/photo-files';
+import { photoFingerprint, uniquePhotoFiles } from '@/lib/photo-files';
 import { LOCAL_HEADER_NOTICE, LOCAL_ROW_NOTICE } from '@/lib/local-photo';
 
 type Verification = NonNullable<PhotoFields['verification']>;
@@ -29,11 +29,13 @@ const hasManualContent = (item: Draft) => item.id || item.issueDate || item.plat
 export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, initialId }: {
   initialId?: string; open: boolean; onOpenChange: (open: boolean) => void; manifests: Manifest[]; onCreate: (drafts: ImportDraft[]) => ImportOutcome;
 }) {
+  const fieldId = useId();
   const [items, setItems] = useState<Draft[]>([]);
   const currentItems = useRef(items); currentItems.current = items;
   const [active, setActive] = useState(0);
   const [selectedRow, setSelectedRow] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [preparingKey, setPreparingKey] = useState<string | null>(null);
   const [progress, setProgress] = useState('');
   const [error, setError] = useState('');
   const [reader, setReader] = useState<'checking' | 'ai' | 'local'>('checking');
@@ -49,6 +51,13 @@ export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, 
   useEffect(() => { if (open && initialId) { setItems(list => [...list.filter(item => item.status !== 'manual' || hasManualContent(item)), { ...blank(), id: initialId }]); setActive(items.length && items[0]?.id ? items.length : 0); setSelectedRow(0); } }, [open, initialId]);
   useEffect(() => () => { generation.current++; controller.current?.abort(); cancelCurrent.current = null; urls.current.forEach(url => URL.revokeObjectURL(url)); }, []);
   const draft = items[active];
+  const conflicts = findImportConflicts(manifests, items);
+  const draftConflicts = conflicts.filter(conflict => conflict.index === active);
+  const manifestConflicts = [...new Set(draftConflicts.filter(conflict => conflict.kind === 'manifest').map(conflict => conflict.message))];
+  const ctcConflicts: Record<number, string[]> = {};
+  for (const conflict of draftConflicts) if (conflict.kind === 'ctc' && conflict.row !== undefined) (ctcConflicts[conflict.row] ??= []).push(conflict.message);
+  const conflictIndices = new Set(conflicts.map(conflict => conflict.index));
+  const manifestConflictNotice = manifestConflicts.length > 0 && <span className="import-field-warning import-field-conflict" id={`${fieldId}-manifest-conflict`} role="status"><AlertCircle size={13} aria-hidden="true" /><span><strong>Cadastro duplicado</strong>{manifestConflicts.map(message => <span key={message}>{message}</span>)}</span></span>;
   const update = (change: Partial<Draft>) => { setError(''); setItems(list => list.map((item, i) => i === active ? { ...item, ...change, ...(item.status === 'read' ? { edited: true } : {}) } : item)); };
   const selectItem = (index: number) => { setActive(index); setSelectedRow(0); setPreviewRotation(0); setError(''); };
   const releaseUrl = (url?: string) => { if (url) { URL.revokeObjectURL(url); urls.current = urls.current.filter(item => item !== url); } };
@@ -57,14 +66,14 @@ export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, 
     const abort = controller.current; controller.current = null;
     abort?.abort();
     cancelCurrent.current?.(); cancelCurrent.current = null;
-    setBusy(false); setProgress(''); setError(''); setActive(0); setSelectedRow(0); setPreviewRotation(0); setDragging(false);
+    setBusy(false); setPreparingKey(null); setProgress(''); setError(''); setActive(0); setSelectedRow(0); setPreviewRotation(0); setDragging(false);
   }
   function closeDialog(value: boolean) {
     if (!value) {
       generation.current++; cancelCurrent.current = null;
       controller.current?.abort(); controller.current = null;
       urls.current.forEach(url => URL.revokeObjectURL(url)); urls.current = [];
-      setItems([]); setActive(0); setSelectedRow(0); setError(''); setProgress(''); setBusy(false); setDragging(false); setPreviewRotation(0);
+      setItems([]); setActive(0); setSelectedRow(0); setError(''); setProgress(''); setBusy(false); setPreparingKey(null); setDragging(false); setPreviewRotation(0);
     }
     onOpenChange(value);
   }
@@ -75,7 +84,7 @@ export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, 
     if (!files.length) { if (selected.length) setError('Envie uma foto em JPG, PNG ou WebP. Arquivos PDF ainda não são aceitos.'); return; }
     const skippedMessage = selected.length !== files.length ? 'Alguns arquivos foram ignorados. Envie fotos em JPG, PNG ou WebP.' : '';
     setError(skippedMessage);
-    setBusy(true); setSelectedRow(0); setPreviewRotation(0);
+    setBusy(true); setPreparingKey(replaceKey ?? null); setSelectedRow(0); setPreviewRotation(0);
     const abort = new AbortController(); controller.current = abort;
     const run = ++generation.current;
     const isCurrent = () => generation.current === run && controller.current === abort && !abort.signal.aborted;
@@ -95,15 +104,29 @@ export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, 
     try {
       if (!replaceKey) {
         const existing = items.flatMap(item => item.file ? [item.file] : []);
-        const unique = await uniquePhotoFiles(files, existing, abort.signal);
+        const registered = manifests.flatMap(manifest => (manifest.sourcePhotoHashes ?? []).map(hash => ({ hash, manifestId: manifest.id })));
+        const unique = await uniquePhotoFiles(files, existing, abort.signal, registered);
         if (!isCurrent()) return;
         files = unique.files;
-        setError([skippedMessage, unique.duplicates ? `${unique.duplicates} foto(s) repetida(s) ignorada(s).` : ''].filter(Boolean).join(' '));
+        const registeredDuplicates = unique.registeredDuplicates ?? [];
+        const repeated = unique.duplicates - registeredDuplicates.length;
+        const registeredMessages = [...new Set(registeredDuplicates.map(({ filename, manifestId }) => {
+          const driver = manifests.find(manifest => manifest.id === manifestId)?.driver;
+          return `${filename}: foto já cadastrada no pré ${manifestId}${driver ? ` · ${driver}` : ''}. Não foi lida novamente.`;
+        }))];
+        setError([skippedMessage, repeated > 0 ? `${repeated} foto(s) repetida(s) ignorada(s).` : '', ...registeredMessages].filter(Boolean).join(' '));
         if (!files.length) return;
       }
-      additions = files.map(file => {
+      const sourceHashes = await Promise.all(files.map(file => photoFingerprint(file)));
+      if (!isCurrent()) return;
+      setPreparingKey(null);
+      additions = files.map((file, index) => {
         const url = URL.createObjectURL(file); urls.current.push(url);
-        return { ...(previous ?? blank()), key: crypto.randomUUID(), file, filename: file.name, url, status: 'waiting', rows: previous?.rows ?? [{ ctc: '', nf: '', volumes: '' }], verification: undefined, headerReview: undefined, readingSource: undefined, readingFallback: undefined, edited: false };
+        const item: Draft = { ...(previous ?? blank()), key: crypto.randomUUID(), file, filename: file.name, url, status: 'waiting', rows: previous?.rows ?? [{ ctc: '', nf: '', volumes: '' }], verification: undefined, headerReview: undefined, readingSource: undefined, readingFallback: undefined, edited: false };
+        delete item.sourcePhotoHash;
+        const hash = sourceHashes[index];
+        if (hash) item.sourcePhotoHash = hash;
+        return item;
       });
       if (previous) releaseUrl(previous.url);
       cancelCurrent.current = () => {
@@ -146,12 +169,15 @@ export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, 
     } catch { if (isCurrent()) setError(additions.length ? 'Falha ao iniciar o leitor. Suas fotos continuam na lista para tentar novamente.' : 'Não foi possível preparar as fotos. Tente selecioná-las novamente.'); }
     finally {
       if (isCurrent()) {
-        setBusy(false); controller.current = null; cancelCurrent.current = null; setProgress('');
+        setBusy(false); setPreparingKey(null); controller.current = null; cancelCurrent.current = null; setProgress('');
         setItems(list => list.map(item => item.status === 'checking' ? { ...item, status: 'read' } : item.status === 'waiting' || item.status === 'reading' ? recoverable && additions.some(addition => addition.key === item.key) ? preservePrevious(item) : { ...item, status: 'error', message: 'Leitura interrompida. Tente ler esta foto novamente.' } : item));
       }
     }
   }
   function save(all: boolean) {
+    if (busy) return;
+    const conflict = findImportConflicts(manifests, items).find(item => all || item.index === active);
+    if (conflict) { setActive(conflict.index); setSelectedRow(conflict.row ?? 0); setError(''); return; }
     const chosen = all ? items : draft ? [draft] : [];
     const result = onCreate(chosen);
     if (!result.ok) { setError(result.error); setActive(all ? result.index : active); setSelectedRow(result.row ?? 0); return; }
@@ -163,7 +189,7 @@ export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, 
   }
   const waiting = draft?.status === 'waiting' || draft?.status === 'reading';
   const checking = draft?.status === 'checking';
-  const fieldsDisabled = waiting || checking;
+  const fieldsDisabled = waiting || checking || draft?.key === preparingKey;
   const filled = draft?.rows.filter(row => row.ctc && row.nf && Number(row.volumes) > 0 && row.client && row.recipient).length ?? 0;
   const photoCount = items.filter(item => item.file).length;
   const completed = items.filter(item => item.status === 'read' || item.status === 'error').length;
@@ -196,34 +222,34 @@ export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, 
       <aside className="import-queue" aria-label="Arquivos para importar">
         <div className="import-queue-heading"><div><span className="import-eyebrow">Sua lista</span><h3>{photoCount ? `${photoCount} ${photoCount === 1 ? 'foto' : 'fotos'}` : 'Novo pré'}</h3></div><span className="import-queue-count">{items.length}</span></div>
         <div className="import-batch-totals"><span><strong>{detected}</strong> CTCs</span><span><strong>{volumes}</strong> volumes</span></div>
-        {items.length > 1 && <label className="form-field import-mobile-select">Documento selecionado<select aria-label="Selecionar foto do lote" value={active} onChange={event => selectItem(Number(event.target.value))}>{items.map((item, i) => <option key={item.key} value={i}>{i + 1}. {item.id || item.filename} · {statusText(item)}</option>)}</select></label>}
+        {items.length > 1 && <label className="form-field import-mobile-select">Documento selecionado<select aria-label="Selecionar foto do lote" value={active} onChange={event => selectItem(Number(event.target.value))}>{items.map((item, i) => <option key={item.key} value={i}>{i + 1}. {item.id || item.filename} · {conflictIndices.has(i) ? 'Cadastro duplicado' : statusText(item)}</option>)}</select></label>}
         <div className="import-queue-list">{items.map((item, index) => <button type="button" className="import-queue-item" key={item.key} aria-label={`Revisar arquivo ${index + 1}: ${item.id || item.filename}`} aria-pressed={index === active} onClick={() => selectItem(index)}>
           <div className="import-queue-thumb">{item.url ? <img src={item.url} alt="" /> : <FileImage size={22} />}<span>{index + 1}</span></div>
-          <div className="import-queue-copy"><strong>{item.id || (item.file ? 'Identificando pré…' : 'Cadastro manual')}</strong><small>{item.driver || item.filename}</small><span className={`import-file-status ${needsReview(item) ? 'warning' : item.status === 'read' ? 'success' : ''}`}>{item.status === 'reading' || item.status === 'checking' ? <Loader2 className="animate-spin" /> : item.status === 'error' ? <AlertCircle /> : item.status === 'read' ? <CheckCircle2 /> : null}{statusText(item)}</span>{(item.status === 'reading' || item.status === 'checking') && item.progress && <span className="import-queue-progress">{item.progress}</span>}{(item.status === 'read' || item.status === 'checking') && <span className="import-queue-numbers">{documentCount(item)} CTCs · {volumeCount(item)} volumes</span>}</div>
+          <div className="import-queue-copy"><strong>{item.id || (item.file ? 'Identificando pré…' : 'Cadastro manual')}</strong><small>{item.driver || item.filename}</small><span className={`import-file-status ${conflictIndices.has(index) || needsReview(item) ? 'warning' : item.status === 'read' ? 'success' : ''}`}>{conflictIndices.has(index) ? <AlertCircle /> : item.status === 'reading' || item.status === 'checking' ? <Loader2 className="animate-spin" /> : item.status === 'error' ? <AlertCircle /> : item.status === 'read' ? <CheckCircle2 /> : null}{conflictIndices.has(index) ? 'Cadastro duplicado' : statusText(item)}</span>{(item.status === 'reading' || item.status === 'checking') && item.progress && <span className="import-queue-progress">{item.progress}</span>}{(item.status === 'read' || item.status === 'checking') && <span className="import-queue-numbers">{documentCount(item)} CTCs · {volumeCount(item)} volumes</span>}</div>
         </button>)}</div>
         <Button type="button" variant="outline" size="sm" className="import-manual-button" disabled={busy} onClick={() => { setItems(list => [...list, blank()]); selectItem(items.length); }}><Plus size={15} />Adicionar pré manualmente</Button>
         <p className="import-draft-note">Os documentos só serão salvos ao cadastrar. Fechar descarta os rascunhos e as fotos.</p>
       </aside>
       {draft && <form className="import-review" noValidate onSubmit={(event: FormEvent) => { event.preventDefault(); save(false); }}>
-        <div className="import-review-heading"><div><span className="import-eyebrow">Documento {active + 1} de {items.length}</span><h3>{draft.id || (draft.file ? 'Lendo seu documento' : 'Preencha os dados do pré')}</h3><p>{draft.file ? draft.filename : 'Cadastre os documentos sem enviar uma foto.'}</p></div><span className={`import-file-status ${needsReview(draft) ? 'warning' : draft.status === 'read' ? 'success' : ''}`}>{fieldsDisabled ? <Loader2 className="animate-spin" /> : draft.status === 'read' ? <CheckCircle2 /> : null}{statusText(draft)}</span></div>
+        <div className="import-review-heading"><div><span className="import-eyebrow">Documento {active + 1} de {items.length}</span><h3>{draft.id || (draft.file ? 'Lendo seu documento' : 'Preencha os dados do pré')}</h3><p>{draft.file ? draft.filename : 'Cadastre os documentos sem enviar uma foto.'}</p></div><span className={`import-file-status ${draftConflicts.length || needsReview(draft) ? 'warning' : draft.status === 'read' ? 'success' : ''}`}>{draftConflicts.length ? <AlertCircle /> : fieldsDisabled ? <Loader2 className="animate-spin" /> : draft.status === 'read' ? <CheckCircle2 /> : null}{draftConflicts.length ? 'Cadastro duplicado' : statusText(draft)}</span></div>
         {error && <div className="import-alert error" role="alert"><AlertCircle size={18} /><div><strong>Confira antes de cadastrar</strong><p>{error}</p></div></div>}
         {draft.status === 'error' && <div className="import-alert error" role="alert"><AlertCircle size={18} /><div><strong>Não foi possível concluir esta foto</strong><p>{draft.message}</p></div></div>}
         {draft.readingSource === 'local' ? <div className="import-alert warning" role="status"><AlertCircle size={19} /><div><strong>{checking ? 'Leitura local · conferindo por IA' : draft.readingFallback ? 'Leitura local de reserva' : 'Leitura local'}</strong><p>{checking ? 'Os campos locais já estão preenchidos. A IA está conferindo a foto; aguarde a conclusão ou pare para revisar a leitura local.' : 'Os dados foram lidos no navegador, sem conferência pela IA. Confira todas as linhas, CTCs, NFs, volumes, placa e nomes antes de cadastrar.'}</p>{headerMessages.map(message => <p key={message}>{message}</p>)}</div></div> : <>{draft.verification && <div className={`import-alert ${verificationPassed ? 'verified' : 'warning'}`} role="status">{verificationPassed ? draft.verification.status === 'matched' ? <CheckCheck size={19} /> : <CheckCircle2 size={19} /> : <AlertCircle size={19} />}<div><strong>{draft.edited ? 'Dados ajustados manualmente' : draft.verification.status === 'single' ? 'Leitura concluída com validação local' : draft.verification.status === 'matched' ? verifiedTitle : draft.verification.status === 'review' ? draft.verification.conflicts > 0 ? 'As leituras encontraram diferenças' : 'Há campos para conferir' : 'Leitura sem conferência independente'}</strong><p>{draft.edited ? 'A validação automática corresponde à leitura original. Confira também os campos que você alterou.' : draft.verification.status === 'single' ? 'A IA leu a foto uma vez. A validação local conferiu o formato dos campos e os totais disponíveis. Revise os dados antes de cadastrar.' : draft.verification.status === 'matched' ? verifiedDescription : draft.verification.status === 'review' ? draft.verification.conflicts > 0 ? `${draft.verification.conflicts} divergência(s). Confira os campos sinalizados na foto.` : 'Confira os avisos e os campos sinalizados na foto.' : 'Os dados foram extraídos sem conferência independente. Revise os campos antes de cadastrar.'}</p></div></div>}{!!headerMessages.length && <div className="import-alert warning" role="status"><AlertCircle size={18} /><div><strong>Conferir os dados do pré</strong>{headerMessages.map(message => <p key={message}>{message}</p>)}</div></div>}</>}
         <div className={`import-review-columns ${draft.url ? 'with-photo' : ''}`}>
           <section className="import-details-panel"><div className="import-section-title"><span>1</span><h4>Dados do pré</h4></div>
-            {draft.kind === 'dacte' && <label className="form-field import-target">DACTE avulso — vincular ao pré<select aria-label="Vincular DACTE ao pré" disabled={fieldsDisabled} value={draft.targetId || ''} onChange={event => update({ targetId: event.target.value })}><option value="">Selecione um pré ou preencha abaixo</option>{targets.map(item => <option key={item.id} value={item.id}>{item.id} · {item.driver}</option>)}</select></label>}
-            {!draft.targetId && <div className="import-manifest-fields"><label className="form-field">Número do pré<input aria-label="Número do pré" disabled={fieldsDisabled} value={draft.id} placeholder="DI00000000000" onChange={event => update({ id: event.target.value })} /></label><label className="form-field">Data de emissão do pré<input aria-label="Data de emissão do pré" type="date" disabled={fieldsDisabled} value={draft.issueDate ?? ''} onChange={event => update({ issueDate: event.target.value })} /></label><label className="form-field">Placa<input aria-label="Placa" disabled={fieldsDisabled} value={draft.plate} maxLength={8} placeholder="ABC1D23" onChange={event => update({ plate: event.target.value })} /></label><label className="form-field">Motorista<input aria-label="Motorista" disabled={fieldsDisabled} value={draft.driver} placeholder="Nome do motorista" onChange={event => update({ driver: event.target.value })} /></label></div>}
+            {draft.kind === 'dacte' && <label className="form-field import-target" data-conflict={!!draft.targetId && !!manifestConflicts.length}>DACTE avulso — vincular ao pré<select aria-label="Vincular DACTE ao pré" aria-invalid={draft.targetId && manifestConflicts.length ? true : undefined} aria-describedby={draft.targetId && manifestConflicts.length ? `${fieldId}-manifest-conflict` : undefined} disabled={fieldsDisabled} value={draft.targetId || ''} onChange={event => update({ targetId: event.target.value })}><option value="">Selecione um pré ou preencha abaixo</option>{targets.map(item => <option key={item.id} value={item.id}>{item.id} · {item.driver}</option>)}</select>{draft.targetId && manifestConflictNotice}</label>}
+            {!draft.targetId && <div className="import-manifest-fields"><label className="form-field" data-conflict={!!manifestConflicts.length}>Número do pré<input aria-label="Número do pré" aria-invalid={manifestConflicts.length ? true : undefined} aria-describedby={manifestConflicts.length ? `${fieldId}-manifest-conflict` : undefined} disabled={fieldsDisabled} value={draft.id} placeholder="DI00000000000" onChange={event => update({ id: event.target.value })} />{manifestConflictNotice}</label><label className="form-field">Data de emissão do pré<input aria-label="Data de emissão do pré" type="date" disabled={fieldsDisabled} value={draft.issueDate ?? ''} onChange={event => update({ issueDate: event.target.value })} /></label><label className="form-field">Placa<input aria-label="Placa" disabled={fieldsDisabled} value={draft.plate} maxLength={8} placeholder="ABC1D23" onChange={event => update({ plate: event.target.value })} /></label><label className="form-field">Motorista<input aria-label="Motorista" disabled={fieldsDisabled} value={draft.driver} placeholder="Nome do motorista" onChange={event => update({ driver: event.target.value })} /></label></div>}
             {!draft.targetId && <p className="import-date-note">Use a data impressa no cabeçalho do pré para contar os dias pendentes. Se não estiver legível, deixe em branco.</p>}
             {(draft.status === 'read' || checking) && <div className="import-document-totals"><span><strong>{documentCount(draft)}{draft.expectedRows != null && draft.expectedRows > 0 && draft.expectedRows !== documentCount(draft) ? ` / ${draft.expectedRows}` : ''}</strong> CTCs lidos</span><span><strong>{volumeCount(draft)}{draft.totalVolumes != null && draft.totalVolumes > 0 && draft.totalVolumes !== volumeCount(draft) ? ` / ${draft.totalVolumes}` : ''}</strong> volumes</span>{draft.seconds !== undefined && <span><strong>{draft.seconds.toFixed(1)} s</strong> de leitura</span>}</div>}
           </section>
           {draft.url && <section className="import-photo-panel"><div className="import-photo-heading"><span>Foto original</span><Button type="button" variant="ghost" size="icon" aria-label="Girar visualização da foto" title="Girar visualização da foto" onClick={() => setPreviewRotation(value => (value + 90) % 360)}><RotateCw size={15} /></Button></div><a href={draft.url} target="_blank" rel="noreferrer" className="import-photo-frame" aria-label="Ampliar foto original"><img src={draft.url} style={{ transform: `rotate(${previewRotation}deg)` }} alt="Documento enviado para conferência" /></a><span className="import-photo-caption">Toque na foto para ampliar</span></section>}
         </div>
         {waiting ? <div className="import-reading-placeholder" role="status"><ScanLine size={30} className={draft.status === 'reading' ? 'animate-pulse' : ''} /><strong>{draft.status === 'waiting' ? 'Esta foto está na fila' : 'Lendo todas as linhas do documento'}</strong><p>{draft.status === 'waiting' ? 'As fotos prontas já podem ser conferidas na lista.' : 'CTCs, notas fiscais, volumes e clientes aparecerão aqui.'}</p></div> : <>
-          <ManifestDocumentsEditor rows={draft.rows} onChange={rows => update({ rows })} selectedIndex={selectedRow} onSelect={setSelectedRow} disabled={fieldsDisabled} hideReviewNotice={draft.readingSource === 'local' ? LOCAL_ROW_NOTICE : undefined} />
+          <ManifestDocumentsEditor rows={draft.rows} onChange={rows => update({ rows })} selectedIndex={selectedRow} onSelect={setSelectedRow} disabled={fieldsDisabled} hideReviewNotice={draft.readingSource === 'local' ? LOCAL_ROW_NOTICE : undefined} ctcConflicts={ctcConflicts} />
           {draft.status === 'read' && <p className="import-completeness" role="status">{filled} de {draft.rows.length} CTC(s) com NF, volumes, cliente e destinatário preenchidos.{reviewCount(draft) > 0 && ` ${reviewCount(draft)} CTC(s) com campos para conferir.`}</p>}
         </>}
         {draft.file && !waiting && <div className="import-read-tools"><Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => { void readFiles([draft.file!], true, draft.key); }}><ScanLine size={15} />{draft.status === 'error' ? 'Tentar ler novamente' : 'Reler detalhes desta foto'}</Button>{draft.text && <details className="import-raw-text"><summary>Texto identificado</summary><textarea readOnly aria-label="Texto lido da foto" value={draft.text} /></details>}</div>}
-        <div className="import-form-footer"><div className="import-footer-info"><span>{documentCount(draft)} CTCs · {volumeCount(draft)} volumes</span><Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => { releaseUrl(draft.url); setItems(list => list.filter(item => item.key !== draft.key)); selectItem(Math.max(0, active - 1)); }}><Trash2 size={14} />{draft.file ? 'Remover foto' : 'Remover pré'}</Button></div><div className="import-save-actions"><Button type="submit" variant={items.length > 1 ? 'outline' : 'default'} disabled={busy || waiting}>{draft.targetId ? 'Adicionar ao pré' : 'Cadastrar pré'}</Button>{items.length > 1 && <Button type="button" disabled={busy} onClick={() => save(true)}>Cadastrar lote ({items.length})</Button>}</div></div>
+        <div className="import-form-footer"><div className="import-footer-info"><span>{documentCount(draft)} CTCs · {volumeCount(draft)} volumes</span><Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => { releaseUrl(draft.url); setItems(list => list.filter(item => item.key !== draft.key)); selectItem(Math.max(0, active - 1)); }}><Trash2 size={14} />{draft.file ? 'Remover foto' : 'Remover pré'}</Button></div><div className="import-save-actions"><Button type="submit" variant={items.length > 1 ? 'outline' : 'default'} disabled={busy || waiting || !!draftConflicts.length}>{draft.targetId ? 'Adicionar ao pré' : 'Cadastrar pré'}</Button>{items.length > 1 && <Button type="button" disabled={busy || !!conflicts.length} onClick={() => save(true)}>Cadastrar lote ({items.length})</Button>}</div></div>
         {items.length > 1 && <div className="import-file-navigation"><Button type="button" variant="ghost" size="sm" disabled={active === 0} onClick={() => selectItem(active - 1)}><ChevronLeft size={15} />Documento anterior</Button><span>{active + 1} / {items.length}</span><Button type="button" variant="ghost" size="sm" disabled={active === items.length - 1} onClick={() => selectItem(active + 1)}>Próximo documento<ChevronRight size={15} /></Button></div>}
       </form>}
     </div>

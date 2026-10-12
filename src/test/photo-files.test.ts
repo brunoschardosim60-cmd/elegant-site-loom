@@ -1,6 +1,6 @@
 import { webcrypto } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { uniquePhotoFiles } from '@/lib/photo-files';
+import { photoFingerprint, uniquePhotoFiles } from '@/lib/photo-files';
 
 beforeEach(() => vi.stubGlobal('crypto', webcrypto));
 afterEach(() => vi.unstubAllGlobals());
@@ -21,6 +21,28 @@ describe('duplicate import photos', () => {
     const file = photo('same page');
     expect((await uniquePhotoFiles([file])).files).toEqual([file]);
     expect((await uniquePhotoFiles([file])).files).toEqual([file]);
+  });
+
+  it('skips registered photos across imports before OCR, including renamed copies', async () => {
+    const original = photo('registered page');
+    const hash = (await photoFingerprint(original))!;
+    const next = photo('new page');
+    expect(await uniquePhotoFiles([photo('registered page', 'copy.jpg'), next], [], undefined, [{ hash: hash.toUpperCase(), manifestId: 'DI00601860020' }])).toEqual({
+      files: [next], duplicates: 1, registeredDuplicates: [{ filename: 'copy.jpg', manifestId: 'DI00601860020' }],
+    });
+  });
+
+  it('does not confuse different image contents with the same name or retain another account records', async () => {
+    const hash = (await photoFingerprint(photo('first')))!;
+    const changed = photo('second');
+    expect(await uniquePhotoFiles([changed], [], undefined, [{ hash, manifestId: 'DI00601860020' }])).toEqual({ files: [changed], duplicates: 0 });
+    const original = photo('first');
+    expect(await uniquePhotoFiles([original])).toEqual({ files: [original], duplicates: 0 });
+  });
+
+  it('uses the actual bytes for a stable SHA-256 fingerprint without retaining a read result', async () => {
+    expect(await photoFingerprint(photo('abc'))).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+    expect(await photoFingerprint(photo('abc', 'renamed.jpg'))).toBe(await photoFingerprint(photo('abc')));
   });
 
   it('keeps distinct files if content hashing is unavailable', async () => {

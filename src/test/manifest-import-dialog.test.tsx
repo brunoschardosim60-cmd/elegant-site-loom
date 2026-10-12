@@ -4,17 +4,19 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ManifestImportDialog } from '@/components/manifest-import-dialog';
 import type { readAiPhotos } from '@/lib/photo-ai';
 import type { ImportDraft } from '@/lib/manifest-import';
+import type { Manifest } from '@/lib/conference';
 import type { PhotoReadResult } from '@/lib/photo-reader';
 import { LOCAL_HEADER_NOTICE, LOCAL_ROW_NOTICE } from '@/lib/local-photo';
 
-const mocks = vi.hoisted(() => ({ read: vi.fn(), unique: vi.fn() }));
+const mocks = vi.hoisted(() => ({ read: vi.fn(), unique: vi.fn(), fingerprint: vi.fn() }));
 vi.mock('@/lib/photo-reader.functions', () => ({ photoReaderStatus: vi.fn(async () => ({ configured: true })) }));
 vi.mock('@/lib/photo-reader', () => ({ readPhotosWithFallback: mocks.read }));
-vi.mock('@/lib/photo-files', () => ({ uniquePhotoFiles: mocks.unique }));
+vi.mock('@/lib/photo-files', () => ({ uniquePhotoFiles: mocks.unique, photoFingerprint: mocks.fingerprint }));
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 beforeEach(() => {
   mocks.read.mockReset();
   mocks.unique.mockReset().mockImplementation(async (files: File[]) => ({ files, duplicates: 0 }));
+  mocks.fingerprint.mockReset().mockResolvedValue(undefined);
   vi.stubGlobal('URL', class extends URL { static override createObjectURL = vi.fn(() => 'blob:photo'); static override revokeObjectURL = vi.fn(); });
 });
 const result = (id: string, ctc: string, nf: string) => ({
@@ -396,4 +398,143 @@ it.each(['local fallback', 'partial Gemini', 'error'] as const)('preserves all p
     id: 'DI00000000001', driver: 'MOTORISTA CONFERIDO', plate: 'ABC1D24', readingSource: 'gemini', edited: true,
     rows: [expect.objectContaining({ ctc: '0000000001', nf: '12-1', client: 'LAB CONFERIDO' }), secondRow],
   })]);
+});
+
+const registeredManifest = (): Manifest => ({ id: 'DI00000000008', driver: 'MOTORISTA ORIGINAL', plate: 'ABC1D23', date: '2026-08-28', finishedAt: '2026-08-29', documents: [{ id: 'registered-ctc', ctc: '0000000008', nf: '88-1', volumes: 2, received: true }] });
+
+it('warns inside the pre and CTC fields before saving, includes the original driver, and clears conflicts immediately after correction', async () => {
+  const existing = registeredManifest();
+  const create = vi.fn((_: ImportDraft[]) => ({ ok: true as const, manifests: [] }));
+  render(<ManifestImportDialog open onOpenChange={vi.fn()} manifests={[existing]} onCreate={create} />);
+  await waitFor(() => expect(screen.getByLabelText('Enviar várias fotos')).not.toBeDisabled());
+  fireEvent.change(screen.getByLabelText('Número do pré'), { target: { value: existing.id } });
+  fireEvent.change(screen.getByLabelText('Motorista'), { target: { value: 'NOVO MOTORISTA' } });
+  fireEvent.change(screen.getByLabelText('Placa'), { target: { value: 'ABC1D24' } });
+  fireEvent.change(screen.getByLabelText('CTC'), { target: { value: existing.documents[0]!.ctc } });
+  const id = screen.getByLabelText('Número do pré'), ctc = screen.getByLabelText('CTC');
+  expect(id).toHaveAttribute('aria-invalid', 'true');
+  expect(ctc).toHaveAttribute('aria-invalid', 'true');
+  expect(id).toHaveAccessibleDescription(expect.stringContaining('MOTORISTA ORIGINAL'));
+  expect(ctc).toHaveAccessibleDescription(expect.stringContaining(existing.id));
+  expect(screen.getByRole('button', { name: 'Cadastrar pré' })).toBeDisabled();
+  fireEvent.submit(ctc.closest('form')!);
+  expect(create).not.toHaveBeenCalled();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  fireEvent.change(id, { target: { value: 'DI00000000009' } });
+  expect(id).not.toHaveAttribute('aria-invalid');
+  expect(screen.getByRole('button', { name: 'Cadastrar pré' })).toBeDisabled();
+  fireEvent.change(ctc, { target: { value: '0000000009' } });
+  expect(ctc).not.toHaveAttribute('aria-invalid');
+  expect(screen.getByRole('button', { name: 'Cadastrar pré' })).not.toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Cadastrar pré' }));
+  expect(create.mock.calls[0]![0][0]!.rows[0]).not.toHaveProperty('review');
+});
+
+it('blocks both occurrences of a CTC duplicated between draft photos and allows the batch after correcting one', async () => {
+  mocks.read.mockImplementation(async (_files: File[], receive: Parameters<typeof readAiPhotos>[1]) => {
+    receive(0, result('DI00000000001', '0000000001', '11-1'));
+    receive(1, result('DI00000000002', '0000000001', '22-1'));
+  });
+  const create = vi.fn((_: ImportDraft[]) => ({ ok: true as const, manifests: [] }));
+  render(<ManifestImportDialog open onOpenChange={vi.fn()} manifests={[]} onCreate={create} />);
+  await waitFor(() => expect(screen.getByLabelText('Enviar várias fotos')).not.toBeDisabled());
+  fireEvent.change(screen.getByLabelText('Enviar várias fotos'), { target: { files: [new File(['a'], 'a.jpg', { type: 'image/jpeg' }), new File(['b'], 'b.jpg', { type: 'image/jpeg' })] } });
+  await waitFor(() => expect(screen.getByLabelText('CTC')).toHaveAttribute('aria-invalid', 'true'));
+  expect(screen.getByRole('button', { name: 'Cadastrar pré' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Cadastrar lote (2)' })).toBeDisabled();
+  for (const index of [1, 2]) expect(within(screen.getByRole('button', { name: `Revisar arquivo ${index}: DI0000000000${index}` })).getByText('Cadastro duplicado')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Revisar arquivo 2: DI00000000002' }));
+  expect(screen.getByLabelText('CTC')).toHaveAttribute('aria-invalid', 'true');
+  fireEvent.change(screen.getByLabelText('CTC'), { target: { value: '0000000002' } });
+  expect(screen.getByLabelText('CTC')).not.toHaveAttribute('aria-invalid');
+  expect(screen.getByRole('button', { name: 'Cadastrar lote (2)' })).not.toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Revisar arquivo 1: DI00000000001' }));
+  expect(screen.getByLabelText('CTC')).not.toHaveAttribute('aria-invalid');
+  expect(screen.getByRole('button', { name: 'Cadastrar pré' })).not.toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Cadastrar lote (2)' }));
+  expect(create.mock.calls[0]![0].map(draft => draft.rows[0]!.ctc)).toEqual(['0000000001', '0000000002']);
+  expect(create.mock.calls[0]![0].every(draft => !draft.rows[0]!.review?.length)).toBe(true);
+});
+
+it('passes registered photo hashes before OCR and identifies an already registered filename and driver without reading it', async () => {
+  const hash = 'a'.repeat(64), existing = { ...registeredManifest(), sourcePhotoHashes: [hash] };
+  const file = new File(['registered photo'], 'foto-repetida.jpg', { type: 'image/jpeg' });
+  mocks.unique.mockResolvedValueOnce({ files: [], duplicates: 1, registeredDuplicates: [{ filename: file.name, manifestId: existing.id }] });
+  render(<ManifestImportDialog open onOpenChange={vi.fn()} manifests={[existing]} onCreate={() => ({ ok: true, manifests: [] })} />);
+  await waitFor(() => expect(screen.getByLabelText('Enviar várias fotos')).not.toBeDisabled());
+  fireEvent.change(screen.getByLabelText('Enviar várias fotos'), { target: { files: [file] } });
+  expect(await screen.findByText(`${file.name}: foto já cadastrada no pré ${existing.id} · ${existing.driver}. Não foi lida novamente.`)).toBeInTheDocument();
+  expect(mocks.unique.mock.calls[0]![3]).toEqual([{ hash, manifestId: existing.id }]);
+  expect(mocks.read).not.toHaveBeenCalled();
+  expect(mocks.fingerprint).not.toHaveBeenCalled();
+  expect(URL.createObjectURL).not.toHaveBeenCalled();
+  expect(screen.queryByText('1 foto(s) repetida(s) ignorada(s).')).not.toBeInTheDocument();
+});
+
+it('submits a photo fingerprint only with its own reviewed photo and leaves manual drafts without that hash', async () => {
+  const hash = 'b'.repeat(64);
+  mocks.fingerprint.mockResolvedValue(hash);
+  mocks.read.mockImplementation(async (_files: File[], receive: Parameters<typeof readAiPhotos>[1]) => receive(0, result('DI00000000001', '0000000001', '11-1')));
+  const create = vi.fn((_: ImportDraft[]) => ({ ok: true as const, manifests: [] }));
+  render(<ManifestImportDialog open onOpenChange={vi.fn()} manifests={[]} onCreate={create} />);
+  await waitFor(() => expect(screen.getByLabelText('Enviar várias fotos')).not.toBeDisabled());
+  fireEvent.change(screen.getByLabelText('Enviar várias fotos'), { target: { files: [new File(['a'], 'a.jpg', { type: 'image/jpeg' })] } });
+  await screen.findByText('Cabeçalho e números conferidos');
+  expect(create).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Adicionar pré manualmente' }));
+  fireEvent.change(screen.getByLabelText('Número do pré'), { target: { value: 'DI00000000002' } });
+  fireEvent.change(screen.getByLabelText('CTC'), { target: { value: '0000000002' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Cadastrar pré' }));
+  expect(create.mock.calls[0]![0][0]).not.toHaveProperty('sourcePhotoHash');
+  fireEvent.click(screen.getByRole('button', { name: 'Cadastrar pré' }));
+  expect(create.mock.calls[1]![0][0]).toMatchObject({ id: 'DI00000000001', sourcePhotoHash: hash });
+});
+
+it('discards a late fingerprint after closing and reopening without starting OCR or adding a photo', async () => {
+  let finishHash!: (value: string) => void;
+  mocks.fingerprint.mockImplementation(() => new Promise<string>(resolve => { finishHash = resolve; }));
+  function Harness() {
+    const [open, setOpen] = useState(true);
+    return <><button onClick={() => setOpen(true)}>Reabrir</button><ManifestImportDialog open={open} onOpenChange={setOpen} manifests={[]} onCreate={() => ({ ok: true, manifests: [] })} /></>;
+  }
+  render(<Harness />);
+  await waitFor(() => expect(screen.getByLabelText('Enviar várias fotos')).not.toBeDisabled());
+  fireEvent.change(screen.getByLabelText('Enviar várias fotos'), { target: { files: [new File(['a'], 'a.jpg', { type: 'image/jpeg' })] } });
+  await waitFor(() => expect(mocks.fingerprint).toHaveBeenCalledOnce());
+  fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Reabrir' }));
+  await act(async () => { finishHash('c'.repeat(64)); });
+  expect(mocks.read).not.toHaveBeenCalled();
+  expect(URL.createObjectURL).not.toHaveBeenCalled();
+  expect(screen.getByLabelText('Número do pré')).toHaveValue('');
+  expect(screen.getByLabelText('CTC')).toHaveValue('');
+  expect(screen.getByLabelText('Enviar várias fotos')).not.toBeDisabled();
+});
+
+it('locks only the draft being reread during delayed fingerprint preparation and preserves edits to another finished draft', async () => {
+  let finishHash!: (hash: string) => void;
+  mocks.fingerprint.mockResolvedValueOnce('a'.repeat(64)).mockResolvedValueOnce('b'.repeat(64)).mockImplementationOnce(() => new Promise<string>(resolve => { finishHash = resolve; }));
+  mocks.read.mockImplementationOnce(async (_files: File[], receive: Parameters<typeof readAiPhotos>[1]) => {
+    receive(0, result('DI00000000001', '0000000001', '11-1'));
+    receive(1, result('DI00000000002', '0000000002', '22-1'));
+  }).mockImplementationOnce(async (_files: File[], receive: Parameters<typeof readAiPhotos>[1]) => receive(0, { error: 'Releitura indisponível.' }));
+  render(<ManifestImportDialog open onOpenChange={vi.fn()} manifests={[]} onCreate={() => ({ ok: true, manifests: [] })} />);
+  await waitFor(() => expect(screen.getByLabelText('Enviar várias fotos')).not.toBeDisabled());
+  fireEvent.change(screen.getByLabelText('Enviar várias fotos'), { target: { files: [new File(['a'], 'a.jpg', { type: 'image/jpeg' }), new File(['b'], 'b.jpg', { type: 'image/jpeg' })] } });
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Cadastrar lote (2)' })).not.toBeDisabled());
+  fireEvent.change(screen.getByLabelText('NF-série'), { target: { value: '13-1' } });
+  fireEvent.change(screen.getByLabelText('Motorista'), { target: { value: 'MOTORISTA CONFERIDO' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Reler detalhes desta foto' }));
+  await waitFor(() => expect(finishHash).toBeDefined());
+  for (const field of ['Número do pré', 'Motorista', 'CTC', 'NF-série', 'Volumes', 'Cliente / laboratório']) expect(screen.getByLabelText(field)).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Revisar arquivo 2: DI00000000002' }));
+  expect(screen.getByLabelText('NF-série')).not.toBeDisabled();
+  fireEvent.change(screen.getByLabelText('NF-série'), { target: { value: '23-1' } });
+  await act(async () => { finishHash('a'.repeat(64)); });
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Cadastrar lote (2)' })).not.toBeDisabled());
+  expect(screen.getByLabelText('NF-série')).toHaveValue('13-1');
+  expect(screen.getByLabelText('Motorista')).toHaveValue('MOTORISTA CONFERIDO');
+  expect(screen.getByLabelText('NF-série')).not.toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Revisar arquivo 1: DI00000000002' }));
+  expect(screen.getByLabelText('NF-série')).toHaveValue('23-1');
 });

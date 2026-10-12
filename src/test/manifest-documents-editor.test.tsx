@@ -50,3 +50,23 @@ it('does not flag the client or CTC field just because their words occur in a re
   expect(screen.getByLabelText('Destinatário')).toHaveAccessibleDescription(`Confira na foto ${message}`);
   for (const field of ['CTC', 'NF-série', 'Cliente / laboratório']) expect(screen.getByLabelText(field)).not.toHaveAttribute('aria-describedby');
 });
+
+it('shows an external duplicate conflict only on its CTC field and includes it in review navigation without changing OCR notes', () => {
+  const rows = [{ ctc: '0012345678', nf: '12-1', volumes: '2', review: ['Confira NF'] }, { ctc: '1234567890', nf: '34-1', volumes: '3' }];
+  const message = 'CTC 1234567890 já cadastrado no pré DI00123456789 · Motorista original.';
+  const select = vi.fn();
+  const { rerender } = render(<ManifestDocumentsEditor rows={rows} onChange={vi.fn()} selectedIndex={0} onSelect={select} ctcConflicts={{ 1: [message] }} />);
+  expect(screen.getByRole('option', { name: /2\. 1234567890.*Duplicado/ })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Ir para campo sinalizado' }));
+  expect(select).toHaveBeenCalledWith(1);
+  rerender(<ManifestDocumentsEditor rows={rows} onChange={vi.fn()} selectedIndex={1} onSelect={select} ctcConflicts={{ 1: [message] }} />);
+  expect(screen.getByLabelText('CTC')).toHaveAttribute('aria-invalid', 'true');
+  expect(screen.getByLabelText('CTC')).toHaveAccessibleDescription(`CTC repetido ${message}`);
+  expect(within(screen.getByLabelText('CTC').closest('label')!).getByText(message)).toBeInTheDocument();
+  for (const field of ['NF-série', 'Volumes']) expect(screen.getByLabelText(field)).not.toHaveAttribute('aria-describedby');
+  rerender(<ManifestDocumentsEditor rows={rows} onChange={vi.fn()} selectedIndex={1} onSelect={select} ctcConflicts={{}} />);
+  expect(screen.getByLabelText('CTC')).not.toHaveAttribute('aria-invalid');
+  expect(screen.queryByText(message)).not.toBeInTheDocument();
+  expect(rows[0]!.review).toEqual(['Confira NF']);
+  expect(rows[1]).not.toHaveProperty('review');
+});

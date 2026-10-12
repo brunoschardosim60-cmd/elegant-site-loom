@@ -12,7 +12,7 @@ function bytes(file: File): Promise<ArrayBuffer> {
   });
 }
 
-function fingerprint(file: File): Promise<string | undefined> {
+export function photoFingerprint(file: File): Promise<string | undefined> {
   let hash = hashes.get(file);
   if (!hash) {
     hash = (async () => {
@@ -39,29 +39,40 @@ function untilCancelled(hash: Promise<string | undefined>, signal?: AbortSignal)
   });
 }
 
-/** Ignore byte-identical photos within this import, regardless of their names.
+export type RegisteredPhoto = { hash: string; manifestId: string };
+export type PhotoSelection = { files: File[]; duplicates: number; registeredDuplicates?: { filename: string; manifestId: string }[] };
+
+/** Ignore byte-identical photos within this import and registered photos,
+ * regardless of their names. Registered hashes come from this account's saved
+ * manifests; no photo contents or unsaved reading results are retained.
  * If hashing is unavailable, retain the file rather than risk dropping a page.
  */
-export async function uniquePhotoFiles(selected: File[], existing: File[] = [], signal?: AbortSignal): Promise<{ files: File[]; duplicates: number }> {
+export async function uniquePhotoFiles(selected: File[], existing: File[] = [], signal?: AbortSignal, registered: RegisteredPhoto[] = []): Promise<PhotoSelection> {
   const files: File[] = [];
   const seen = new Set(existing);
   const fingerprints = new Set<string>();
+  const saved = new Map(registered.filter(item => /^[a-f0-9]{64}$/i.test(item.hash)).map(item => [item.hash.toLowerCase(), item.manifestId]));
+  const registeredDuplicates: NonNullable<PhotoSelection['registeredDuplicates']> = [];
   let duplicates = 0;
   for (const file of existing) {
     if (signal?.aborted) return { files: [], duplicates: 0 };
-    const hash = await untilCancelled(fingerprint(file), signal);
+    const hash = await untilCancelled(photoFingerprint(file), signal);
     if (hash) fingerprints.add(hash);
   }
   for (const file of selected) {
     if (signal?.aborted) return { files: [], duplicates: 0 };
-    const hash = await untilCancelled(fingerprint(file), signal);
+    const hash = await untilCancelled(photoFingerprint(file), signal);
     if (signal?.aborted) return { files: [], duplicates: 0 };
-    if (seen.has(file) || (hash && fingerprints.has(hash))) duplicates++;
+    const manifestId = hash ? saved.get(hash) : undefined;
+    if (manifestId) {
+      duplicates++;
+      registeredDuplicates.push({ filename: file.name, manifestId });
+    } else if (seen.has(file) || (hash && fingerprints.has(hash))) duplicates++;
     else {
       files.push(file);
       seen.add(file);
       if (hash) fingerprints.add(hash);
     }
   }
-  return { files, duplicates };
+  return { files, duplicates, ...(registeredDuplicates.length ? { registeredDuplicates } : {}) };
 }

@@ -6,4 +6,7 @@
 .import-field-warning > span, .import-inline-review > span { display: grid; gap: 3px; min-width: 0; }
 .import-field-warning strong { font-weight: 700; }
 .import-inline-review { margin-top: 12px; }
+.import-dialog .form-field[data-conflict="true"] > input, .import-dialog .form-field[data-conflict="true"] > select, .import-ctc-editor .form-field[data-conflict="true"] > input { border-color: var(--destructive); background: color-mix(in oklch, var(--destructive) 5%, var(--card)); }
+.import-field-conflict { color: var(--destructive); }
+.import-manifest-fields { align-items: start; }
 @media (max-width: 760px) { .import-field-warning, .import-inline-review { font-size: 11px; } .import-ctc-fields .import-remove-ctc { margin-top: 25px; } }

@@ -11,7 +11,9 @@ vi.mock('@/lib/photo-reader.functions', () => ({ photoReaderStatus: async () => 
 const saved = { manifests: [{ id: 'DI00123456789', driver: 'Teste', plate: 'ABC1234', date: '2026-10-11', documents: [{ id: 'doc', ctc: '0000000001', nf: '123-1', volumes: 2, received: false }] }], activity: [], issues: [] };
 beforeEach(() => { mocks.read.mockResolvedValue({ data: { revision: 7, data: saved }, error: null }); mocks.rpc.mockResolvedValue({ data: 8, error: null }); });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
-it('restores saved records and only saves changes with the loaded revision', async () => {
+it('restores saved records and photo fingerprints and only saves changes with the loaded revision', async () => {
+  const photoHash = 'a'.repeat(64);
+  mocks.read.mockResolvedValue({ data: { revision: 7, data: { ...saved, manifests: saved.manifests.map(item => ({ ...item, sourcePhotoHashes: [photoHash] })) } }, error: null });
   render(<AccountWorkspace />);
   const button = await screen.findByRole('button', { name: 'Marcar CTC 0000000001 como recebido' });
   expect(mocks.rpc).not.toHaveBeenCalled();
@@ -19,6 +21,7 @@ it('restores saved records and only saves changes with the loaded revision', asy
   await waitFor(() => expect(mocks.rpc).toHaveBeenCalledTimes(1));
   expect(mocks.rpc.mock.calls[0]?.[1].expected_revision).toBe(7);
   expect(mocks.rpc.mock.calls[0]?.[1].next_data.manifests[0].documents[0].received).toBe(true);
+  expect(mocks.rpc.mock.calls[0]?.[1].next_data.manifests[0].sourcePhotoHashes).toEqual([photoHash]);
   await screen.findByText('Todos os dados salvos');
 });
 it('keeps unsaved changes visible and retries after a save failure', async () => {
