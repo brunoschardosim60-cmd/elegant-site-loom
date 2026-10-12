@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { readPhotoWithGemini } from '@/lib/photo-reader.functions';
+import { photoReaderStatus, readPhotoWithGemini } from '@/lib/photo-reader.functions';
 
 const mocks = vi.hoisted(() => ({ fetch: vi.fn(), user: vi.fn(), request: vi.fn(), client: vi.fn() }));
 vi.mock('@tanstack/react-start', () => ({ createServerFn: () => {
@@ -13,11 +13,12 @@ const input = { data: { accessToken: 'synthetic-session-token', data: 'a'.repeat
 const parsedPhoto = { kind: 'pre', id: 'DI000000001', plate: 'ABC1D23', driver: 'MOTORISTA', issueDate: '2026-08-28', expectedRows: 1, totalVolumes: 2, clockwiseRotation: 0,
   documents: [{ ctc: '0000000001', nf: '100-1', volumes: '2', client: 'LAB', recipient: 'CLIENTE', review: [] }],
 };
+const successResponse = () => new Response(JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify(parsedPhoto) }] } }] }));
 let user = 0;
 const advanceUntil = (startedAt: number, elapsed: number) => vi.advanceTimersByTimeAsync(Math.max(0, startedAt + elapsed - Date.now()));
 beforeEach(() => {
   vi.clearAllMocks(); vi.useFakeTimers();
-  vi.stubEnv('GEMINI_API_KEY', 'synthetic-provider-key'); vi.stubEnv('GEMINI_OCR_MODEL', undefined); vi.stubEnv('GEMINI_OCR_VERIFY_MODEL', undefined);
+  vi.stubEnv('GEMINI_API_KEY', 'synthetic-provider-key'); vi.stubEnv('GEMINI_API_KEY_FALLBACK', undefined); vi.stubEnv('GEMINI_OCR_MODEL', undefined); vi.stubEnv('GEMINI_OCR_VERIFY_MODEL', undefined);
   mocks.user.mockResolvedValue({ data: { user: { id: `server-test-${++user}` } }, error: null });
   mocks.client.mockImplementation(() => ({ auth: { getUser: mocks.user } }));
   mocks.request.mockReturnValue({ signal: new AbortController().signal });
@@ -220,4 +221,146 @@ it('returns provider unavailability without an automatic second attempt or expos
   expect(mocks.fetch).toHaveBeenCalledOnce();
   expect(JSON.stringify(result)).not.toContain('do-not-show');
   expect(JSON.stringify(vi.mocked(console.warn).mock.calls)).not.toContain('do-not-show');
+});
+
+it('keeps a successful primary reading at one provider call even with a reserve configured', async () => {
+  vi.stubEnv('GEMINI_API_KEY_FALLBACK', 'synthetic-reserve-key');
+  mocks.fetch.mockResolvedValue(successResponse());
+  expect(await readPhotoWithGemini(input)).toMatchObject({ ok: true });
+  expect(mocks.fetch).toHaveBeenCalledOnce();
+  expect(mocks.fetch.mock.calls[0]![1].headers['x-goog-api-key']).toBe('synthetic-provider-key');
+});
+
+it.each([401, 403, 500, 503, 599, 400])('tries one distinct reserve after an eligible HTTP %s access or technical failure', async status => {
+  vi.stubEnv('GEMINI_API_KEY_FALLBACK', 'synthetic-reserve-key');
+  mocks.fetch.mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: 'API key invalid synthetic-provider-key' } }), { status })).mockResolvedValueOnce(successResponse());
+  const result = await readPhotoWithGemini(input);
+  expect(result).toMatchObject({ ok: true, pre: { documents: [{ ctc: '0000000001', nf: '100-1', volumes: '2' }] } });
+  expect(mocks.fetch).toHaveBeenCalledTimes(2);
+  expect(mocks.fetch.mock.calls.map(([, init]) => init.headers['x-goog-api-key'])).toEqual(['synthetic-provider-key', 'synthetic-reserve-key']);
+  expect(mocks.fetch.mock.calls[1]![1].signal).toBe(mocks.fetch.mock.calls[0]![1].signal);
+  const output = JSON.stringify([result, vi.mocked(console.warn).mock.calls]);
+  expect(output).not.toContain('synthetic-provider-key');
+  expect(output).not.toContain('synthetic-reserve-key');
+});
+
+it('uses a reserve once for a connection error but returns a safe error after both fail', async () => {
+  vi.stubEnv('GEMINI_API_KEY_FALLBACK', 'synthetic-reserve-key');
+  mocks.fetch.mockRejectedValueOnce(new Error('network api_key=synthetic-provider-key')).mockRejectedValueOnce(new Error('network api_key=synthetic-reserve-key'));
+  const result = await readPhotoWithGemini(input);
+  expect(result).toMatchObject({ ok: false, unavailable: true, retryable: false });
+  expect(mocks.fetch).toHaveBeenCalledTimes(2);
+  const output = JSON.stringify([result, vi.mocked(console.warn).mock.calls]);
+  expect(output).not.toContain('synthetic-provider-key');
+  expect(output).not.toContain('synthetic-reserve-key');
+});
+
+it('recovers a primary connection error with one successful reserve attempt', async () => {
+  vi.stubEnv('GEMINI_API_KEY_FALLBACK', 'synthetic-reserve-key');
+  mocks.fetch.mockRejectedValueOnce(new TypeError('Fetch failed')).mockResolvedValueOnce(successResponse());
+  expect(await readPhotoWithGemini(input)).toMatchObject({ ok: true });
+  expect(mocks.fetch).toHaveBeenCalledTimes(2);
+});
+
+it.each([429, 402])('does not use a reserve to bypass HTTP %s quota or billing limits', async status => {
+  vi.stubEnv('GEMINI_API_KEY_FALLBACK', 'synthetic-reserve-key');
+  mocks.fetch.mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: 'Quota per day exhausted' } }), { status }));
+  const result = await readPhotoWithGemini(input);
+  expect(result).toMatchObject({ ok: false, retryable: false });
+  if (status === 429) expect(result).toHaveProperty('quota', 'daily');
+  expect(mocks.fetch).toHaveBeenCalledOnce();
+});
+
+it.each(['connection', '503'] as const)('does not block the primary until midnight when a %s failure is followed by daily quota on the reserve', async failure => {
+  vi.stubEnv('GEMINI_API_KEY_FALLBACK', 'synthetic-reserve-key');
+  if (failure === 'connection') mocks.fetch.mockRejectedValueOnce(new TypeError('Fetch failed'));
+  else mocks.fetch.mockResolvedValueOnce(new Response('unavailable', { status: 503 }));
+  mocks.fetch.mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: 'Quota per day exhausted' } }), { status: 429 }));
+  const result = await readPhotoWithGemini(input);
+  expect(result).toEqual({ ok: false, unavailable: true, retryable: false, error: 'Cota diária do Gemini esgotada. Aguarde a renovação da cota ou ative o faturamento no Google AI Studio.' });
+  expect(result).not.toHaveProperty('quota');
+  expect(mocks.fetch).toHaveBeenCalledTimes(2);
+  expect(mocks.fetch.mock.calls.map(([, init]) => init.headers['x-goog-api-key'])).toEqual(['synthetic-provider-key', 'synthetic-reserve-key']);
+});
+
+it('keeps the daily block when the reserve is the only configured credential', async () => {
+  vi.stubEnv('GEMINI_API_KEY', ''); vi.stubEnv('GEMINI_API_KEY_FALLBACK', 'synthetic-reserve-key');
+  mocks.fetch.mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: 'Quota per day exhausted' } }), { status: 429 }));
+  expect(await readPhotoWithGemini(input)).toMatchObject({ ok: false, quota: 'daily', retryable: false });
+  expect(mocks.fetch).toHaveBeenCalledOnce();
+});
+
+it.each(['JSON schema constraint unsupported', 'Image inlineData base64 invalid', 'Thinking resolution unsupported', 'Invalid request'])('does not retry shared HTTP 400 payload or model errors with another credential: %s', async message => {
+  vi.stubEnv('GEMINI_API_KEY_FALLBACK', 'synthetic-reserve-key');
+  mocks.fetch.mockResolvedValueOnce(new Response(JSON.stringify({ error: { message } }), { status: 400 }));
+  expect(await readPhotoWithGemini(input)).toMatchObject({ ok: false, retryable: false });
+  expect(mocks.fetch).toHaveBeenCalledOnce();
+});
+
+it('does not repeat an HTTP 200 response whose transcription is invalid', async () => {
+  vi.stubEnv('GEMINI_API_KEY_FALLBACK', 'synthetic-reserve-key');
+  mocks.fetch.mockResolvedValueOnce(new Response(JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: 'invalid transcription json' }] } }] })));
+  expect(await readPhotoWithGemini(input)).toMatchObject({ ok: false });
+  expect(mocks.fetch).toHaveBeenCalledOnce();
+});
+
+it.each(['synthetic-provider-key', ' synthetic-provider-key ', '', '   '])('ignores a duplicate or empty reserve credential', async reserve => {
+  vi.stubEnv('GEMINI_API_KEY_FALLBACK', reserve);
+  mocks.fetch.mockResolvedValue(new Response('unavailable', { status: 503 }));
+  expect(await readPhotoWithGemini(input)).toMatchObject({ ok: false, unavailable: true });
+  expect(mocks.fetch).toHaveBeenCalledOnce();
+});
+
+it('accepts a reserve as the only configured credential without exposing it or its count in status', async () => {
+  vi.stubEnv('GEMINI_API_KEY', '  '); vi.stubEnv('GEMINI_API_KEY_FALLBACK', 'synthetic-reserve-key');
+  expect(await photoReaderStatus()).toEqual({ configured: true });
+  mocks.fetch.mockResolvedValue(successResponse());
+  const result = await readPhotoWithGemini(input);
+  expect(result).toMatchObject({ ok: true });
+  expect(mocks.fetch).toHaveBeenCalledOnce();
+  expect(mocks.fetch.mock.calls[0]![1].headers['x-goog-api-key']).toBe('synthetic-reserve-key');
+  expect(JSON.stringify(result)).not.toContain('synthetic-reserve-key');
+});
+
+it('reports only unconfigured status when neither credential is provided', async () => {
+  vi.stubEnv('GEMINI_API_KEY', ''); vi.stubEnv('GEMINI_API_KEY_FALLBACK', '  ');
+  expect(await photoReaderStatus()).toEqual({ configured: false });
+  expect(await readPhotoWithGemini(input)).toMatchObject({ ok: false, unavailable: true });
+  expect(mocks.fetch).not.toHaveBeenCalled();
+});
+
+it('does not start a reserve if closing races with the primary access failure', async () => {
+  vi.stubEnv('GEMINI_API_KEY_FALLBACK', 'synthetic-reserve-key');
+  const controller = new AbortController();
+  mocks.request.mockReturnValue({ signal: controller.signal });
+  mocks.fetch.mockImplementationOnce(async () => { controller.abort(); return new Response('access denied', { status: 403 }); });
+  expect(await readPhotoWithGemini(input)).toEqual({ ok: false, retryable: false, fallback: false, error: 'Leitura cancelada.' });
+  expect(mocks.fetch).toHaveBeenCalledOnce();
+});
+
+it('keeps the reserve inside the original deadline, including time spent waiting for a primary failure', async () => {
+  vi.stubEnv('GEMINI_API_KEY_FALLBACK', 'synthetic-reserve-key');
+  mocks.fetch.mockImplementationOnce(() => new Promise(resolve => setTimeout(() => resolve(new Response('unavailable', { status: 503 })), 5000)))
+    .mockImplementationOnce((_url: string, init: RequestInit) => new Promise((_, reject) => init.signal!.addEventListener('abort', () => reject(init.signal!.reason), { once: true })));
+  const startedAt = Date.now(); let finished = false;
+  const run = readPhotoWithGemini(input).then(result => { finished = true; return result; });
+  await vi.waitFor(() => expect(mocks.fetch).toHaveBeenCalledOnce());
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(mocks.fetch).toHaveBeenCalledTimes(2);
+  await advanceUntil(startedAt, 19900); expect(finished).toBe(false);
+  await advanceUntil(startedAt, 20000);
+  expect(await run).toMatchObject({ ok: false, unavailable: true, error: 'O Gemini excedeu o limite de 20 s; a leitura local pode ser usada.' });
+  expect(mocks.fetch.mock.calls[1]![1].signal).toBe(mocks.fetch.mock.calls[0]![1].signal);
+  expect(mocks.fetch.mock.calls[1]![1].signal.aborted).toBe(true);
+});
+
+it.each([['full', 20000], ['verify', 10000], ['survey', 8000]] as const)('does not start a reserve after the initial %s request consumes its entire deadline', async (mode, budget) => {
+  vi.stubEnv('GEMINI_API_KEY_FALLBACK', 'synthetic-reserve-key');
+  mocks.fetch.mockImplementation(() => new Promise(() => {}));
+  const startedAt = Date.now();
+  const run = readPhotoWithGemini({ data: { ...input.data, mode } });
+  await vi.waitFor(() => expect(mocks.fetch).toHaveBeenCalledOnce());
+  await advanceUntil(startedAt, budget);
+  expect(await run).toMatchObject({ ok: false, unavailable: true, error: `O Gemini excedeu o limite de ${budget / 1000} s; a leitura local pode ser usada.` });
+  expect(mocks.fetch).toHaveBeenCalledOnce();
 });

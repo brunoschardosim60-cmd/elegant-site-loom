@@ -6,6 +6,10 @@ import { supabaseConfig } from './supabase-config';
 import { photoQuotaFailure } from './photo-quota';
 const requests = new Map<string, { count: number; until: number }>();
 
+function providerKeys() {
+  return [...new Set([process.env['GEMINI_API_KEY'], process.env['GEMINI_API_KEY_FALLBACK']].map(key => key?.trim()).filter((key): key is string => Boolean(key)))];
+}
+
 /** Bound library calls as well as fetch; a late operation cannot resume reading. */
 async function withinSignal<T>(operation: () => Promise<T>, signal: AbortSignal): Promise<T> {
   signal.throwIfAborted();
@@ -18,7 +22,7 @@ async function withinSignal<T>(operation: () => Promise<T>, signal: AbortSignal)
   finally { signal.removeEventListener('abort', onAbort); }
 }
 
-export const photoReaderStatus = createServerFn({ method: 'GET' }).handler(async () => ({ configured: Boolean(process.env['GEMINI_API_KEY']) }));
+export const photoReaderStatus = createServerFn({ method: 'GET' }).handler(async () => ({ configured: providerKeys().length > 0 }));
 
 export const readPhotoWithGemini = createServerFn({ method: 'POST' })
   .inputValidator(z.object({ accessToken: z.string().min(20).max(10000), data: z.string().min(100).max(2800000).regex(/^[A-Za-z0-9+/=]+$/), detail: z.string().max(1000000).regex(/^[A-Za-z0-9+/=]+$/).optional(), mimeType: z.literal('image/jpeg'), mode: z.enum(['survey', 'full', 'verify']).optional(), orientationOnly: z.boolean().optional() }))
@@ -45,8 +49,8 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
       // Do not consume the user's request bucket or start Gemini after closing.
       signal.throwIfAborted();
       if (authError || !user.user) return { ok: false as const, fallback: false, error: 'Entre novamente na sua conta para ler fotos.' };
-      const key = process.env['GEMINI_API_KEY'];
-      if (!key) return { ok: false as const, unavailable: true, error: 'Configure GEMINI_API_KEY na Vercel para ativar a leitura por IA.' };
+      const keys = providerKeys();
+      if (!keys.length) return { ok: false as const, unavailable: true, error: 'Configure a chave Gemini no servidor da Vercel para ativar a leitura por IA.' };
       const now = Date.now();
       for (const [ip, value] of requests) if (value.until < now) requests.delete(ip);
       const userId = user.user.id;
@@ -56,7 +60,7 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
       const compact = data.mode === 'survey' || data.mode === 'verify';
       const model = data.orientationOnly || data.mode === 'survey' ? 'gemini-3.5-flash-lite' : data.mode === 'verify' ? process.env['GEMINI_OCR_VERIFY_MODEL'] || 'gemini-3.5-flash-lite' : process.env['GEMINI_OCR_MODEL'] || 'gemini-3.8-flash';
       stage = 'connection';
-      const request = (model: string) => withinSignal(() => fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+      const request = (key: string) => withinSignal(() => fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
         method: 'POST', signal,
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
         body: JSON.stringify({
@@ -65,18 +69,48 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
           generationConfig: { responseMimeType: 'application/json', responseJsonSchema: data.orientationOnly ? { type: 'object', properties: { kind: { type: 'string', enum: ['pre', 'dacte', 'unknown'] }, clockwiseRotation: { type: 'integer', enum: [0, 90, 180, 270] } }, required: ['kind', 'clockwiseRotation'] } : compact ? verificationJsonSchema : photoJsonSchema, maxOutputTokens: data.orientationOnly ? 512 : compact ? 6000 : 12000, temperature: 1, mediaResolution: 'MEDIA_RESOLUTION_HIGH', thinkingConfig: { thinkingLevel: model === 'gemini-3.5-flash-lite' ? 'MINIMAL' : 'LOW' } },
         }),
       }), signal);
-      const response = await request(model);
-      if (response.status === 429) {
-        const body = await withinSignal(() => response.json(), signal).catch(() => null);
+      let response: Response | undefined;
+      let invalidRequestCategory = 'request';
+      let attemptedKey = 0;
+      for (const [index, key] of keys.entries()) {
         signal.throwIfAborted();
-        return photoQuotaFailure(body);
+        attemptedKey = index;
+        try { response = await request(key); }
+        catch (error) {
+          signal.throwIfAborted();
+          if (index + 1 < keys.length) continue;
+          throw error;
+        }
+        signal.throwIfAborted();
+        if (response.status === 400) {
+          const body = await withinSignal(() => response!.json(), signal).catch(() => null) as { error?: { message?: string } } | null;
+          signal.throwIfAborted();
+          const message = typeof body?.error?.message === 'string' ? body.error.message : '';
+          invalidRequestCategory = /schema|constraint/i.test(message) ? 'schema' : /thinking|resolution|output.?tokens/i.test(message) ? 'model-options' : /api.?key|expired|credential/i.test(message) ? 'credentials' : /image|inline.?data|mime|base64/i.test(message) ? 'image' : 'request';
+        }
+        // A reserve handles access/technical failures only. Quota and billing
+        // failures must retain the local reading rather than rotate credentials.
+        const canUseReserve = response.status === 401 || response.status === 403 || (response.status >= 500 && response.status <= 599) || (response.status === 400 && invalidRequestCategory === 'credentials');
+        if (canUseReserve && index + 1 < keys.length) {
+          void response.body?.cancel().catch(() => {});
+          continue;
+        }
+        break;
+      }
+      if (!response) throw new Error('Provider connection failed.');
+      const finalResponse = response;
+      if (response.status === 429) {
+        const body = await withinSignal(() => finalResponse.json(), signal).catch(() => null);
+        signal.throwIfAborted();
+        const failure = photoQuotaFailure(body);
+        // Reserve quota says nothing about the primary's quota after its
+        // technical failure. Use only the existing short unavailability pause.
+        if (attemptedKey > 0) return { ok: false as const, unavailable: true, retryable: false, error: failure.error };
+        return failure;
       }
       if (response.status === 400) {
-        const body = await withinSignal(() => response.json(), signal).catch(() => null) as { error?: { message?: string } } | null;
-        signal.throwIfAborted();
-        const message = typeof body?.error?.message === 'string' ? body.error.message : '';
         // Log only a fixed category, never the provider's message or input data.
-        const category = /schema|constraint/i.test(message) ? 'schema' : /thinking|resolution|output.?tokens/i.test(message) ? 'model-options' : /api.?key|expired|credential/i.test(message) ? 'credentials' : /image|inline.?data|mime|base64/i.test(message) ? 'image' : 'request';
+        const category = invalidRequestCategory;
         console.warn('ocr_provider_failure', { status: 400, category, elapsedMs: Math.round(performance.now() - startedAt) });
         return { ok: false as const, unavailable: category === 'schema' || category === 'model-options' || category === 'credentials', retryable: false, error: 'O Gemini rejeitou a solicitação de leitura. A reserva local pode ser usada para esta foto.' };
       }
@@ -85,7 +119,7 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
         return { ok: false as const, unavailable: true, retryable: false, error: response.status === 402 ? 'O Gemini está sem créditos. Confira o faturamento no Google AI Studio.' : response.status === 403 || response.status === 401 ? 'Chave do Gemini sem acesso. Confira a configuração na Vercel.' : `Gemini indisponível (${response.status}). Tente novamente.` };
       }
       stage = 'provider-json';
-      const result = await withinSignal(() => response.json(), signal) as { candidates?: { finishReason?: string; content?: { parts?: { text?: string; thought?: boolean }[] } }[] };
+      const result = await withinSignal(() => finalResponse.json(), signal) as { candidates?: { finishReason?: string; content?: { parts?: { text?: string; thought?: boolean }[] } }[] };
       signal.throwIfAborted();
       const candidate = result.candidates?.[0];
       if (candidate?.finishReason !== 'STOP') return { ok: false as const, error: 'A leitura ficou incompleta. Tente novamente com uma foto por vez.' };
