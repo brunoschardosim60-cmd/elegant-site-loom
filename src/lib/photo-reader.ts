@@ -69,7 +69,8 @@ export async function readPhotosWithFallback(files: File[], onResult: OnResult, 
       await readAiPhotos([files[index]!], (_position, result) => {
         if (signal?.aborted || finished.has(index)) return;
         if ('error' in result) {
-          fallback(index, result.error);
+          if ('fallback' in result && result.fallback === false && /Entre .*conta|sess[aã]o|autentica/i.test(result.error)) deliver(index, { error: safeCause(result.error), fallback: false });
+          else fallback(index, result.error);
         } else {
           const pre = reading && !('error' in reading) ? correctLocalPhoto(reading.pre, result.pre) : result.pre;
           deliver(index, { ...result, pre, text: JSON.stringify(pre, null, 2), milliseconds: elapsed(), pendingVerification: false });
