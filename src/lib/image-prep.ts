@@ -23,7 +23,9 @@ export async function prepareForOcr(file: File, rotation: 0 | 90 | 180 | 270 = 0
     ctx.rotate(rotation * Math.PI / 180);
     ctx.drawImage(bitmap, -width / 2, -height / 2, width, height);
     signal?.throwIfAborted();
-    const prepared = await new Promise<Blob>(resolve => canvas.toBlob(b => resolve(b ?? file), 'image/png'));
+    // JPEG keeps the full-resolution OCR image much smaller in mobile memory than PNG,
+    // while high quality preserves the fine strokes of printed table digits.
+    const prepared = await new Promise<Blob>(resolve => canvas.toBlob(b => resolve(b ?? file), 'image/jpeg', 0.96));
     signal?.throwIfAborted();
     return prepared;
   } catch { return file; }
