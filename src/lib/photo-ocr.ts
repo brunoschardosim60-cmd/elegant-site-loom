@@ -1,5 +1,5 @@
 import { createWorker, PSM, type Worker } from 'tesseract.js';
-import { clean, parsePhotoFields, photoScore, pageWords, tableCellRegions, tableCtcRepairRegions, tableSummaryRegions, type OcrPage, type PhotoFields, type OcrWord } from './photo-fields';
+import { clean, mergeCtcPages, parsePhotoFields, photoScore, pageWords, tableCellRegions, tableCtcRepairRegions, tableSummaryRegions, type OcrPage, type PhotoFields, type OcrWord } from './photo-fields';
 import { buildDigitTemplates, matchPrintedNumber, type GrayImage } from './printed-digits';
 import { recoverNfSeparator } from './ocr-numeric';
 import { prepareForOcr, preparePrintedField, prepareNumericMontage, readGrayImage } from './image-prep';
@@ -89,10 +89,11 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
     active();
     await worker.setParameters({ tessedit_pageseg_mode: psm });
     try {
-      const { data } = await worker.recognize(source, {}, { text: true, blocks: true });
+      const recognized = await worker.recognize(source, {}, { text: true, blocks: true });
+      const data = best.source === source ? mergeCtcPages(recognized.data, best.page) : recognized.data;
       active();
       successful = true;
-      const candidate = { page: data, pre: parsePhotoFields(data), confidence: data.confidence, angle, source };
+      const candidate = { page: data, pre: parsePhotoFields(data), confidence: recognized.data.confidence, angle, source };
       const score = (pre: PhotoFields) => photoScore(pre) + (pre.expectedRows && pre.documents.length === pre.expectedRows ? 100 : 0);
       if (best.source !== source || score(candidate.pre) > score(best.pre) || (score(candidate.pre) === score(best.pre) && candidate.confidence > best.confidence)) best = candidate;
       // Do not stop just because we found one valid CTC. On real manifests the
@@ -111,7 +112,9 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
       const totalMismatch = Boolean(candidate.pre.totalVolumes && candidate.pre.totalVolumes !== volumeSum);
       // Table headings alone are not a reason to repeat a full-page OCR:
       // clean rows can proceed immediately when header totals were not readable.
-      const needsMoreWork = rowCountMismatch || totalMismatch || incompleteRows
+      const cells = tableCellRegions(data);
+      const canRepairCells = candidate.pre.kind === 'pre' && cells.some(cell => cell.field === 'nf') && cells.some(cell => cell.field === 'volumes');
+      const needsMoreWork = rowCountMismatch || ((totalMismatch || incompleteRows) && !canRepairCells)
         || (!candidate.pre.documents.length && hasTableEvidence);
       if (!needsMoreWork) break;
       // A missed row/field on the fast mobile pass gets one high-resolution
@@ -212,6 +215,7 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
               }
             });
           }
+          if (bestDistance === 0 && candidate.every(row => row.volumes) && readings.every(reading => reading && reading.confidence >= 80)) break;
         } catch { active(); /* Continue with the next image preparation and retain existing readings. */ }
       }
       // If the total still differs after targeted rereads, keep the mismatch as an
@@ -231,10 +235,17 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
         await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_BLOCK, tessedit_char_whitelist: '0123456789-', user_defined_dpi: '300' });
         const { data } = await worker.recognize(montage.image, {}, { text: true, blocks: true }); active();
         for (const [i, reading] of montageReadings(data, montage.cells).entries()) {
-          if (!reading || !/^\d{2,9}-\d{1,3}$/.test(reading.text) || reading.confidence < 80) continue;
+          if (!reading) continue;
           const region = regions[i]!; const value = reading.text;
           const row = best.pre.documents[region.row]!;
+          const formatted = /^\d{2,9}-\d{1,3}$/.test(value);
+          // Keep digits actually recovered from a crop even when OCR misses
+          // the hyphen. Pixel analysis below may recover its printed position;
+          // no series is guessed, and a complete NF is never replaced by this.
+          const numeric = /^\d{3,12}$/.test(value) && !/^\d{2,9}-\d{1,3}$/.test(row.nf);
+          if (!(formatted && reading.confidence >= 80) && !(numeric && reading.confidence >= 60)) continue;
           if (row.nf && row.nf !== value) row.review = [...(row.review ?? []), `NF relida: ${row.nf} / ${value}. Confira na foto.`];
+          if (!formatted) row.review = [...new Set([...(row.review ?? []), 'NF', 'Dígitos recuperados em recorte. Confira o número e a série na foto.'])];
           row.nf = value;
         }
       } catch { active(); /* Full-page readings remain editable. */ }
@@ -251,8 +262,19 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
       if (recovered) { row.nf = recovered; row.review = [...new Set([...(row.review ?? []), 'NF', 'Separador da NF recuperado da foto. Confira os números e a série.'])]; }
     }
   }
-  const idWord = pageWords(best.page).find(w => /^D[I1L|][0-9OQIL|SB]{4,12}$/i.test(w.text));
-  if (idWord && best.pre.kind !== 'dacte') {
+  const idWord = pageWords(best.page).find(w => /^D[I1L|][A-Z0-9|]{4,14}$/i.test(w.text));
+  let barcodeId: string | undefined;
+  if (best.pre.kind === 'pre' && (idWord || pageWords(best.page).some(w => clean(w.text) === 'PREMANIFESTO'))) {
+    try {
+      active();
+      const { readPreBarcode } = await import('./pre-barcode');
+      active();
+      gray ??= await readGrayImage(best.source);
+      barcodeId = readPreBarcode(gray, best.page, signal);
+      if (barcodeId) best.pre.id = barcodeId;
+    } catch { active(); /* Barcode recovery is optional and never supplies a CTC. */ }
+  }
+  if (!barcodeId && idWord && best.pre.kind !== 'dacte') {
     progress('Conferindo número do pré…');
     try {
       active();
@@ -261,7 +283,13 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
       const { data } = await worker.recognize(field);
       active();
       const id = data.text.trim().match(/^DI\d{8,12}$/)?.[0];
-      if (id) best.pre.id = id;
+      if (id) {
+        if (idWord.text !== id) best.pre.headerReview = [...(best.pre.headerReview ?? []), 'Número do pré relido em recorte. Confira os dígitos e os zeros na foto.'];
+        if (/^DI\d{8,12}$/.test(idWord.text) && idWord.text !== id) {
+          best.pre.id = idWord.text;
+          best.pre.headerReview = [...(best.pre.headerReview ?? []), 'As leituras do número do pré diferem. Foi preservado o número impresso da leitura da página.'];
+        } else best.pre.id = id;
+      } else best.pre.headerReview = [...(best.pre.headerReview ?? []), 'Número do pré não confirmado no recorte. Confira na foto.'];
     } catch { active(); /* Keep the full-page ID for review. */ }
   }
   return { text: best.page.text.trim(), pre: best.pre, milliseconds: Math.round(performance.now() - started), angle: best.angle };

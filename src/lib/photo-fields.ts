@@ -107,6 +107,27 @@ function groupFor(groups: OcrWord[][], index: number, count: number, baseline: n
   return groups.filter(group => Math.abs(cy(group[0]!) - baseline) < tolerance)
     .sort((a, b) => Math.abs(cy(a[0]!) - baseline) - Math.abs(cy(b[0]!) - baseline))[0];
 }
+
+/** Complementary segmentation modes can miss different physical CTC rows.
+ * Merge literal identifiers only in the CTC column of the same-size page;
+ * never join NFs by index or create a second identifier on an occupied row.
+ */
+export function mergeCtcPages(primary: OcrPage, secondary: OcrPage): OcrPage {
+  const current = table(primary), other = table(secondary);
+  if (!current || !other || Math.abs(cx(current.header) - cx(other.header)) > current.height * 2
+    || Math.abs(cy(current.header) - cy(other.header)) > current.height * 2) return primary;
+  const words = pageWords(primary);
+  let changed = false;
+  for (const candidate of other.ctcWords.slice(0, 300)) {
+    const rowTolerance = Math.min(current.step, other.step) * .4;
+    const occupied = current.ctcWords.some(word => Math.abs(cy(word) - cy(candidate)) < rowTolerance);
+    if (occupied) continue;
+    const malformed = current.rowWords.filter(word => Math.abs(cy(word) - cy(candidate)) < rowTolerance);
+    for (const word of malformed) { const index = words.indexOf(word); if (index >= 0) words.splice(index, 1); }
+    words.push(candidate); current.ctcWords.push(candidate); changed = true;
+  }
+  return changed ? { ...primary, blocks: [{ paragraphs: [{ lines: [{ words }] }] }] } : primary;
+}
 const groupText = (group: OcrWord[] | undefined) => group?.sort((a, b) => a.bbox.x0 - b.bbox.x0).map(w => w.text).join(' ').replace(/^[—–-]\s*/, '').trim() ?? '';
 
 function columnBaseline(t: NonNullable<ReturnType<typeof table>>, field: keyof typeof t.columns, row: OcrWord): number {
@@ -116,7 +137,23 @@ function columnBaseline(t: NonNullable<ReturnType<typeof table>>, field: keyof t
   const gaps = groups.slice(1).map((group, i) => cy(group[0]!) - cy(groups[i]![0]!));
   // Missing OCR cells produce gaps of two or more rows. Their spacing still
   // measures perspective; do not treat the next visible cell as the next row.
-  const step = median(gaps.filter(gap => gap > t.step * .6).map(gap => gap / Math.max(1, Math.round(gap / t.step)))) || t.step;
+  let step = median(gaps.filter(gap => gap > t.step * .6).map(gap => gap / Math.max(1, Math.round(gap / t.step))));
+  if (!step) {
+    // A narrow volume column often disappears entirely from full-page OCR.
+    // Estimate its perspective from the CTC and nearest readable column rather
+    // than extending the leftmost row spacing across a slanted sheet.
+    const neighbours = (Object.keys(t.columns) as (keyof typeof t.columns)[]).filter(key => key !== field && t.anchors[key])
+      .map(key => {
+        const cells = t.columns[key].groups;
+        const spacing = median(cells.slice(1).map((group, i) => cy(group[0]!) - cy(cells[i]![0]!))
+          .filter(gap => gap > t.step * .6).map(gap => gap / Math.max(1, Math.round(gap / t.step))));
+        return { x: cx(t.anchors[key]!), spacing, count: cells.length };
+      }).filter(item => item.count >= 3 && item.spacing > 0 && Math.abs(item.x - cx(t.header)) > t.height * 3)
+      .sort((a, b) => Math.abs(a.x - cx(anchor)) - Math.abs(b.x - cx(anchor)));
+    const neighbour = neighbours[0];
+    const projected = neighbour ? t.step + (neighbour.spacing - t.step) * (cx(anchor) - cx(t.header)) / (neighbour.x - cx(t.header)) : t.step;
+    step = Math.max(t.step * .75, Math.min(t.step * 1.25, projected));
+  }
   const firstRow = t.rowWords[0]!;
   const projected = cy(anchor) + (cy(firstRow) - cy(t.header)) * step / t.step;
   const first = groups.find(group => Math.abs(cy(group[0]!) - projected) < t.step * .4);
@@ -129,7 +166,7 @@ export function tableSummaryRegions(page: OcrPage): NumericTableRegion[] {
   const tableHeading = words.find(w => clean(w.text) === 'REMETENTE') ?? words.find(w => clean(w.text) === 'CTC');
   if (!tableHeading) return [];
   return (['expectedRows', 'totalVolumes'] as const).flatMap(field => {
-    const pattern = field === 'expectedRows' ? /^CTCS$/ : /^VOLSS?$/;
+    const pattern = field === 'expectedRows' ? /^C?CTCS$/ : /^VOLSS?$/;
     const label = words.filter(w => pattern.test(clean(w.text)) && w.bbox.y1 < tableHeading.bbox.y0).sort((a, b) => b.bbox.y0 - a.bbox.y0)[0];
     if (!label) return [];
     const h = label.bbox.y1 - label.bbox.y0;
@@ -181,15 +218,17 @@ export function parsePhotoFields(page: OcrPage): PhotoFields {
     // The printed plate and driver's name can occupy separate columns below the same heading.
     const below = words.filter(w => w.bbox.y0 > driverLabel.bbox.y1 - h * .1
       && w.bbox.y0 < driverLabel.bbox.y1 + h * 5
-      && w.bbox.x0 >= driverLabel.bbox.x0 - h * 2
-      && w.bbox.x0 < driverLabel.bbox.x1 + h * 28)
+      && w.bbox.x1 >= driverLabel.bbox.x0 - h * 2
+      && w.bbox.x0 < driverLabel.bbox.x1 + h * 50)
       .sort((a, b) => cy(a) - cy(b) || a.bbox.x0 - b.bbox.x0);
     const nearest = below[0];
     const lineWords = below.filter(w => nearest && Math.abs(cy(w) - cy(nearest)) < h * .9);
     const line = lineWords.sort((a, b) => a.bbox.x0 - b.bbox.x0).map(w => w.text).join(' ').trim();
     const plate = parsePreText(line).plate || parsePreText(below.map(w => w.text).join(' ')).plate;
-    if (plate) fields.plate = plate;
-    const withoutPlate = line.replace(/[A-Z]{3}[\s-]?[0-9OIL][\s-]?[A-Z0-9][\s-]?[0-9OIL][\s-]?[0-9OIL]/i, ' ');
+    // A barcode/background can resemble a plate. Prefer only the labelled field.
+    fields.plate = plate;
+    const withoutPlate = line.replace(/^[A-Z0-9]{6,10}\s*[-–]\s*(?=[A-ZÀ-ÖØ-Þ])/i, token => /\d/.test(token) ? '' : token)
+      .replace(/[A-Z]{3}[\s-]?[0-9OIL][\s-]?[A-Z0-9][\s-]?[0-9OIL][\s-]?[0-9OIL]/i, ' ');
     const driver = withoutPlate.replace(/(^|[\s-])\d+(?=[\s-]|$)/g, ' ').replace(/^[\s:;|/–-]+|[\s:;|/–-]+$/g, '').replace(/\s{2,}/g, ' ').trim();
     if (driver && /[A-ZÀ-ÖØ-Þ]{2,}/i.test(driver) && !/^MOTORISTA$/i.test(driver)) fields.driver = driver;
     // Fallback: when the OCR puts plate and driver on separate lines, use the first plausible name below the label.
@@ -249,18 +288,29 @@ export function tableCellRegions(page: OcrPage): CellRegion[] {
     for (const field of ['nf', 'volumes'] as const) {
       const col = t.columns[field];
       if (col.right <= col.left) continue;
-      const y = field === 'nf' && nf ? cy(nf[0]!) : columnBaseline(t, field, ctc);
+      let y = field === 'nf' && nf ? cy(nf[0]!) : columnBaseline(t, field, ctc);
+      if (field === 'volumes' && nf && t.anchors.nf && t.anchors.volumes
+        && !groupFor(col.groups, row, t.ctcWords.length, y, t.step * .4)) {
+        // Project the same physical row from the nearest NF and CTC cells.
+        // This handles perspective even when OCR misses every volume glyph.
+        const span = cx(t.anchors.nf) - cx(t.header);
+        if (span > t.height * 3) y = cy(nf[0]!) + (cy(nf[0]!) - cy(ctc)) * (cx(t.anchors.volumes) - cx(t.anchors.nf)) / span;
+      }
       const numericEnds = field === 'volumes' ? col.groups.flat().filter(w => /^\d{1,4}$/.test(w.text)).map(w => w.bbox.x1) : [];
       const end = median(numericEnds) + t.height * .2;
       const nfWords = field === 'nf' ? col.groups.flat().filter(w => /^[0-9OQILBSZ-]{3,}$/i.test(w.text)) : [];
+      const readableNfs = nfWords.filter(word => nfValue(word.text));
       const nfAnchor = t.anchors.nf;
       const x1 = field === 'nf' && nfAnchor
-        ? Math.min(col.right - t.height * .15, Math.max(nfAnchor.bbox.x1, ...nfWords.map(w => w.bbox.x1)) + t.height * .3)
-        : numericEnds.length ? end : col.right - t.height * .15;
+        ? readableNfs.length >= Math.max(2, t.ctcWords.length * .5)
+          ? Math.min(col.right - t.height * .15, Math.max(nfAnchor.bbox.x1, ...nfWords.map(w => w.bbox.x1)) + t.height * .3)
+          : col.right - t.height * .15
+        : t.anchors.check ? t.anchors.check.bbox.x0 - t.height * .15 : numericEnds.length ? end : col.right - t.height * .15;
       const x0 = field === 'nf' && nfAnchor
-        ? Math.max(col.left + t.height * .15, Math.min(nfAnchor.bbox.x0, ...nfWords.map(w => w.bbox.x0)) - t.height * .2)
+        ? Math.max(col.left + t.height * .15, (nfWords.length ? Math.min(...nfWords.map(w => w.bbox.x0)) : nfAnchor.bbox.x0) - t.height * .2)
         : Math.max(col.left + t.height * .15, x1 - t.height * 2.5);
-      const glyphHeight = median(col.groups.flat().map(w => w.bbox.y1 - w.bbox.y0)) || t.height;
+      const reliableGlyphs = col.groups.flat().filter(w => w.confidence >= 60 && (field === 'nf' ? /^\d{2,9}-\d{1,3}$/.test(w.text) : /^\d{1,4}$/.test(w.text)));
+      const glyphHeight = median((reliableGlyphs.length ? reliableGlyphs : col.groups.flat()).map(w => w.bbox.y1 - w.bbox.y0)) || t.height;
       const halfHeight = field === 'volumes' ? Math.max(glyphHeight * .65, t.step * .42) : glyphHeight * .65;
       regions.push({ row, field, box: { x0, x1, y0: y - halfHeight, y1: y + halfHeight } });
     }

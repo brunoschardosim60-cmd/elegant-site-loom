@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parsePhotoFields, tableCtcRepairRegions, type OcrWord } from '@/lib/photo-fields';
+import { mergeCtcPages, parsePhotoFields, tableCellRegions, tableCtcRepairRegions, type OcrWord } from '@/lib/photo-fields';
 const word = (text: string, x: number, y: number, width = 50): OcrWord => ({ text, confidence: 80, bbox: { x0: x, y0: y, x1: x + width, y1: y + 20 } });
 const page = (words: OcrWord[]) => ({ text: words.map(w => w.text).join('\n'), blocks: [{ paragraphs: [{ lines: [{ words }] }] }] });
 
@@ -14,6 +14,23 @@ it('reads the original pré date from the labelled header rather than delivery r
   expect(parsePhotoFields({ text: 'DACTE\nDATA DE EMISSÃO 28/08/2026\nID: 1234567890' })).not.toHaveProperty('issueDate');
 });
 describe('Photo table extraction', () => {
+  it('recovers complementary missing CTC rows from two segmentation modes without shifting NFs', () => {
+    const headers=[word('CTC',100,200),word('Remetente',250,200),word('NF-Série',400,200,90),word('Vols.',600,200)];
+    const first=page([...headers,word('0000000001',100,240,100),word('0000000003',100,340,100),
+      ...[0,1,2].flatMap(i=>[word(`${11111+i}-1`,400,238+i*50,80),word(String(i+1),610,235+i*50,20)])]);
+    const second=page([...headers,word('0000000001',100,240,100),word('0000000002',100,290,100)]);
+    expect(parsePhotoFields(mergeCtcPages(first,second)).documents).toMatchObject([
+      {ctc:'0000000001',nf:'11111-1',volumes:'1'},
+      {ctc:'0000000002',nf:'11112-1',volumes:'2'},
+      {ctc:'0000000003',nf:'11113-1',volumes:'3'},
+    ]);
+  });
+  it('never adds a conflicting CTC on an occupied physical row or removes legitimate repeated CTC rows', () => {
+    const headers=[word('CTC',100,200),word('Remetente',250,200)];
+    const first=page([...headers,word('0000000001',100,240,100)]);
+    const second=page([...headers,word('9999999999',100,240,100),word('0000000001',100,290,100)]);
+    expect(parsePhotoFields(mergeCtcPages(first,second)).documents.map(row=>row.ctc)).toEqual(['0000000001','0000000001']);
+  });
   it('reads CTC identifiers and aligns columns by position', () => {
     const fields = parsePhotoFields(page([
       word('CTC', 100, 200), word('NF-Série', 400, 200, 90), word('Vols.', 600, 200),
@@ -80,6 +97,61 @@ describe('Photo table extraction', () => {
     const fields = parsePhotoFields(page([word('PLACA/MOTORISTA', 100, 100, 120), word('ABC1D23-JOSE', 100, 130, 180), word('SILVA', 290, 130), word('-', 350, 130, 10), word('999', 370, 130)]));
     expect(fields.plate).toBe('ABC1D23');
     expect(fields.driver).toBe('JOSE SILVA');
+  });
+  it('includes the plate/name token when perspective starts it slightly left of the label', () => {
+    const fields = parsePhotoFields(page([
+      word('ARO', 100, 10), word('OQ', 160, 10), word('LL', 210, 10),
+      word('PLACA/MOTORISTA', 500, 100, 180), word('TRB7E25-DAVID', 456, 132, 200),
+      word('VARGAS', 670, 132, 75), word('FERNANDES', 755, 132, 115), word('-', 880, 132, 10), word('0062', 900, 132),
+    ]));
+    expect(fields.plate).toBe('TRB7E25');
+    expect(fields.driver).toBe('DAVID VARGAS FERNANDES');
+  });
+  it('does not use barcode noise as a plate when the labelled field is unreadable', () => {
+    expect(parsePhotoFields(page([word('ABC1D23', 50, 10), word('PLACA/MOTORISTA', 500, 100, 180)])).plate).toBe('');
+  });
+  it('does not include an unreadable plate token in the driver name', () => {
+    const fields=parsePhotoFields(page([word('PLACA/MOTORISTA',100,100,180),word('QUO7IBO-RAFAEL',100,132,180),word('INACIO',290,132,80),word('DA',380,132,40),word('CUNHA',430,132,75)]));
+    expect(fields.driver).toBe('RAFAEL INACIO DA CUNHA');
+    expect(fields.plate).toBe('');
+  });
+  it('reads a CTC header whose first letter was doubled by OCR', () => {
+    expect(parsePhotoFields(page([
+      word('CcTCs', 100, 100), word('NFs', 250, 100), word('11', 130, 130, 20),
+      word('CTC', 100, 200), word('Remetente', 250, 200), word('0000000001', 100, 240, 100),
+    ])).expectedRows).toBe(11);
+  });
+  it('projects missing volume cells using nearby column perspective without borrowing NF values', () => {
+    const cells = tableCellRegions(page([
+      word('CTC', 100, 200), word('Remetente', 250, 200), word('NF-Série', 400, 200, 90), word('Vols.', 600, 200),
+      ...[0,1,2,3,4].flatMap(i => [word(`000000000${i+1}`, 100, 240+i*50, 100), word(`${12345+i}-1`,400,238+i*46,80)]),
+    ])).filter(cell=>cell.field==='volumes');
+    expect(cells).toHaveLength(5);
+    const distance = (cells[4]!.box.y0 + cells[4]!.box.y1 - cells[0]!.box.y0 - cells[0]!.box.y1) / 2;
+    expect(distance).toBeLessThan(190);
+    expect(distance).toBeGreaterThan(170);
+  });
+  it('keeps numeric crops inside their columns when right-aligned volumes lean toward Chk', () => {
+    const cells = tableCellRegions(page([
+      word('CTC', 100, 200), word('Remetente', 250, 200), word('NF-Série', 400, 200, 90),
+      word('Vols.', 600, 200), word('Chk', 700, 200),
+      ...[0,1,2,3,4].flatMap(i=>[word(`000000000${i+1}`,100,240+i*50,100),word(`${12345+i}-1`,420,238+i*46,75)]),
+    ]));
+    const nf = cells.filter(cell=>cell.field==='nf'), volumes=cells.filter(cell=>cell.field==='volumes');
+    expect(nf[0]!.box.x0).toBeGreaterThan(400);
+    expect(volumes[4]!.box.x1).toBeGreaterThan(680);
+    expect(volumes[4]!.box.x1).toBeLessThan(700);
+    const lastCenter=(volumes[4]!.box.y0+volumes[4]!.box.y1)/2;
+    expect(lastCenter).toBeGreaterThan(395);
+    expect(lastCenter).toBeLessThan(430);
+  });
+  it('keeps readable NF crops away from neighbouring order digits and widens incomplete columns', () => {
+    const headers=[word('CTC',100,200),word('Remetente',250,200),word('NF-Série',400,200,90),word('Pedido',700,200,80)];
+    const rows=[word('0000000001',100,240,100),word('0000000002',100,290,100)];
+    const tight=tableCellRegions(page([...headers,...rows,word('12345-1',420,240,75),word('54321-1',420,290,75)])).find(r=>r.field==='nf')!;
+    const wide=tableCellRegions(page([...headers,...rows,word('12345',420,240,60)])).find(r=>r.field==='nf')!;
+    expect(tight.box.x1).toBeLessThan(550);
+    expect(wide.box.x1).toBeGreaterThan(tight.box.x1+50);
   });
   it('flags a low-confidence but well-formed CTC for row-level review', () => {
     const fields = parsePhotoFields(page([

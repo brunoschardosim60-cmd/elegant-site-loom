@@ -80,11 +80,13 @@ describe('Photo OCR batches', () => {
     const weakerPass = { data: { text: '10\n38', confidence: 75, blocks: [{ paragraphs: [{ lines: [{ words: [
       word('10', 20, 20, 30), word('38', 20, 100, 30),
     ] }] }] }] } };
-    mocks.recognize.mockResolvedValueOnce(result('PRÉ-MANIFESTO')).mockResolvedValueOnce(source).mockResolvedValueOnce(source).mockResolvedValueOnce(checked).mockResolvedValueOnce(weakerPass);
+    mocks.recognize.mockResolvedValueOnce(result('PRÉ-MANIFESTO')).mockResolvedValueOnce(source).mockResolvedValueOnce(checked).mockResolvedValueOnce(weakerPass);
     const reading = await readPrePhoto(new File(['image'], 'photo.jpg'));
     expect(reading.pre.documents.map(row => [row.ctc, row.volumes])).toEqual([['0000000001', '10'], ['0000000002', '36']]);
     expect(reading.pre.documents[1]?.review).toContain('Volumes relidos: 38 / 36. Confira na foto.');
-    expect(mocks.recognize).toHaveBeenCalledTimes(5);
+    // Targeted high-confidence cells agree with the printed total; no second
+    // full-page or numeric montage is needed.
+    expect(mocks.recognize).toHaveBeenCalledTimes(3);
   });
   it('stops immediately during worker startup and terminates the worker if it arrives later', async () => {
     let finish!: (value: never) => void;
@@ -118,6 +120,19 @@ describe('Photo OCR batches', () => {
     expect(prepareForOcr).toHaveBeenCalledWith(expect.any(File), 270, 3840, undefined);
     expect(mocks.recognize).toHaveBeenCalledTimes(3);
     expect(mocks.terminate).toHaveBeenCalledOnce();
+  });
+  it('keeps recovered NF digits without inventing a separator or a series', async () => {
+    const word=(text:string,x:number,y:number,width=50)=>({text,confidence:95,bbox:{x0:x,x1:x+width,y0:y,y1:y+20}});
+    const source={data:{text:'PRÉ-MANIFESTO',confidence:95,blocks:[{paragraphs:[{lines:[{words:[
+      word('CTC',100,200),word('Remetente',250,200),word('NF-Série',400,200,90),word('Vols.',600,200),
+      word('0000000001',100,240,100),word('111170',400,238,80),word('4',610,235,20),
+    ]}]}]}]}};
+    const cropped={data:{text:'11117021',confidence:74,blocks:[{paragraphs:[{lines:[{words:[
+      {...word('11117021',20,20,90),confidence:74},
+    ]}]}]}]}};
+    mocks.recognize.mockResolvedValueOnce(result('PRÉ-MANIFESTO')).mockResolvedValueOnce(source).mockResolvedValueOnce(cropped);
+    const reading=await readPrePhoto(new File(['image'],'nf-crop.jpg'));
+    expect(reading.pre.documents[0]).toMatchObject({nf:'11117021',review:expect.arrayContaining(['NF'])});
   });
   it('tries one alternate full-page mode when the printed count exceeds recovered CTCs', async () => {
     const word = (text: string, x: number, y: number, width = 50) => ({ text, confidence: 90, bbox: { x0: x, x1: x + width, y0: y, y1: y + 20 } });
