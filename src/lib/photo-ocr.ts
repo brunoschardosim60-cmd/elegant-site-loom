@@ -1,5 +1,5 @@
 import { createWorker, PSM, type Worker } from 'tesseract.js';
-import { parsePhotoFields, photoScore, pageWords, tableCellRegions, tableCtcRepairRegions, tableSummaryRegions, type OcrPage, type PhotoFields, type OcrWord } from './photo-fields';
+import { clean, parsePhotoFields, photoScore, pageWords, tableCellRegions, tableCtcRepairRegions, tableSummaryRegions, type OcrPage, type PhotoFields, type OcrWord } from './photo-fields';
 import { buildDigitTemplates, matchPrintedNumber, type GrayImage } from './printed-digits';
 import { recoverNfSeparator } from './ocr-numeric';
 import { prepareForOcr, preparePrintedField, prepareNumericMontage, readGrayImage } from './image-prep';
