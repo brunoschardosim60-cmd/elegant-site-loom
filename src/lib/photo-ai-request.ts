@@ -1,10 +1,11 @@
 import { readPhotoWithGemini } from './photo-reader.functions';
 
 // Include upload and server/auth overhead in the browser's limit. Provider
-// limits are slightly shorter. Errors go to local OCR without another AI call.
+// limits are slightly shorter. Quota fallback is coordinated by photo-ai;
+// this function makes only one request and preserves cancellation.
 export async function requestAiPhoto(input: Parameters<typeof readPhotoWithGemini>[0]) {
   if (input.signal?.aborted) throw input.signal.reason ?? new DOMException('Leitura cancelada.', 'AbortError');
-  const timeoutMs = input.data.mode === 'verify' ? 12000 : input.data.mode === 'survey' || input.data.orientationOnly ? 10000 : 22000;
+  const timeoutMs = input.data.mode === 'verify' || input.data.mode === 'full-lite' ? 12000 : input.data.mode === 'survey' || input.data.orientationOnly ? 10000 : 22000;
   const timeout = AbortSignal.timeout(timeoutMs);
   const signal = input.signal ? AbortSignal.any([input.signal, timeout]) : timeout;
   let rejectAborted!: (reason: unknown) => void;

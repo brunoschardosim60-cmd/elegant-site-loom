@@ -13,6 +13,7 @@ type OnProgress = NonNullable<Parameters<LocalReader>[2]>;
 function safeCause(message: string): string {
   return message
     .replace(/\bAIza[A-Za-z0-9_-]{20,}\b/g, '[credencial oculta]')
+    .replace(/\bAQ\.[A-Za-z0-9_-]{20,}\b/g, '[credencial oculta]')
     .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, '[credencial oculta]')
     .replace(/((?:api[_-]?key|access[_-]?token|authorization|secret)[\s"'=:]+)(?:Bearer\s+)?[^\s,;"'}]+/gi, '$1[credencial oculta]')
     .replace(/\bBearer\s+[A-Za-z0-9._~-]+/gi, 'Bearer [credencial oculta]')
@@ -74,7 +75,7 @@ export async function readPhotosWithFallback(files: File[], onResult: OnResult, 
           const pre = reading && !('error' in reading) ? correctLocalPhoto(reading.pre, result.pre) : result.pre;
           deliver(index, { ...result, pre, text: JSON.stringify(pre, null, 2), milliseconds: elapsed(), pendingVerification: false });
         }
-      }, (_position, message) => progress(index, message), signal, { singlePass: true, ...(angle !== undefined ? { orientations: [angle] } : {}) });
+      }, (_position, message) => progress(index, message), signal, { singlePass: true, quotaFallback: true, ...(angle !== undefined ? { orientations: [angle] } : {}) });
       if (!finished.has(index) && !signal?.aborted) fallback(index, 'A conferência por IA terminou sem retornar os dados.');
     } catch (error) {
       if (signal?.aborted) return;

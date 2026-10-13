@@ -6,8 +6,8 @@ import { detectPhotoOrientations, type PhotoAngle } from './photo-orientation';
 import type { PhotoFields } from './photo-fields';
 
 type ProviderFailure = Extract<Awaited<ReturnType<typeof requestAiPhoto>>, { ok: false }>;
-type ProviderStage = 'full' | 'verify';
-export type PhotoAiOptions = { orientations?: readonly PhotoAngle[]; singlePass?: boolean };
+type ProviderStage = 'full' | 'lite' | 'verify';
+export type PhotoAiOptions = { orientations?: readonly PhotoAngle[]; singlePass?: boolean; quotaFallback?: boolean };
 const temporaryBlocks = new Map<string, { until: number; result: ProviderFailure }>();
 const providerCooldown = 2 * 60 * 1000;
 // Full reading and verification use different models and quota buckets.
@@ -16,6 +16,7 @@ const providerCooldown = 2 * 60 * 1000;
 const providerScope = (userId: string, stage: ProviderStage) => `${userId}:photo-model-stages-v3:${stage}`;
 const verificationQuotaMessage = 'A cota diária da conferência adicional esgotou. A leitura completa foi mantida; confira os campos sinalizados.';
 const verificationUnavailableMessage = 'A conferência adicional está temporariamente indisponível. A leitura completa foi mantida; confira os campos sinalizados.';
+const isQuotaFailure = (failure: ProviderFailure) => 'quota' in failure;
 
 function stageFailure(stage: ProviderStage, failure: ProviderFailure): ProviderFailure {
   if (stage !== 'verify') return failure;
@@ -75,12 +76,19 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
     const result = getPhotoProviderBlock(scope) ?? temporaryBlocks.get(scope)?.result;
     return result && stageFailure(stage, result);
   };
-  const providerBlocks: Record<ProviderStage, ProviderFailure | undefined> = { full: stageBlock('full'), verify: stageBlock('verify') };
-  if (providerBlocks.full) {
+  const providerBlocks: Record<ProviderStage, ProviderFailure | undefined> = { full: stageBlock('full'), lite: stageBlock('lite'), verify: stageBlock('verify') };
+  const getBlockedError = () => {
+    const full = providerBlocks.full;
+    if (!full || !options.quotaFallback || !isQuotaFailure(full)) return full;
+    const lite = providerBlocks.lite;
+    return lite ? { ...lite, error: `O Gemini normal atingiu a cota. Flash Lite: ${lite.error}` } : undefined;
+  };
+  const initialBlock = getBlockedError();
+  if (initialBlock) {
     for (const index of files.keys()) {
       if (signal?.aborted) return;
-      onProgress?.(index, 'quota' in providerBlocks.full && providerBlocks.full.quota === 'daily' ? 'Cota diária esgotada · usando o leitor gratuito…' : 'Gemini temporariamente indisponível · usando o leitor gratuito…');
-      onResult(index, { error: providerBlocks.full.error });
+      onProgress?.(index, 'quota' in initialBlock && initialBlock.quota === 'daily' ? 'Cota diária esgotada · usando o leitor gratuito…' : 'Gemini temporariamente indisponível · usando o leitor gratuito…');
+      onResult(index, { error: initialBlock.error });
     }
     return;
   }
@@ -93,21 +101,29 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
   }
   if (signal?.aborted) return;
   const preparationMilliseconds = performance.now() - preparationStarted;
-  const getBlockedError = () => providerBlocks.full;
   const providerAwareRequest = async (input: Parameters<typeof requestAiPhoto>[0]) => {
-    const stage: ProviderStage = input.data.mode === 'verify' ? 'verify' : 'full';
+    input.signal?.throwIfAborted();
+    const stage: ProviderStage = input.data.mode === 'verify' ? 'verify' : input.data.mode === 'full-lite' ? 'lite' : 'full';
     const scope = providerScope(userId, stage);
     // A failure in one model must never block the other model's quota bucket.
     // Keep valid full data even when its optional verification is unavailable.
     if (providerBlocks[stage]) return providerBlocks[stage];
     const result = await requestAiPhoto(input);
+    input.signal?.throwIfAborted();
     if (!result.ok) rememberPhotoProviderBlock(scope, result);
+    if (!result.ok && isQuotaFailure(result) && options.quotaFallback && stage !== 'verify') {
+      // A known normal quota selects Lite without another normal request. A
+      // Lite quota selects local OCR. Minute/unknown limits get a short pause;
+      // daily metadata already expires at the provider's midnight.
+      if (!('quota' in result && result.quota === 'daily')) temporaryBlocks.set(scope, { until: Date.now() + 60000, result });
+      return providerBlocks[stage] = result;
+    }
     if (!result.ok && 'unavailable' in result && result.unavailable === true) temporaryBlocks.set(scope, { until: Date.now() + providerCooldown, result: stageFailure(stage, { ok: false, unavailable: true, retryable: false, error: 'Gemini temporariamente indisponível. O leitor local será usado por alguns minutos antes de uma nova tentativa por IA.' }) });
     if (!result.ok && (('quota' in result && result.quota === 'daily') || ('unavailable' in result && result.unavailable === true))) return providerBlocks[stage] = stageFailure(stage, result);
     return result;
   };
   const worker = async () => {
-    while (next < files.length && !signal?.aborted && !providerBlocks.full) {
+    while (next < files.length && !signal?.aborted && !getBlockedError()) {
       const index = next++;
       const file = files[index]!;
       const start = performance.now() - preparationMilliseconds;
@@ -121,17 +137,24 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
         progress('Lendo todas as linhas e laboratórios…');
         image = await createImageBitmap(file);
         if (photoSignal.aborted) throw new Error('Leitura interrompida.');
-        const full = await providerAwareRequest({ data: { ...photoPayload(image, orientation), accessToken, mode: 'full' }, signal: photoSignal });
-        if (full.ok) completedPhoto = { ...full.pre, verification: { status: 'single', checkedFields: 0, conflicts: 0 } };
+        const payload = photoPayload(image, orientation);
+        let full = await providerAwareRequest({ data: { ...payload, accessToken, mode: 'full' }, signal: photoSignal });
+        let usedLite = false;
+        if (options.quotaFallback && !full.ok && isQuotaFailure(full) && !photoSignal.aborted) {
+          usedLite = true;
+          progress('Cota do Gemini normal atingida · conferindo pelo Flash Lite…');
+          full = await providerAwareRequest({ data: { ...payload, accessToken, mode: 'full-lite' }, signal: photoSignal });
+        }
+        if (full.ok) completedPhoto = { ...full.pre, aiReader: usedLite ? 'lite' : 'normal', verification: { status: 'single', checkedFields: 0, conflicts: 0 } };
         if (photoSignal.aborted) throw new Error('Leitura interrompida.');
-        if (!full.ok) { if (!signal?.aborted) onResult(index, { error: full.error, ...('fallback' in full && full.fallback === false ? { fallback: false } : {}) }); continue; }
+        if (!full.ok) { if (!signal?.aborted) onResult(index, { error: usedLite ? `O Gemini normal atingiu a cota. Flash Lite: ${full.error}` : full.error, ...('fallback' in full && full.fallback === false ? { fallback: false } : {}) }); continue; }
         let pre = completedPhoto!;
         if (!options.singlePass && needsPhotoVerification(full.pre)) {
           if (!providerBlocks.verify) progress('Conferindo campos sinalizados em uma segunda leitura…');
           // Keep the whole page so every CTC retains its NF, quantities and names.
           const check = providerBlocks.verify ?? await providerAwareRequest({ data: { ...photoPayload(image, (orientation + full.rotation) % 360, full.pre.kind === 'pre'), accessToken, mode: 'verify' }, signal: photoSignal });
           if (photoSignal.aborted) throw new Error('Leitura interrompida.');
-          pre = reconcilePhotoRead(full.pre, check.ok ? check.check : null);
+          pre = reconcilePhotoRead(pre, check.ok ? check.check : null);
           completedPhoto = pre;
           if (!check.ok) pre.headerReview = [...(pre.headerReview ?? []), check.error];
         }

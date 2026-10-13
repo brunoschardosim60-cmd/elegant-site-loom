@@ -23,6 +23,21 @@ const result = (id: string, ctc: string, nf: string) => ({
   pre: { id, issueDate: '2026-08-28', plate: 'ABC1D23', driver: 'MOTORISTA', kind: 'pre' as const, readingSource: 'gemini' as const, ctcs: [ctc], documents: [{ ctc, nf, volumes: '2', client: 'LAB', recipient: 'CLIENTE' }], expectedRows: 1, totalVolumes: 2, verification: { status: 'matched' as const, checkedFields: 6, conflicts: 0 } }, text: 'Documento', milliseconds: 3200,
 });
 
+it('identifies Lite confirmation while keeping field review and requiring explicit registration', async () => {
+  const create = vi.fn(() => ({ ok: true as const, manifests: [] }));
+  const reading = result('DI00000000001', '0000000001', '100-1');
+  mocks.read.mockImplementation(async (_files: File[], receive: (index: number, value: PhotoReadResult) => void) => {
+    receive(0, { ...reading, pre: { ...reading.pre, aiReader: 'lite', verification: { status: 'review', checkedFields: 5, conflicts: 1 }, documents: [{ ...reading.pre.documents[0]!, review: ['NF corrigido pela IA: 10-1 / 100-1. Confira na foto.'] }] } });
+  });
+  render(<ManifestImportDialog open onOpenChange={vi.fn()} manifests={[]} onCreate={create} />);
+  await waitFor(() => expect(screen.getByLabelText('Enviar várias fotos')).toBeEnabled());
+  fireEvent.change(screen.getByLabelText('Enviar várias fotos'), { target: { files: [new File(['a'], 'lite.jpg', { type: 'image/jpeg' })] } });
+  expect(await screen.findByText('Conferência por Flash Lite · cota do Gemini normal atingida')).toBeInTheDocument();
+  expect(screen.getByLabelText('NF-série')).toHaveValue('100-1');
+  expect(screen.getByText('NF corrigido pela IA: 10-1 / 100-1. Confira na foto.')).toBeInTheDocument();
+  expect(create).not.toHaveBeenCalled();
+});
+
 it('stops immediately, keeps completed photos, removes unread photos and ignores the old run during a new import', async () => {
   vi.mocked(URL.createObjectURL).mockImplementation(source => `blob:${(source as File).name}`);
   const runs: { args: Parameters<typeof readAiPhotos>; finish: () => void }[] = [];

@@ -8,6 +8,7 @@ export type PhotoFields = ReturnType<typeof parsePreText> & {
   rawPlate?: string; expectedRows?: number; totalVolumes?: number; headerReview?: string[];
   issueDate?: string;
   readingSource?: 'gemini' | 'local';
+  aiReader?: 'normal' | 'lite';
   readingFallback?: boolean;
   verification?: { status: 'single' | 'matched' | 'review' | 'unavailable'; checkedFields: number; conflicts: number };
 };

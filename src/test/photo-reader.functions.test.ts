@@ -38,6 +38,29 @@ beforeEach(() => {
 });
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
+it('uses Lite for a complete independent transcription with the full schema, names, date and LOW thinking', async () => {
+  vi.stubEnv('GEMINI_OCR_MODEL', 'gemini-3.8-flash');
+  mocks.fetch.mockResolvedValue(successResponse());
+  const result = await readPhotoWithGemini({ data: { ...input.data, mode: 'full-lite' } });
+  expect(result).toMatchObject({ ok: true, check: null, pre: { issueDate: '2026-08-28', documents: [{ ctc: '0000000001', nf: '100-1', client: 'LAB', recipient: 'CLIENTE' }] } });
+  const [url, request] = mocks.fetch.mock.calls[0]!;
+  const body = JSON.parse(request.body);
+  expect(url).toContain('/gemini-3.5-flash-lite:generateContent');
+  expect(request.headers['x-goog-api-key']).toBe('synthetic-provider-key');
+  expect(body.generationConfig.thinkingConfig.thinkingLevel).toBe('LOW');
+  expect(body.generationConfig.maxOutputTokens).toBe(12000);
+  expect(body.generationConfig.responseJsonSchema.properties.documents.items.required).toEqual(['ctc', 'nf', 'volumes', 'client', 'recipient', 'review']);
+  expect(body.contents[0].parts[0].text).toContain('Leia TODAS as linhas');
+  expect(mocks.fetch).toHaveBeenCalledOnce();
+});
+
+it('classifies the Lite daily quota without trying a different credential', async () => {
+  vi.stubEnv('GEMINI_API_KEY_FALLBACK', 'synthetic-reserve-key');
+  mocks.fetch.mockResolvedValue(new Response(JSON.stringify({ error: { message: 'Quota per day exhausted' } }), { status: 429 }));
+  expect(await readPhotoWithGemini({ data: { ...input.data, mode: 'full-lite' } })).toMatchObject({ ok: false, quota: 'daily' });
+  expect(mocks.fetch).toHaveBeenCalledOnce();
+});
+
 it('does not authenticate or call Gemini when the browser request is already cancelled', async () => {
   const controller = new AbortController(); controller.abort();
   mocks.request.mockReturnValue({ signal: controller.signal });
@@ -76,7 +99,7 @@ it('aborts authentication HTTP work immediately on close and never starts Gemini
   expect(console.warn).not.toHaveBeenCalled();
 });
 
-it.each([['full', 20000], ['verify', 10000]] as const)('includes stalled authentication in the same %s %sms deadline', async (mode, budget) => {
+it.each([['full', 20000], ['full-lite', 10000], ['verify', 10000]] as const)('includes stalled authentication in the same %s %sms deadline', async (mode, budget) => {
   mocks.user.mockReturnValue(new Promise(() => {}));
   let finished = false;
   const startedAt = Date.now();
@@ -173,7 +196,7 @@ it.each([
   expect(JSON.parse(mocks.fetch.mock.calls[0]![1].body).generationConfig.thinkingConfig.thinkingLevel).toBe(level);
 });
 
-it.each([['full', 20000], ['verify', 10000]] as const)('aborts a stalled provider %s request at %sms and emits a safe fallback cause', async (mode, budget) => {
+it.each([['full', 20000], ['full-lite', 10000], ['verify', 10000]] as const)('aborts a stalled provider %s request at %sms and emits a safe fallback cause', async (mode, budget) => {
   mocks.fetch.mockImplementation((_url: string, init: RequestInit) => new Promise((_, reject) => init.signal!.addEventListener('abort', () => reject(init.signal!.reason), { once: true })));
   let finished = false;
   const startedAt = Date.now();

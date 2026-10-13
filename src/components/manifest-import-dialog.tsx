@@ -16,7 +16,7 @@ type Draft = ImportDraft & {
   key: string; filename: string; file?: File; url?: string; text?: string;
   status: 'manual' | 'waiting' | 'reading' | 'checking' | 'read' | 'error';
   kind?: 'pre' | 'dacte' | 'unknown'; message?: string; seconds?: number;
-  verification?: Verification | undefined; headerReview?: string[] | undefined; expectedRows?: number | undefined; totalVolumes?: number | undefined; edited?: boolean; progress?: string; readingSource?: 'gemini' | 'local' | undefined; readingFallback?: boolean | undefined;
+  verification?: Verification | undefined; headerReview?: string[] | undefined; expectedRows?: number | undefined; totalVolumes?: number | undefined; edited?: boolean; progress?: string; readingSource?: 'gemini' | 'local' | undefined; readingFallback?: boolean | undefined; aiReader?: PhotoFields['aiReader'];
 };
 const blank = (): Draft => ({ key: crypto.randomUUID(), filename: 'Cadastro manual', status: 'manual', id: '', plate: '', driver: '', rows: [{ ctc: '', nf: '', volumes: '1' }] });
 const documentCount = (item: Draft) => item.rows.filter(row => row.ctc).length;
@@ -122,7 +122,7 @@ export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, 
       setPreparingKey(null);
       additions = files.map((file, index) => {
         const url = URL.createObjectURL(file); urls.current.push(url);
-        const item: Draft = { ...(previous ?? blank()), key: crypto.randomUUID(), file, filename: file.name, url, status: 'waiting', rows: previous?.rows ?? [{ ctc: '', nf: '', volumes: '' }], verification: undefined, headerReview: undefined, readingSource: undefined, readingFallback: undefined, edited: false };
+        const item: Draft = { ...(previous ?? blank()), key: crypto.randomUUID(), file, filename: file.name, url, status: 'waiting', rows: previous?.rows ?? [{ ctc: '', nf: '', volumes: '' }], verification: undefined, headerReview: undefined, readingSource: undefined, readingFallback: undefined, aiReader: undefined, edited: false };
         delete item.sourcePhotoHash;
         const hash = sourceHashes[index];
         if (hash) item.sourcePhotoHash = hash;
@@ -153,7 +153,7 @@ export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, 
           return {
           ...item, id: result.pre.id || item.id, issueDate: result.pre.issueDate || item.issueDate, plate: result.pre.plate || item.plate, driver: result.pre.driver || item.driver, kind: result.pre.kind, status: pendingVerification ? 'checking' : 'read', text: result.text,
           rows: result.pre.documents.length ? result.pre.documents : result.pre.ctcs.length ? result.pre.ctcs.map(ctc => ({ ctc, nf: '', volumes: '' })) : [{ ctc: '', nf: '', volumes: '' }],
-          verification: result.pre.verification, headerReview: result.pre.headerReview, readingSource: result.pre.readingSource ?? (reader === 'local' ? 'local' : 'gemini'), readingFallback: result.pre.readingFallback,
+          verification: result.pre.verification, headerReview: result.pre.headerReview, readingSource: result.pre.readingSource ?? (reader === 'local' ? 'local' : 'gemini'), readingFallback: result.pre.readingFallback, aiReader: result.pre.aiReader,
           expectedRows: result.pre.expectedRows, totalVolumes: result.pre.totalVolumes,
           seconds: result.milliseconds / 1000,
           message: result.pre.documents.length ? `${result.pre.documents.length} CTC(s) identificados.` : 'Não identifiquei CTCs. Confira a foto e complete os campos.',
@@ -213,7 +213,7 @@ export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, 
       </div>
       <div className="import-reader-settings">
         <span className="import-reader-badge"><span className={reader === 'checking' ? 'import-dot checking' : 'import-dot'} />{reader === 'ai' ? 'Leitura local + IA' : reader === 'checking' ? 'Preparando leitor…' : 'Leitura local'}</span>
-        <details><summary>Opções de leitura</summary><div className="import-reader-options"><label className="form-field">Leitor<select aria-label="Leitor de fotos" disabled={locked} value={reader} onChange={e => setReader(e.target.value as 'ai' | 'local')}><option value="checking" disabled>Verificando leitor…</option><option value="ai" disabled={!aiAvailable}>Leitura local + IA{!aiAvailable && ' (indisponível)'}</option><option value="local">Leitura no navegador</option></select></label><p>{reader === 'ai' ? 'O navegador lê primeiro e preenche os campos. Uma chamada ao Gemini confere a foto e corrige os dados associados ao mesmo CTC. Se a IA falhar, a leitura local permanece para revisão. Fotos repetidas são ignoradas. Confira os campos sinalizados antes de cadastrar.' : reader === 'checking' ? 'Verificando disponibilidade da IA…' : 'Números pequenos podem ficar incompletos na leitura local. Confira todas as linhas antes de cadastrar.'}</p></div></details>
+        <details><summary>Opções de leitura</summary><div className="import-reader-options"><label className="form-field">Leitor<select aria-label="Leitor de fotos" disabled={locked} value={reader} onChange={e => setReader(e.target.value as 'ai' | 'local')}><option value="checking" disabled>Verificando leitor…</option><option value="ai" disabled={!aiAvailable}>Leitura local + IA{!aiAvailable && ' (indisponível)'}</option><option value="local">Leitura no navegador</option></select></label><p>{reader === 'ai' ? 'O navegador lê primeiro e preenche os campos. O Gemini normal confere a foto e corrige os dados pelo CTC. Se a cota dele acabar, o Flash Lite assume a conferência. Se o Lite falhar ou atingir a cota, a leitura local permanece para revisão. Fotos repetidas são ignoradas. Confira os campos sinalizados antes de cadastrar.' : reader === 'checking' ? 'Verificando disponibilidade da IA…' : 'Números pequenos podem ficar incompletos na leitura local. Confira todas as linhas antes de cadastrar.'}</p></div></details>
       </div>
       {dragging && <div className="import-drop-overlay"><Images size={30} /><strong>Solte as fotos para ler</strong></div>}
     </div>
@@ -245,6 +245,7 @@ export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, 
           {draft.url && <section className="import-photo-panel"><div className="import-photo-heading"><span>Foto original</span><Button type="button" variant="ghost" size="icon" aria-label="Girar visualização da foto" title="Girar visualização da foto" onClick={() => setPreviewRotation(value => (value + 90) % 360)}><RotateCw size={15} /></Button></div><a href={draft.url} target="_blank" rel="noreferrer" className="import-photo-frame" aria-label="Ampliar foto original"><img src={draft.url} style={{ transform: `rotate(${previewRotation}deg)` }} alt="Documento enviado para conferência" /></a><span className="import-photo-caption">Toque na foto para ampliar</span></section>}
         </div>
         {waiting ? <div className="import-reading-placeholder" role="status"><ScanLine size={30} className={draft.status === 'reading' ? 'animate-pulse' : ''} /><strong>{draft.status === 'waiting' ? 'Esta foto está na fila' : 'Lendo todas as linhas do documento'}</strong><p>{draft.status === 'waiting' ? 'As fotos prontas já podem ser conferidas na lista.' : 'CTCs, notas fiscais, volumes e clientes aparecerão aqui.'}</p></div> : <>
+          {draft.readingSource === 'gemini' && draft.aiReader === 'lite' && <p className="text-xs text-muted-foreground" role="status">Conferência por Flash Lite · cota do Gemini normal atingida</p>}
           <ManifestDocumentsEditor rows={draft.rows} onChange={rows => update({ rows })} selectedIndex={selectedRow} onSelect={setSelectedRow} disabled={fieldsDisabled} hideReviewNotice={draft.readingSource === 'local' ? LOCAL_ROW_NOTICE : undefined} ctcConflicts={ctcConflicts} />
           {draft.status === 'read' && <p className="import-completeness" role="status">{filled} de {draft.rows.length} CTC(s) com NF, volumes, cliente e destinatário preenchidos.{reviewCount(draft) > 0 && ` ${reviewCount(draft)} CTC(s) com campos para conferir.`}</p>}
         </>}

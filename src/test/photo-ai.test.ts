@@ -42,7 +42,7 @@ function responses(number: number, rotation: 0 | 90 | 180 | 270 = 0, needsCheck 
   return { verification, full };
 }
 
-async function pendingCall(name: string, mode: 'full' | 'verify', occurrence = 0) {
+async function pendingCall(name: string, mode: 'full' | 'full-lite' | 'verify', occurrence = 0) {
   await waitFor(() => expect(calls.filter(call => call.name === name && call.input.data.mode === mode).length).toBeGreaterThan(occurrence));
   return calls.filter(call => call.name === name && call.input.data.mode === mode)[occurrence]!;
 }
@@ -86,6 +86,150 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('AI photo import pipeline', () => {
+  it('keeps one normal full read when its quota is available', async () => {
+    const receive = vi.fn();
+    const batch = readAiPhotos([photo('normal-available.jpg')], receive, undefined, undefined, { singlePass: true, quotaFallback: true, orientations: [90] });
+    (await pendingCall('normal-available.jpg', 'full')).pending.resolve(responses(1, 0, false).full);
+    await batch;
+    expect(calls.map(call => call.input.data.mode)).toEqual(['full']);
+    expect(receive.mock.calls[0]![1].pre.aiReader).toBe('normal');
+  });
+
+  it.each(['daily', 'minute', 'unknown'] as const)('uses a full Lite transcription after a normal %s quota without decoding or orienting again', async quota => {
+    const receive = vi.fn(), progress = vi.fn();
+    const batch = readAiPhotos([photo('quota-switch.jpg')], receive, progress, undefined, { singlePass: true, quotaFallback: true, orientations: [270] });
+    const normal = await pendingCall('quota-switch.jpg', 'full');
+    normal.pending.resolve(quotaFailure(quota));
+    const lite = await pendingCall('quota-switch.jpg', 'full-lite');
+    expect(lite.input.data).toEqual({ ...normal.input.data, mode: 'full-lite' });
+    expect(lite.input.signal).toBe(normal.input.signal);
+    lite.pending.resolve(responses(1, 0, false).full);
+    await batch;
+    expect(mocks.decode).toHaveBeenCalledOnce(); expect(mocks.orient).not.toHaveBeenCalled();
+    expect(bitmaps[0]!.close).toHaveBeenCalledOnce();
+    expect(receive).toHaveBeenCalledOnce();
+    expect(receive.mock.calls[0]![1].pre).toMatchObject({ aiReader: 'lite', documents: [{ ctc: '0000000001', nf: '101-1', client: 'LAB TESTE' }] });
+    expect(progress).toHaveBeenCalledWith(0, 'Cota do Gemini normal atingida · conferindo pelo Flash Lite…');
+    expect(calls.map(call => call.input.data.mode)).toEqual(['full', 'full-lite']);
+  });
+
+  it('skips a known daily normal quota on the next import and reuses the independent Lite quota', async () => {
+    const options = { singlePass: true, quotaFallback: true, orientations: [0] as const };
+    const first = readAiPhotos([photo('normal-limited.jpg')], vi.fn(), undefined, undefined, options);
+    (await pendingCall('normal-limited.jpg', 'full')).pending.resolve(quotaFailure('daily'));
+    (await pendingCall('normal-limited.jpg', 'full-lite')).pending.resolve(responses(1, 0, false).full);
+    await first;
+    const receive = vi.fn();
+    const second = readAiPhotos([photo('lite-direct.jpg')], receive, undefined, undefined, options);
+    (await pendingCall('lite-direct.jpg', 'full-lite')).pending.resolve(responses(2, 0, false).full);
+    await second;
+    expect(calls.map(call => call.input.data.mode)).toEqual(['full', 'full-lite', 'full-lite']);
+    expect(receive.mock.calls[0]![1].pre.aiReader).toBe('lite');
+  });
+
+  it('skips both exhausted daily quotas without decoding the next photos and restores normal after renewal', async () => {
+    let now = Date.now(); vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const options = { singlePass: true, quotaFallback: true, orientations: [0] as const };
+    const first = readAiPhotos([photo('both-limited.jpg')], vi.fn(), undefined, undefined, options);
+    (await pendingCall('both-limited.jpg', 'full')).pending.resolve(quotaFailure('daily'));
+    (await pendingCall('both-limited.jpg', 'full-lite')).pending.resolve(quotaFailure('daily'));
+    await first;
+    const receive = vi.fn();
+    await readAiPhotos([photo('local-next.jpg'), photo('local-next-2.jpg')], receive, undefined, undefined, options);
+    expect(calls).toHaveLength(2); expect(mocks.decode).toHaveBeenCalledOnce();
+    expect(receive.mock.calls.map(([index, result]) => [index, result.error.includes('Flash Lite')])).toEqual([[0, true], [1, true]]);
+    now += 26 * 60 * 60 * 1000;
+    const restored = readAiPhotos([photo('quota-renewed.jpg')], receive, undefined, undefined, options);
+    (await pendingCall('quota-renewed.jpg', 'full')).pending.resolve(responses(3, 0, false).full);
+    await restored;
+    expect(calls.map(call => call.input.data.mode)).toEqual(['full', 'full-lite', 'full']);
+  });
+
+  it('pauses minute quotas independently and tries normal again when the minute expires', async () => {
+    let now = Date.now(); vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const options = { singlePass: true, quotaFallback: true, orientations: [0] as const };
+    const first = readAiPhotos([photo('minute-limited.jpg')], vi.fn(), undefined, undefined, options);
+    (await pendingCall('minute-limited.jpg', 'full')).pending.resolve(quotaFailure('minute'));
+    (await pendingCall('minute-limited.jpg', 'full-lite')).pending.resolve(quotaFailure('minute'));
+    await first;
+    await readAiPhotos([photo('local-minute.jpg')], vi.fn(), undefined, undefined, options);
+    expect(calls).toHaveLength(2);
+    now += 60001;
+    const restored = readAiPhotos([photo('minute-restored.jpg')], vi.fn(), undefined, undefined, options);
+    (await pendingCall('minute-restored.jpg', 'full')).pending.resolve(responses(1, 0, false).full);
+    await restored;
+    expect(calls.map(call => call.input.data.mode)).toEqual(['full', 'full-lite', 'full']);
+  });
+
+  it('returns Lite failure for local review without repeating either AI read', async () => {
+    const receive = vi.fn();
+    const batch = readAiPhotos([photo('lite-offline.jpg')], receive, undefined, undefined, { singlePass: true, quotaFallback: true, orientations: [0] });
+    (await pendingCall('lite-offline.jpg', 'full')).pending.resolve(quotaFailure('daily'));
+    (await pendingCall('lite-offline.jpg', 'full-lite')).pending.resolve({ ok: false, unavailable: true, retryable: false, error: 'Gemini indisponível (503).' });
+    await batch;
+    expect(receive).toHaveBeenCalledExactlyOnceWith(0, { error: 'O Gemini normal atingiu a cota. Flash Lite: Gemini indisponível (503).' });
+    expect(calls).toHaveLength(2);
+  });
+
+  it('does not switch to Lite for a session failure or a technical failure without quota evidence', async () => {
+    const failures: Extract<Response, { ok: false }>[] = [{ ok: false, fallback: false, error: 'Entre novamente na sua conta para ler fotos.' }, { ok: false, unavailable: true, retryable: false, error: 'Gemini indisponível (503).' }];
+    for (const failure of failures) {
+      const receive = vi.fn();
+      const name = 'fallback' in failure && failure.fallback === false ? 'auth-stopped.jpg' : 'technical-stopped.jpg';
+      const batch = readAiPhotos([photo(name)], receive, undefined, undefined, { singlePass: true, quotaFallback: true, orientations: [0] });
+      (await pendingCall(name, 'full')).pending.resolve(failure);
+      await batch;
+      expect(calls.filter(call => call.name === name).map(call => call.input.data.mode)).toEqual(['full']);
+      expect(receive.mock.calls[0]![1].error).toBe(failure.error);
+    }
+  });
+
+  it('does not start Lite or remember a late normal quota after stopping the photo', async () => {
+    const abort = new AbortController(), receive = vi.fn();
+    const options = { singlePass: true, quotaFallback: true, orientations: [0] as const };
+    const batch = readAiPhotos([photo('stop-before-lite.jpg')], receive, undefined, abort.signal, options);
+    const normal = await pendingCall('stop-before-lite.jpg', 'full');
+    abort.abort(); normal.pending.resolve(quotaFailure('daily'));
+    await batch;
+    expect(receive).not.toHaveBeenCalled();
+    const next = readAiPhotos([photo('after-stop.jpg')], receive, undefined, undefined, options);
+    (await pendingCall('after-stop.jpg', 'full')).pending.resolve(responses(1, 0, false).full);
+    await next;
+    expect(calls.map(call => call.input.data.mode)).toEqual(['full', 'full']);
+  });
+
+  it('ignores Lite results after stopping and keeps the normal quota without caching a late Lite quota', async () => {
+    const abort = new AbortController(), receive = vi.fn();
+    const options = { singlePass: true, quotaFallback: true, orientations: [0] as const };
+    const batch = readAiPhotos([photo('stop-during-lite.jpg')], receive, undefined, abort.signal, options);
+    (await pendingCall('stop-during-lite.jpg', 'full')).pending.resolve(quotaFailure('daily'));
+    const lite = await pendingCall('stop-during-lite.jpg', 'full-lite');
+    abort.abort(); lite.pending.resolve(quotaFailure('daily'));
+    await batch;
+    expect(lite.input.signal?.aborted).toBe(true); expect(receive).not.toHaveBeenCalled();
+    const next = readAiPhotos([photo('lite-after-stop.jpg')], receive, undefined, undefined, options);
+    (await pendingCall('lite-after-stop.jpg', 'full-lite')).pending.resolve(responses(2, 0, false).full);
+    await next;
+    expect(calls.map(call => call.input.data.mode)).toEqual(['full', 'full-lite', 'full-lite']);
+  });
+
+  it('switches queued photos to Lite while preserving a successful normal read already in flight', async () => {
+    const receive = vi.fn(), files = Array.from({ length: 10 }, (_, index) => photo(`quota-batch-${index}.jpg`));
+    const batch = readAiPhotos(files, receive, undefined, undefined, { singlePass: true, quotaFallback: true });
+    const normal0 = await pendingCall(files[0]!.name, 'full'), normal1 = await pendingCall(files[1]!.name, 'full');
+    normal0.pending.resolve(quotaFailure('daily'));
+    (await pendingCall(files[0]!.name, 'full-lite')).pending.resolve(responses(1, 0, false).full);
+    normal1.pending.resolve(responses(2, 0, false).full);
+    for (let index = 2; index < files.length; index++) (await pendingCall(files[index]!.name, 'full-lite')).pending.resolve(responses(index + 1, 0, false).full);
+    await batch;
+    expect(receive).toHaveBeenCalledTimes(10); expect(new Set(receive.mock.calls.map(([index]) => index)).size).toBe(10);
+    expect(calls.filter(call => call.input.data.mode === 'full')).toHaveLength(2);
+    expect(calls.filter(call => call.input.data.mode === 'full-lite')).toHaveLength(9);
+    expect(peakRequests).toBe(2); expect(mocks.decode).toHaveBeenCalledTimes(10);
+    expect(receive.mock.calls.find(([index]) => index === 1)![1].pre.aiReader).toBe('normal');
+    bitmaps.forEach(image => expect(image.close).toHaveBeenCalledOnce());
+  });
+
   it('reuses the local orientation and returns a full independent reading without an extra AI check in single-pass mode', async () => {
     const receive = vi.fn(); const progress = vi.fn();
     const batch = readAiPhotos([photo('local-first.jpg')], receive, progress, undefined, { orientations: [270], singlePass: true });

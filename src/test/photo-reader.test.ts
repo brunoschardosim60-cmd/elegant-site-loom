@@ -41,7 +41,7 @@ describe('local-first photo reading with independent AI correction', () => {
     expect(mocks.local.mock.calls[0]![0]).toEqual(files.slice(0, 2));
     expect(mocks.local.mock.calls[0]![3].aborted).toBe(false); expect(mocks.local.mock.calls[0]![4]).toBe(true);
     expect(mocks.ai.mock.calls[0]![0]).toEqual([files[0]]);
-    expect(mocks.ai.mock.calls[0]![4]).toEqual({ singlePass: true, orientations: [270] });
+    expect(mocks.ai.mock.calls[0]![4]).toEqual({ singlePass: true, quotaFallback: true, orientations: [270] });
     expect(progress).toHaveBeenCalledWith(0, 'Leitura local · Lendo');
     sendLocal(1, reading(1, true)); localGate.resolve(); aiGate.resolve(); await run;
     expect(finals(receive).map(([index]) => index)).toEqual([0, 1]);
@@ -72,12 +72,13 @@ describe('local-first photo reading with independent AI correction', () => {
   });
 
   it('corrects a local NF and quantity by CTC rather than preserving a plausible OCR error', async () => {
-    const local = reading(0, true), ai = reading(0); local.pre.documents[0]!.nf = '10-1'; local.pre.documents[0]!.volumes = '8';
+    const local = reading(0, true), full = reading(0), ai = { ...full, pre: { ...full.pre, aiReader: 'lite' as const } }; local.pre.documents[0]!.nf = '10-1'; local.pre.documents[0]!.volumes = '8';
     mocks.local.mockImplementation(async (_files: File[], result: OnResult) => result(0, local));
     mocks.ai.mockImplementation(async (_files: File[], result: OnResult) => result(0, ai));
     const receive = vi.fn(); await readPhotosWithFallback([files[0]!], receive);
     const corrected = finals(receive)[0]![1].pre;
     expect(corrected.documents[0]).toMatchObject({ ctc: '0000000001', nf: '100-1', volumes: '3' });
+    expect(corrected.aiReader).toBe('lite');
     expect(corrected.documents[0].review.join(' ')).toContain('corrigido pela IA'); expect(corrected.verification).toMatchObject({ status: 'review', conflicts: 2 });
     expect(local.pre.documents[0]).toMatchObject({ nf: '10-1', volumes: '8' });
   });
@@ -91,12 +92,13 @@ describe('local-first photo reading with independent AI correction', () => {
 
   it('reports both failures and removes credentials from deliberate provider messages', async () => {
     const credential = `AIza${'x'.repeat(35)}`;
+    const alternateCredential = `AQ.${'x'.repeat(40)}`;
     mocks.local.mockImplementation(async (_files: File[], result: OnResult) => result(0, { error: 'Falha local Bearer private-local-token' }));
-    mocks.ai.mockImplementation(async (_files: File[], result: OnResult) => result(0, { error: `Sem cota ${credential}; access_token=private-ai-token` }));
+    mocks.ai.mockImplementation(async (_files: File[], result: OnResult) => result(0, { error: `Sem cota ${credential}; ${alternateCredential}; access_token=private-ai-token` }));
     const receive = vi.fn(); await readPhotosWithFallback([files[0]!], receive);
     expect(receive).toHaveBeenCalledOnce(); const error = receive.mock.calls[0]![1].error;
     expect(error).toContain('Sem cota'); expect(error).toContain('Falha local');
-    for (const value of [credential, 'private-local-token', 'private-ai-token']) expect(error).not.toContain(value);
+    for (const value of [credential, alternateCredential, 'private-local-token', 'private-ai-token']) expect(error).not.toContain(value);
   });
 
   it.each(['callback', 'exception'])('does not label an authentication %s as a successful local fallback', async mode => {
