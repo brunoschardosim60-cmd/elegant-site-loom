@@ -37,3 +37,34 @@ describe('Conferência por CTC', () => {
     expect(parsePreText(key('57', '365569') + '\nCT-e: 1234567890\nNF: 1234567890').ctcs).toEqual([]);
   });
 });
+
+
+import { accessKeyIsValid, parseScan } from '@/lib/conference';
+
+describe('bipe do CT-e (DACTE)', () => {
+  const REAL = '31260952134798000591570020003652411736399041';
+
+  it('validates the real access key check digit', () => {
+    expect(accessKeyIsValid(REAL)).toBe(true);
+  });
+
+  it('rejects a key with an incorrect check digit', () => {
+    expect(parseScan(REAL.slice(0, 43) + (REAL[43] === '0' ? '1' : '0')).kind).toBe('invalid');
+  });
+
+  it('maps the CT-e number to the corresponding CTC identifier', () => {
+    expect(parseScan(REAL)).toEqual({ kind: 'ctc', number: '4400365241', cteNumber: '365241' });
+  });
+
+  it('continues accepting a ten-digit CTC directly', () => {
+    expect(parseScan('4400365241')).toEqual({ kind: 'ctc', number: '4400365241' });
+  });
+
+  it('continues identifying NF-e keys separately', () => {
+    expect(parseScan(key('55', '1127276')).kind).toBe('nfe');
+  });
+
+  it('keeps import parsing from converting CT-e keys', () => {
+    expect(parseReading(REAL).kind).toBe('invalid');
+  });
+});
