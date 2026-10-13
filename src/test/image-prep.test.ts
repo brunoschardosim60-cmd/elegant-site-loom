@@ -51,7 +51,7 @@ describe('Photo preparation', () => {
     const decode = vi.fn(); vi.stubGlobal('createImageBitmap', decode);
     const abort = new AbortController(); abort.abort();
     const file = new File(['image'], 'photo.jpg');
-    expect(await prepareForOcr(file, 0, 1400, abort.signal)).toBe(file);
+    await expect(prepareForOcr(file, 0, 1400, abort.signal)).rejects.toThrow();
     expect(decode).not.toHaveBeenCalled();
   });
   it('closes a bitmap that arrives after cancellation without creating or encoding a canvas', async () => {
@@ -64,7 +64,7 @@ describe('Photo preparation', () => {
     const result = prepareForOcr(file, 270, 1400, abort.signal);
     abort.abort();
     finish({ width: 1000, height: 2000, close } as unknown as ImageBitmap);
-    expect(await result).toBe(file);
+    await expect(result).rejects.toThrow();
     expect(close).toHaveBeenCalledOnce();
     expect(getContext).not.toHaveBeenCalled();
     expect(encode).not.toHaveBeenCalled();
