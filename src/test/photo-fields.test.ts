@@ -24,6 +24,14 @@ describe('Photo table extraction', () => {
     expect(fields.ctcs).toEqual(['1234567890', '2345678901']);
     expect(fields.documents).toMatchObject([{ ctc: '1234567890', nf: '12345-1', volumes: '20' }, { ctc: '2345678901', nf: '54321-2', volumes: '7' }]);
   });
+  it('rejoins a CTC split into adjacent numeric OCR tokens without shifting NF and volumes', () => {
+    const fields = parsePhotoFields(page([
+      word('CTC', 100, 200), word('Remetente', 250, 200), word('NF-Série', 400, 200, 90), word('Vols.', 600, 200),
+      word('00000', 100, 240, 45), word('0001', 148, 240, 40),
+      word('12345-1', 400, 238, 80), word('8', 610, 235, 20),
+    ]));
+    expect(fields.documents).toMatchObject([{ ctc: '0000000001', nf: '12345-1', volumes: '8' }]);
+  });
   it('does not supply default volumes or invent a missing NF series', () => {
     const fields = parsePhotoFields(page([word('CTC', 100, 200), word('NF-Série', 400, 200, 90), word('Vols.', 600, 200), word('1234567890', 100, 240, 100), word('123451', 400, 240, 80)]));
     expect(fields.documents).toMatchObject([{ ctc: '1234567890', nf: '123451', volumes: '' }]);
