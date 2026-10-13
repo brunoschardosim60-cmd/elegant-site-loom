@@ -225,3 +225,10 @@ export async function readPrePhotos(files: File[], onResult: (index: number, res
   try { await Promise.all(pool.map(run)); }
   finally { signal?.removeEventListener('abort', cancel); await Promise.all(pool.map(worker => worker.terminate().catch(() => {}))); }
 }
+
+/** Read a single photo with a dedicated worker. */
+export async function readPrePhoto(file: File, progress: (message: string) => void = () => {}, detailed = false) {
+  const worker = await createWorker('por');
+  try { const result = await readWithWorker(worker, file, progress, undefined, detailed); return { ...result, pre: markLocalPhoto(result.pre) }; }
+  finally { await worker.terminate().catch(() => {}); }
+}
