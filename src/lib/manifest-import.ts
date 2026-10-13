@@ -99,7 +99,12 @@ export function applyImports(existing: Manifest[], drafts: ImportDraft[], now: s
       const reading = parseReading(item.ctc);
       if (reading.kind !== 'ctc') return fail('Confira o CTC de 10 dígitos.', row);
       if (!Number.isInteger(Number(item.volumes)) || Number(item.volumes) < 1) return fail('Confira a quantidade de volumes (inteiro maior que zero).', row);
-      if (registeredCtcs.has(reading.number)) return fail(conflicts.find(conflict => conflict.kind === 'ctc' && conflict.row === row)?.message ?? `CTC ${reading.number} já está cadastrado em outro pré.`, row);
+      if (registeredCtcs.has(reading.number)) {
+        const registeredOwner = manifests.find(manifest => manifest.documents.some(document => parseReading(document.ctc).kind === 'ctc' && parseReading(document.ctc).number === reading.number));
+        const message = conflicts.find(conflict => conflict.kind === 'ctc' && conflict.row === row)?.message
+          ?? (registeredOwner ? `CTC ${reading.number} já está cadastrado no pré ${registeredOwner.id} · motorista ${registeredOwner.driver.trim() || 'não informado'}.` : `CTC ${reading.number} já está cadastrado em outro pré.`);
+        return fail(message, row);
+      }
       const group = grouped.get(reading.number) ?? { rows: [], firstRow: row };
       group.rows.push(item);
       grouped.set(reading.number, group);
