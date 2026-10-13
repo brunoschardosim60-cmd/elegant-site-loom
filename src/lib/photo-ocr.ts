@@ -224,9 +224,52 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
 }
 
 /** One language download and worker initialization for the entire batch. */
+const LOCAL_OCR_IDLE_TIMEOUT_MS = 60000;
+const LOCAL_OCR_IDLE_ERROR = 'A leitura local ficou 60 segundos sem progresso. Tente uma foto mais nítida ou aproxime o documento.';
+
+/** Race a read against cancellation so a stuck OCR call cannot hold the UI forever. */
+async function withAbort<T>(task: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) throw signal.reason ?? new Error('Leitura interrompida.');
+  let cancel!: (reason: unknown) => void;
+  const stopped = new Promise<never>((_, reject) => { cancel = reject; });
+  const onAbort = () => cancel(signal.reason ?? new Error('Leitura interrompida.'));
+  signal.addEventListener('abort', onAbort, { once: true });
+  if (signal.aborted) onAbort();
+  try { return await Promise.race([task, stopped]); }
+  finally { signal.removeEventListener('abort', onAbort); }
+}
+
+/** One language download and worker initialization for the entire batch. */
 export async function readPrePhotos(files: File[], onResult: (index: number, result: Result | { error: string; fallback?: boolean }) => void, progress: (index: number, message: string) => void = () => {}, signal?: AbortSignal, detailed = false) {
   if (signal?.aborted || !files.length) return;
-  progress(0, 'Preparando leitor…');
+
+  const watchdog = new AbortController();
+  const readSignal = signal ? AbortSignal.any([signal, watchdog.signal]) : watchdog.signal;
+  const delivered = new Set<number>();
+  let timedOut = false;
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  const clearIdleTimer = () => { if (idleTimer) clearTimeout(idleTimer); idleTimer = undefined; };
+  const touch = () => {
+    if (signal?.aborted || watchdog.signal.aborted) return;
+    clearIdleTimer();
+    idleTimer = setTimeout(() => {
+      timedOut = true;
+      watchdog.abort(new Error(LOCAL_OCR_IDLE_ERROR));
+    }, LOCAL_OCR_IDLE_TIMEOUT_MS);
+  };
+  const emit = (index: number, result: Result | { error: string; fallback?: boolean }) => {
+    if (delivered.has(index) || signal?.aborted) return;
+    delivered.add(index);
+    touch();
+    onResult(index, result);
+  };
+  const reportProgress = (index: number, message: string) => {
+    if (readSignal.aborted) return;
+    touch();
+    progress(index, message);
+  };
+
+  reportProgress(0, 'Preparando leitor…');
   // A phone can report 6–8 CPU cores while still having little free memory.
   // Keep one WASM worker on mobile/low-memory devices to avoid competing OCR heaps.
   const cores = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 2 : 2;
@@ -240,29 +283,58 @@ export async function readPrePhotos(files: File[], onResult: (index: number, res
   const poolSize = getLocalOcrPoolSize(files.length, cores, mobile, deviceMemory);
   const startingAll = Array.from({ length: poolSize }, () => createWorker('por'));
   let cancelStartup = () => {};
-  const aborted = new Promise<undefined>(resolve => { cancelStartup = () => resolve(undefined); signal?.addEventListener('abort', cancelStartup, { once: true }); });
+  const aborted = new Promise<undefined>(resolve => {
+    cancelStartup = () => resolve(undefined);
+    readSignal.addEventListener('abort', cancelStartup, { once: true });
+    if (readSignal.aborted) cancelStartup();
+  });
   let workers: Worker[] | undefined;
-  try { workers = await Promise.race([Promise.all(startingAll), aborted]); }
-  finally { signal?.removeEventListener('abort', cancelStartup); }
-  if (!workers) { for (const starting of startingAll) void starting.then(late => late.terminate()).catch(() => {}); return; }
+  try {
+    workers = await Promise.race([Promise.all(startingAll), aborted]);
+  } catch (error) {
+    clearIdleTimer();
+    throw error;
+  } finally { readSignal.removeEventListener('abort', cancelStartup); }
+  if (!workers) {
+    for (const starting of startingAll) void starting.then(late => late.terminate()).catch(() => {});
+    clearIdleTimer();
+    if (timedOut && !signal?.aborted) files.forEach((_, index) => emit(index, { error: LOCAL_OCR_IDLE_ERROR }));
+    return;
+  }
+
   const pool = workers;
   let preferred: Angle | undefined;
   let next = 0;
   const cancel = () => { for (const worker of pool) void worker.terminate().catch(() => {}); };
-  signal?.addEventListener('abort', cancel, { once: true });
+  readSignal.addEventListener('abort', cancel, { once: true });
   const run = async (worker: Worker) => {
-    while (!signal?.aborted && next < files.length) {
+    while (!readSignal.aborted && next < files.length) {
       const index = next++;
       try {
-        const result = await readWithWorker(worker, files[index]!, message => progress(index, message), preferred, detailed, signal);
-        if (signal?.aborted) return;
+        const result = await withAbort(
+          readWithWorker(worker, files[index]!, message => reportProgress(index, message), preferred, detailed, readSignal),
+          readSignal,
+        );
+        if (readSignal.aborted) return;
         if (result.pre.kind === 'pre') preferred = result.angle;
-        onResult(index, { ...result, pre: markLocalPhoto(result.pre) });
-      } catch { if (signal?.aborted) return; onResult(index, { error: 'Não foi possível ler esta foto. Tente outra foto ou preencha os dados.' }); }
+        emit(index, { ...result, pre: markLocalPhoto(result.pre) });
+      } catch {
+        if (readSignal.aborted) return;
+        emit(index, { error: 'Não foi possível ler esta foto. Tente outra foto ou preencha os dados.' });
+      }
     }
   };
   try { await Promise.all(pool.map(run)); }
-  finally { signal?.removeEventListener('abort', cancel); await Promise.all(pool.map(worker => worker.terminate().catch(() => {}))); }
+  finally {
+    readSignal.removeEventListener('abort', cancel);
+    clearIdleTimer();
+    await Promise.all(pool.map(worker => worker.terminate().catch(() => {})));
+  }
+  // In local-only mode this guarantees every file receives a terminal state.
+  // In local + AI mode the caller can still send timed-out photos to its fallback.
+  if (timedOut && !signal?.aborted) {
+    files.forEach((_, index) => { if (!delivered.has(index)) emit(index, { error: LOCAL_OCR_IDLE_ERROR }); });
+  }
 }
 
 /** Read a single photo with a dedicated worker. */
