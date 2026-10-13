@@ -149,7 +149,7 @@ export function parsePhotoFields(page: OcrPage): PhotoFields {
     const plate = parsePreText(line).plate || parsePreText(below.map(w => w.text).join(' ')).plate;
     if (plate) fields.plate = plate;
     const withoutPlate = line.replace(/[A-Z]{3}[\s-]?[0-9OIL][\s-]?[A-Z0-9][\s-]?[0-9OIL][\s-]?[0-9OIL]/i, ' ');
-    const driver = withoutPlate.replace(/^[\s:;|/–-]+|[\s:;|/–-]+$/g, '').replace(/\s{2,}/g, ' ').trim();
+    const driver = withoutPlate.replace(/(^|[\s-])\d+(?=[\s-]|$)/g, ' ').replace(/^[\s:;|/–-]+|[\s:;|/–-]+$/g, '').replace(/\s{2,}/g, ' ').trim();
     if (driver && /[A-ZÀ-ÖØ-Þ]{2,}/i.test(driver) && !/^MOTORISTA$/i.test(driver)) fields.driver = driver;
     // Fallback: when the OCR puts plate and driver on separate lines, use the first plausible name below the label.
     if (!fields.driver) {
