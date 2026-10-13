@@ -7,6 +7,7 @@ import { demoManifests, findMatches, parseReading, setReceived, type Manifest } 
 
 import { ManifestImportDialog } from './manifest-import-dialog';
 import { DriverManifestList } from './driver-manifest-list';
+import { ManifestDeleteDialog } from './manifest-delete-dialog';
 import { applyImports, type ImportDraft } from '@/lib/manifest-import';
 import type { ConferenceState } from '@/lib/conference-state';
 import { compareManifestDates, formatManifestDate, manifestAgeDays, manifestAgeLabel, manifestReferenceDate, normalizeIssueDate } from '@/lib/manifest-date';
@@ -36,6 +37,8 @@ export function ConferenceWorkspace({ initialState, onSnapshot, accountEmail }: 
   const [notices, setNotices] = useState<Notice[]>([]);
   const [blocked, setBlocked] = useState<string | null>(null);
   const [newOpen, setNewOpen] = useState(false);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const pendingDeleteId = useRef<string | null>(null);
   const [now, setNow] = useState('2026-10-09T09:36:00');
   const [prefillId, setPrefillId] = useState('');
   const sequence = useRef(Math.max(10, ...(initialState?.activity ?? []).map(item => item.id), ...(initialState?.issues ?? []).map(item => item.id)));
@@ -60,7 +63,7 @@ export function ConferenceWorkspace({ initialState, onSnapshot, accountEmail }: 
       document.removeEventListener('visibilitychange', refreshVisibleClock);
     };
   }, []);
-  useEffect(() => { if (!blocked && !newOpen) scanner.current?.focus(); }, [blocked, newOpen]);
+  useEffect(() => { if (!blocked && !newOpen && !deleteId) scanner.current?.focus(); }, [blocked, newOpen, deleteId]);
 
   function update(next: Manifest[]) { current.current = next; setManifests(next); }
   function log(title: string, description: string, warning = false) {
@@ -75,7 +78,7 @@ export function ConferenceWorkspace({ initialState, onSnapshot, accountEmail }: 
   }
   function scan(event: FormEvent) {
     event.preventDefault();
-    if (!code.trim() || blocked || newOpen) return;
+    if (!code.trim() || blocked || newOpen || pendingDeleteId.current) return;
     const input = code.trim();
     setCode('');
     scanner.current?.focus();
@@ -125,6 +128,29 @@ export function ConferenceWorkspace({ initialState, onSnapshot, accountEmail }: 
     log('Data de emissão atualizada', `${manifestId} · ${issueDate ? formatManifestDate(issueDate) : 'idade pelo cadastro'}`);
     notify(onSnapshot ? 'Data atualizada. Confira o status de salvamento.' : 'Data de emissão atualizada.');
   }
+  function requestDelete(manifestId: string) {
+    if (blocked || newOpen || !current.current.some(item => item.id === manifestId)) return;
+    pendingDeleteId.current = manifestId;
+    setDeleteId(manifestId);
+  }
+  function cancelDelete() {
+    pendingDeleteId.current = null;
+    setDeleteId(null);
+  }
+  function confirmDelete(manifestId: string) {
+    // Confirm only the selected pré, using the latest state. Repeated clicks
+    // cannot remove another pré or create duplicate activity entries.
+    if (pendingDeleteId.current !== manifestId) return;
+    const manifest = current.current.find(item => item.id === manifestId);
+    cancelDelete();
+    if (!manifest) return;
+    update(current.current.filter(item => item.id !== manifestId));
+    setFocusedManifest(focused => focused?.id === manifestId ? null : focused);
+    setQuery(value => value.trim().toUpperCase() === manifestId.toUpperCase() ? '' : value);
+    setCode('');
+    log('Pré-manifesto excluído', `${manifest.id} · ${manifest.driver} · ${manifest.documents.length} CTC(s)`);
+    notify(onSnapshot ? 'Pré excluído. Confira o status de salvamento.' : 'Pré-manifesto excluído.');
+  }
   const pending = manifests.filter(item => !item.finishedAt);
   const finished = manifests.filter(item => item.finishedAt);
   const documents = manifests.flatMap(item => item.documents);
@@ -168,12 +194,12 @@ export function ConferenceWorkspace({ initialState, onSnapshot, accountEmail }: 
         <div className="metric-grid">
           {[{ label: 'Pré-manifestos em aberto', value: pending.length, caption: 'Aguardando documentos', icon: Layers, color: '' }, { label: 'Documentos pendentes', value: missing.length, caption: `${missing.reduce((sum, doc) => sum + doc.volumes, 0)} volumes a conferir`, icon: FileText, color: '' }, { label: 'Documentos conferidos', value: documents.filter(doc => doc.received).length, caption: 'Recebidos e identificados', icon: CircleCheck, color: 'text-success' }, { label: 'Pré-manifestos finalizados', value: finished.length, caption: 'Todos os documentos recebidos', icon: CheckCheck, color: 'text-primary' }].map(metric => <div className="metric" key={metric.label}><div className="metric-label">{metric.label}<metric.icon /></div><div className={`metric-value ${metric.color}`}>{String(metric.value).padStart(2, '0')}</div><div className="metric-caption">{metric.caption}</div></div>)}
         </div>
-        <section className="scanner-band" aria-label="Leitor de CTC"><div className="scanner-symbol"><ScanLine size={29} strokeWidth={1.6} /></div><div className="scanner-copy"><h2>Pronto para a próxima leitura</h2><p><span className="online-dot" />Aguardando CTC</p></div><form className="scan-form" onSubmit={scan}><Barcode /><input ref={scanner} aria-label="Código do CTC" className="scan-input" placeholder="Bipe ou digite o código do CTC…" value={code} onChange={event => setCode(event.target.value)} autoComplete="off" disabled={!!blocked || newOpen} /><Button type="submit" size="sm" disabled={!code.trim() || !!blocked || newOpen}>Conferir <ArrowRight size={13} /></Button></form></section>
+        <section className="scanner-band" aria-label="Leitor de CTC"><div className="scanner-symbol"><ScanLine size={29} strokeWidth={1.6} /></div><div className="scanner-copy"><h2>Pronto para a próxima leitura</h2><p><span className="online-dot" />Aguardando CTC</p></div><form className="scan-form" onSubmit={scan}><Barcode /><input ref={scanner} aria-label="Código do CTC" className="scan-input" placeholder="Bipe ou digite o código do CTC…" value={code} onChange={event => setCode(event.target.value)} autoComplete="off" disabled={!!blocked || newOpen || !!deleteId} /><Button type="submit" size="sm" disabled={!code.trim() || !!blocked || newOpen || !!deleteId}>Conferir <ArrowRight size={13} /></Button></form></section>
         <div className="content-grid"><section>
           <div className="section-heading"><h2 className="mr-auto">{view === 'pending' ? 'Pré-manifestos em aberto' : view === 'missing' ? 'CTCs pendentes' : view === 'finished' ? 'Conferências concluídas' : 'Ocorrências'}<span className="section-count">{view === 'issues' ? issues.length : view === 'missing' ? missingRows.length : visible.length}</span></h2><Button variant="outline" size="sm" onClick={() => void exportPdf()} disabled={pdfBusy} className="text-[11px]">{pdfBusy ? <Loader2 size={12} className="animate-spin" /> : <FileText size={12} />}{pdfBusy ? 'Gerando PDF…' : 'PDF'}</Button></div>
           {view !== 'issues' && <div className="list-tools"><label className="search-wrap"><Search /><input aria-label="Buscar pré-manifesto" placeholder="Pré, motorista, placa, CTC, NF ou cliente" value={query} onChange={event => setQuery(event.target.value)} /></label><select aria-label="Filtrar pré-manifestos" className="filter-select" value={filter} onChange={event => setFilter(event.target.value)}><option value="all">Mais antigos primeiro</option><option value="new">Mais recentes</option><option value="old">Há 2 dias ou mais</option></select></div>}
           <div className="manifest-list">
-            {view === 'missing' ? missingRows.length ? <div className="manifest-card pending-table-wrap"><table className="document-table pending-table" aria-label="CTCs pendentes"><thead><tr><th>CTC</th><th>Pré / Motorista</th><th>NF</th><th>Vols.</th><th>Status</th><th><span className="sr-only">Ações</span></th></tr></thead><tbody>{missingRows.map(({ manifest, doc, days }) => <tr key={doc.id}><td className="ctc-number" data-label="CTC / Cliente">{doc.ctc}{doc.client && <span className="block text-muted-foreground text-[10px] font-sans mt-1">{doc.client}</span>}</td><td data-label="Pré / Motorista"><span className="block font-semibold">{manifest.id}</span><span className="text-muted-foreground">{manifest.driver} · <span className="plate">{manifest.plate}</span></span><span className="block text-muted-foreground text-[10px] mt-1">{normalizeIssueDate(manifest.issueDate ?? '') ? 'Emissão' : 'Cadastro'} {formatManifestDate(manifestReferenceDate(manifest))}</span></td><td className="text-muted-foreground" data-label="Nota fiscal">{doc.nf}</td><td data-label="Volumes">{doc.volumes}</td><td data-label="Status"><span className={`status-badge ${days >= 2 ? 'badge-warning' : 'badge-pending'}`}><Clock3 size={10} />{manifestAgeLabel(manifest, now)}</span></td><td data-label="Ações"><Button variant="ghost" size="icon" className="document-action text-muted-foreground" aria-label={`Marcar CTC ${doc.ctc} como recebido`} onClick={() => toggleDocument(manifest, doc.id, true)}><Check /></Button></td></tr>)}</tbody></table></div> : <div className="empty-state"><CheckCheck /><h3>Nada pendente</h3><p className="text-xs mt-2">{query ? 'Nenhum resultado para essa busca.' : 'Todos os CTCs cadastrados já foram conferidos.'}</p></div> : view === 'issues' ? issues.length ? issues.map(issue => <div className="manifest-card p-5 flex gap-3" key={issue.id}><TriangleAlert className="text-warning shrink-0" size={19} /><div><h3 className="font-semibold text-xs">{issue.title}</h3><p className="text-muted-foreground text-xs mt-2">{issue.description}</p><p className="text-muted-foreground text-[10px] mt-2">{issue.time}</p></div></div>) : <div className="empty-state"><ShieldCheck /><h3>Nenhuma ocorrência</h3><p className="text-xs mt-2">Tudo certo com as leituras desta sessão.</p></div> : visible.length ? <DriverManifestList manifests={visible} query={query} focusedManifest={focusedManifest} age={age} now={now} onToggleDocument={toggleDocument} onIssueDateChange={changeIssueDate} /> : <div className="empty-state"><Inbox /><h3>{view === 'finished' ? 'Nenhum pré finalizado' : 'Nenhum pré pendente'}</h3><p className="text-xs mt-2">{query ? 'Nenhum resultado para essa busca.' : 'A lista está em dia.'}</p></div>}
+            {view === 'missing' ? missingRows.length ? <div className="manifest-card pending-table-wrap"><table className="document-table pending-table" aria-label="CTCs pendentes"><thead><tr><th>CTC</th><th>Pré / Motorista</th><th>NF</th><th>Vols.</th><th>Status</th><th><span className="sr-only">Ações</span></th></tr></thead><tbody>{missingRows.map(({ manifest, doc, days }) => <tr key={doc.id}><td className="ctc-number" data-label="CTC / Cliente">{doc.ctc}{doc.client && <span className="block text-muted-foreground text-[10px] font-sans mt-1">{doc.client}</span>}</td><td data-label="Pré / Motorista"><span className="block font-semibold">{manifest.id}</span><span className="text-muted-foreground">{manifest.driver} · <span className="plate">{manifest.plate}</span></span><span className="block text-muted-foreground text-[10px] mt-1">{normalizeIssueDate(manifest.issueDate ?? '') ? 'Emissão' : 'Cadastro'} {formatManifestDate(manifestReferenceDate(manifest))}</span></td><td className="text-muted-foreground" data-label="Nota fiscal">{doc.nf}</td><td data-label="Volumes">{doc.volumes}</td><td data-label="Status"><span className={`status-badge ${days >= 2 ? 'badge-warning' : 'badge-pending'}`}><Clock3 size={10} />{manifestAgeLabel(manifest, now)}</span></td><td data-label="Ações"><Button variant="ghost" size="icon" className="document-action text-muted-foreground" aria-label={`Marcar CTC ${doc.ctc} como recebido`} onClick={() => toggleDocument(manifest, doc.id, true)}><Check /></Button></td></tr>)}</tbody></table></div> : <div className="empty-state"><CheckCheck /><h3>Nada pendente</h3><p className="text-xs mt-2">{query ? 'Nenhum resultado para essa busca.' : 'Todos os CTCs cadastrados já foram conferidos.'}</p></div> : view === 'issues' ? issues.length ? issues.map(issue => <div className="manifest-card p-5 flex gap-3" key={issue.id}><TriangleAlert className="text-warning shrink-0" size={19} /><div><h3 className="font-semibold text-xs">{issue.title}</h3><p className="text-muted-foreground text-xs mt-2">{issue.description}</p><p className="text-muted-foreground text-[10px] mt-2">{issue.time}</p></div></div>) : <div className="empty-state"><ShieldCheck /><h3>Nenhuma ocorrência</h3><p className="text-xs mt-2">Tudo certo com as leituras desta sessão.</p></div> : visible.length ? <DriverManifestList manifests={visible} query={query} focusedManifest={focusedManifest} age={age} now={now} onToggleDocument={toggleDocument} onIssueDateChange={changeIssueDate} onDeleteManifest={requestDelete} /> : <div className="empty-state"><Inbox /><h3>{view === 'finished' ? 'Nenhum pré finalizado' : 'Nenhum pré pendente'}</h3><p className="text-xs mt-2">{query ? 'Nenhum resultado para essa busca.' : 'A lista está em dia.'}</p></div>}
           </div>
         </section><aside className="activity-panel"><div className="activity-heading">Últimas atividades <span className="live-label"><i className="online-dot" />Ao vivo</span></div><div className="activity-date">Hoje</div><div className="activity-list">{activity.slice(0, 5).map(item => <div className="activity-item" key={item.id}><div className={`activity-icon ${item.warning ? 'warning' : ''}`}>{item.warning ? <TriangleAlert /> : item.title.includes('finalizado') ? <CheckCheck /> : item.title.includes('adicionado') ? <Plus /> : <Check />}</div><div><div className="activity-title">{item.title}</div><div className="activity-description">{item.description}</div><div className="activity-time">{item.time}</div></div></div>)}</div><div className="daily-summary"><h3>Resumo da sessão</h3><div className="summary-line"><span>Documentos recebidos</span><strong>{documents.filter(doc => doc.received).length}</strong></div><div className="summary-line"><span>Pré-manifestos concluídos</span><strong>{finished.length}</strong></div><div className="summary-line"><span>Ocorrências registradas</span><strong>{issues.length}</strong></div><div className="flex gap-2 text-success text-[10px] mt-5 items-center"><ShieldCheck size={13} />{issues.length ? 'Confira as ocorrências' : 'Nenhuma ocorrência nesta sessão'}</div></div></aside></div>
         <footer className="page-footer"><span className="flex gap-1.5 items-center"><ShieldCheck size={12} /> {accountEmail ? 'Cadastros na sua conta · confira o status de salvamento' : 'Dados temporários · reiniciam ao atualizar a página'}</span><span>confere. <span className="mx-2">/</span> Controle de retorno de documentos</span></footer>
@@ -182,6 +208,7 @@ export function ConferenceWorkspace({ initialState, onSnapshot, accountEmail }: 
     <div className="toast-stack" aria-live="polite">{notices.map(notice => <div className={`scan-toast ${notice.warning ? 'warning' : ''}`} key={notice.id}>{notice.warning ? <TriangleAlert className="text-warning shrink-0" size={17} /> : <CircleCheck className="text-success shrink-0" size={17} />}<span>{notice.text}</span></div>)}</div>
     <Dialog open={!!blocked} onOpenChange={open => { if (!open) setBlocked(null); }}><DialogContent><DialogHeader><div className="text-warning mb-2"><TriangleAlert size={30} /></div><DialogTitle>Este CTC precisa de atenção</DialogTitle><DialogDescription className="pt-2">{blocked}</DialogDescription></DialogHeader><p className="text-xs text-muted-foreground">Confira o documento e os CTCs cadastrados antes de continuar.</p><Button onClick={() => setBlocked(null)}>Entendido, continuar <ArrowRight /></Button></DialogContent></Dialog>
     {newOpen && <ManifestImportDialog open onOpenChange={open => { setNewOpen(open); if (!open) setPrefillId(''); }} manifests={manifests} onCreate={importDrafts} initialId={prefillId} />}
+    <ManifestDeleteDialog manifest={manifests.find(item => item.id === deleteId) ?? null} onCancel={cancelDelete} onConfirm={confirmDelete} />
 
   </div></TooltipProvider>;
 }

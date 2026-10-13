@@ -50,3 +50,24 @@ it('never replaces saved data with an empty workspace after a load error', async
   expect(mocks.rpc).not.toHaveBeenCalled();
   expect(screen.queryByRole('button', { name: /Novo pré/ })).not.toBeInTheDocument();
 });
+
+it('persists a confirmed deletion with the current revision and keeps it deleted after reloading', async () => {
+  render(<AccountWorkspace />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Excluir pré DI00123456789' }));
+  expect(mocks.rpc).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Excluir pré-manifesto' }));
+  await waitFor(() => expect(mocks.rpc).toHaveBeenCalledOnce());
+  const [operation, payload] = mocks.rpc.mock.calls[0]!;
+  expect(operation).toBe('save_conference');
+  expect(payload.expected_revision).toBe(7);
+  expect(payload.next_data.manifests).toEqual([]);
+  expect(payload.next_data.activity).toMatchObject([{ title: 'Pré-manifesto excluído' }]);
+  await screen.findByText('Todos os dados salvos');
+
+  cleanup();
+  mocks.read.mockResolvedValue({ data: { revision: 8, data: payload.next_data }, error: null });
+  render(<AccountWorkspace />);
+  expect(await screen.findByRole('heading', { name: 'Nenhum pré pendente' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Excluir pré DI00123456789' })).not.toBeInTheDocument();
+  expect(mocks.rpc).toHaveBeenCalledOnce();
+});
