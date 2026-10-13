@@ -32,6 +32,20 @@ it('never uses a DACTE issue date as the pre issue date', () => {
   expect(normalizeGeminiPhoto({ ...example(), kind: 'dacte', issueDate: '2026-08-28' }).issueDate).toBeUndefined();
 });
 
+it('removes only a separate numeric driver code from a pre and preserves literal names', () => {
+  expect(normalizeGeminiPhoto({ ...example(), driver: 'MOTORISTA TESTE - 850' }).driver).toBe('MOTORISTA TESTE');
+  expect(normalizeGeminiPhoto({ ...example(), driver: 'ANA-MARIA DOS SANTOS' }).driver).toBe('ANA-MARIA DOS SANTOS');
+  expect(normalizeGeminiPhoto({ ...example(), driver: 'MOTORISTA TESTE - SILVA' }).driver).toBe('MOTORISTA TESTE - SILVA');
+});
+
+it('rejects unsafe quantities and flags missing header totals even if every row has an NF', () => {
+  const input = example(); input.expectedRows = 0; input.totalVolumes = 0; input.documents[0]!.volumes = '9007199254740993';
+  const pre = normalizeGeminiPhoto(input);
+  expect(pre.documents[0]!.volumes).toBe(''); expect(pre.documents[0]!.review).toContain('Confira volumes');
+  expect(pre.headerReview).toContain('Confira a quantidade de CTCs no cabeçalho.');
+  expect(pre.headerReview).toContain('Confira o total de volumes no cabeçalho.');
+});
+
 import { normalizePlate } from '@/lib/gemini-photo';
 describe('placa', () => {
   it('fixes letter/digit swaps by position', () => expect(normalizePlate('1YA-7J3I')).toBe('IYA7J31'));

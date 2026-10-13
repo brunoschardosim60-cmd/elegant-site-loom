@@ -15,18 +15,19 @@ let teamId: string;
 beforeAll(async () => {
   db = new PGlite();
   await db.exec(`create role anon; create role authenticated; create schema auth; create table auth.users(id uuid primary key,email text,email_confirmed_at timestamptz); create function auth.uid() returns uuid language sql as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$; grant usage on schema auth to authenticated,anon; grant execute on function auth.uid() to authenticated,anon;`);
-  for (let i = 1; i <= 5; i++) await db.query('insert into auth.users values($1,$2,$3)', [uid(i), `person${i}@example.com`, i === 5 ? null : '2026-10-13']);
+  for (let i = 1; i <= 7; i++) await db.query('insert into auth.users values($1,$2,$3)', [uid(i), `person${i}@example.com`, i === 5 ? null : '2026-10-13']);
   await db.exec(await readFile('supabase/migrations/20261011040000_conference.sql', 'utf8'));
   await db.exec(await readFile('supabase/migrations/20261013040000_teams.sql', 'utf8'));
   await db.exec(await readFile('supabase/migrations/20261013050000_reader_team_access.sql', 'utf8'));
+  await db.exec(await readFile('supabase/migrations/20261013060000_team_members_and_merge.sql', 'utf8'));
 }, 30000);
 afterAll(async () => { await db?.close(); });
-it('preserves the owner records and shares only with invited confirmed accounts, up to three', async () => {
+it('preserves the owner records and shares only with invited confirmed accounts, without a fixed member cap', async () => {
   await as(1); await call('save_conference', [0, { ...emptyConference, manifests: [make()] }]);
   const owner = await call('get_conference_team'); teamId = owner.teamId;
   expect(owner.data.manifests).toHaveLength(1); expect(owner.owner).toBe(true);
   await call('invite_conference_member', ['person2@example.com']); await call('invite_conference_member', ['person3@example.com']);
-  await expect(call('invite_conference_member', ['person4@example.com'])).rejects.toThrow('Equipe completa');
+  await call('invite_conference_member', ['person6@example.com']);
   await as(2); const personal = { ...emptyConference, manifests: [make('DI00123456999', '0000000999')] };
   await call('save_conference', [0, personal]);
   const invited = await call('get_conference_team'); expect(invited.teamId).not.toBe(teamId); expect(invited.invitation.ownerEmail).toBe('person1@example.com'); expect(invited.data).toEqual(personal);
@@ -35,6 +36,7 @@ it('preserves the owner records and shares only with invited confirmed accounts,
   await expect(call('invite_conference_member', ['person4@example.com'])).rejects.toThrow('Somente');
   await as(3); expect((await call('get_conference_team', [true])).teamId).toBe(teamId);
   expect(await call('conference_reader_owner')).toBe('person1@example.com');
+  await as(6); const fourth = await call('get_conference_team', [true]); expect(fourth.teamId).toBe(teamId); expect(fourth.members).toHaveLength(4);
   await as(4); expect((await call('get_conference_team')).teamId).not.toBe(teamId);
   expect((await call('get_conference_team')).data.manifests).toEqual([]);
   expect(await call('conference_reader_owner')).toBe('person4@example.com');
@@ -91,10 +93,22 @@ it('rejects malformed data without changing records or audit and supports pendin
   expect((await call('get_conference_team')).data).toEqual(base); expect(await call('get_conference_audit')).toEqual(history);
   await as(4); await expect(call('invite_conference_member', ['person1@example.com'])).rejects.toThrow('outra equipe');
   await call('invite_conference_member', ['person5@example.com']); await call('invite_conference_member', ['new@example.com']);
-  await expect(call('invite_conference_member', ['fourth@example.com'])).rejects.toThrow('Equipe completa');
+  await call('invite_conference_member', ['fourth@example.com']);
+  await expect(call('invite_conference_member', ['fourth@example.com'])).rejects.toThrow('Email já incluído');
+  await call('cancel_conference_invite', ['fourth@example.com']);
   await call('cancel_conference_invite', ['new@example.com']);
   expect((await call('get_conference_team')).members).toHaveLength(2);
   await as(5); await expect(call('get_conference_team', [true])).rejects.toThrow('Confirme');
+});
+it('does not orphan pending invites when a personal owner tries to join a different team', async () => {
+  await as(7); const own = await call('get_conference_team');
+  await as(4); await call('invite_conference_member', ['person7@example.com']);
+  await as(7); await call('invite_conference_member', ['pending-owner@example.com']);
+  await expect(call('get_conference_team', [true])).rejects.toThrow('outra equipe');
+  expect((await call('get_conference_team')).teamId).toBe(own.teamId);
+  await call('cancel_conference_invite', ['pending-owner@example.com']);
+  await call('get_conference_team', [true]);
+  await as(4); expect((await call('get_conference_team')).members.some((m: any) => m.email === 'person7@example.com' && !m.pending)).toBe(true);
 });
 it('executes the standalone rollback security script without changing existing fixtures', async () => {
   await as(1, 'postgres');

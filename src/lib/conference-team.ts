@@ -3,7 +3,7 @@ import { conferenceStateSchema, type ConferenceState } from './conference-state'
 
 export const teamSchema = z.object({
   teamId: z.string().uuid(), name: z.string(), owner: z.boolean(), revision: z.number().int().nonnegative(), data: conferenceStateSchema,
-  members: z.array(z.object({ email: z.string(), owner: z.boolean(), pending: z.boolean() })).max(3),
+  members: z.array(z.object({ email: z.string(), owner: z.boolean(), pending: z.boolean() })),
   invitation: z.object({ ownerEmail: z.string() }).nullable().optional(),
 });
 export type ConferenceTeam = z.infer<typeof teamSchema>;
@@ -18,6 +18,7 @@ const object = (v: Json | undefined): v is { [key: string]: Json } => !!v && typ
 function merge(b: Json | undefined, l: Json | undefined, r: Json | undefined): Json | undefined {
   if (equal(l, b)) return r;
   if (equal(r, b) || equal(l, r)) return l;
+  if (b === undefined && object(l) && object(r) && 'id' in l && l['id'] === r['id']) throw new Error('CONFERENCE_DUPLICATE');
   if (b === undefined || l === undefined || r === undefined) throw new Error('CONFERENCE_CONFLICT');
   if (object(b) && object(l) && object(r)) {
     const result: Record<string, Json> = {};

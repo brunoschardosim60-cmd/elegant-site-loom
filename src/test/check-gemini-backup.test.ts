@@ -81,3 +81,8 @@ it.each(['fetch', 'body'] as const)('bounds a stalled %s at five seconds even wh
   expect(input.fetch.mock.calls[0]![1].signal.aborted).toBe(true);
   expect(input.log).toHaveBeenCalledExactlyOnceWith('[gemini_backup_check] CHECK_FAILED TIMEOUT');
 });
+
+it('prefers the additional reserve for the safe build probe without logging it', async () => {
+  const input = { ...fixture(vi.fn().mockResolvedValue(new Response(JSON.stringify(validMetadata)))), env: { GEMINI_API_KEY_FALLBACK: credential, GEMINI_API_KEY_FALLBACK_2: 'synthetic-additional-key' } };
+  expect(await checkGeminiBackup(input)).toBe('OK HTTP_200'); expect(input.fetch.mock.calls[0]![1].headers['x-goog-api-key']).toBe('synthetic-additional-key'); expect(JSON.stringify(input.log.mock.calls)).not.toContain('synthetic');
+});

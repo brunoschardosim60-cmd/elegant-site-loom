@@ -52,3 +52,9 @@ it('polls only the revision when nothing changed and never downloads or saves th
   const sync = new TeamSync(team(), rpc, publish); await sync.refresh();
   expect(rpc).toHaveBeenCalledExactlyOnceWith('get_conference_revision', {}); expect(sync.pending()).toBe(false);
 });
+
+it('classifies conflicting new records with the same ID as duplicates while accepting idempotent repeats', () => {
+  const base = state(), a = structuredClone(base), b = structuredClone(base);
+  const added = { ...base.manifests[0]!, id: 'DI00123456999' }; a.manifests.push(added); b.manifests.push({ ...added, driver: 'Outro' });
+  expect(() => mergeConference(base, a, b)).toThrow('CONFERENCE_DUPLICATE'); expect(mergeConference(base, a, a).manifests).toEqual(a.manifests);
+});

@@ -20,9 +20,9 @@ it('keeps audit discreet, filters by pre and shows reliable actor and NF changes
   expect(rpc).toHaveBeenLastCalledWith('get_conference_audit', { pre_id: 'DI00123456789', before_id: null });
   expect(screen.getByText('NF: 123 → 456')).toBeInTheDocument(); expect(screen.getByText('Ver alterações')).toBeInTheDocument();
 });
-it('does not offer invitations to a member or when all three slots are occupied', () => {
+it('offers invitations only to owners, without a displayed count or a fixed cap', () => {
   const rpc = vi.fn(); const first = render(<TeamPanel client={{ rpc } as unknown as SupabaseClient} team={{ ...team, owner: false }} open onOpenChange={() => {}} onRefresh={() => {}} />);
   expect(screen.queryByRole('button', { name: 'Liberar acesso à equipe' })).not.toBeInTheDocument(); first.unmount();
   render(<TeamPanel client={{ rpc } as unknown as SupabaseClient} team={{ ...team, members: [...team.members, { email: 'two@example.com', owner: false, pending: false }, { email: 'three@example.com', owner: false, pending: true }] }} open onOpenChange={() => {}} onRefresh={() => {}} />);
-  expect(screen.queryByRole('button', { name: 'Liberar acesso à equipe' })).not.toBeInTheDocument(); expect(rpc).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: 'Liberar acesso à equipe' })).toBeInTheDocument(); expect(screen.getByRole('button', { name: 'Pessoas' })).toBeInTheDocument(); expect(screen.queryByText(/três pessoas|\/3/)).not.toBeInTheDocument(); expect(rpc).not.toHaveBeenCalled();
 });

@@ -7,7 +7,7 @@ import { photoQuotaFailure } from './photo-quota';
 const requests = new Map<string, { count: number; until: number }>();
 
 function providerKeys() {
-  return [...new Set([process.env['GEMINI_API_KEY'], process.env['GEMINI_API_KEY_FALLBACK']].map(key => key?.trim()).filter((key): key is string => Boolean(key)))];
+  return [...new Set([process.env['GEMINI_API_KEY'], process.env['GEMINI_API_KEY_FALLBACK_2'], process.env['GEMINI_API_KEY_FALLBACK']].map(key => key?.trim()).filter((key): key is string => Boolean(key)))];
 }
 function accessCategory(message: string) {
   if (/leaked|compromised|revoked|reported.{0,30}key/i.test(message)) return 'blocked-key';
@@ -114,7 +114,7 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
         }
         // A reserve handles access/technical failures only. Quota and billing
         // failures must retain the local reading rather than rotate credentials.
-        const canUseReserve = response.status === 401 || response.status === 403 || (response.status >= 500 && response.status <= 599) || (response.status === 400 && invalidRequestCategory === 'credentials');
+        const canUseReserve = ((response.status === 401 || response.status === 403) && failures.at(-1)?.category !== 'billing') || (response.status >= 500 && response.status <= 599) || (response.status === 400 && invalidRequestCategory === 'credentials');
         if (canUseReserve && index + 1 < keys.length) {
           void response.body?.cancel().catch(() => {});
           continue;

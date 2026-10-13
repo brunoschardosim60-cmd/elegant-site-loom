@@ -18,7 +18,7 @@ let user = 0;
 const advanceUntil = (startedAt: number, elapsed: number) => vi.advanceTimersByTimeAsync(Math.max(0, startedAt + elapsed - Date.now()));
 beforeEach(() => {
   vi.clearAllMocks(); vi.useFakeTimers();
-  vi.stubEnv('GEMINI_API_KEY', 'synthetic-provider-key'); vi.stubEnv('GEMINI_API_KEY_FALLBACK', undefined); vi.stubEnv('GEMINI_OCR_MODEL', undefined); vi.stubEnv('GEMINI_OCR_VERIFY_MODEL', undefined);
+  vi.stubEnv('GEMINI_API_KEY', 'synthetic-provider-key'); vi.stubEnv('GEMINI_API_KEY_FALLBACK', undefined); vi.stubEnv('GEMINI_API_KEY_FALLBACK_2', undefined); vi.stubEnv('GEMINI_OCR_MODEL', undefined); vi.stubEnv('GEMINI_OCR_VERIFY_MODEL', undefined);
   mocks.user.mockResolvedValue({ data: { user: { id: `server-test-${++user}` } }, error: null });
   mocks.membership.mockResolvedValue({ data: 'brunoschardosim60@gmail.com', error: null });
   mocks.client.mockImplementation(() => ({ auth: { getUser: mocks.user }, rpc: mocks.membership }));
@@ -413,4 +413,25 @@ it.each([['full', 20000], ['verify', 10000], ['survey', 8000]] as const)('does n
   await advanceUntil(startedAt, budget);
   expect(await run).toMatchObject({ ok: false, unavailable: true, error: `O Gemini excedeu o limite de ${budget / 1000} s; a leitura local pode ser usada.` });
   expect(mocks.fetch).toHaveBeenCalledOnce();
+});
+
+it('uses the additional reserve before the older reserve and keeps one request deadline', async () => {
+  vi.stubEnv('GEMINI_API_KEY_FALLBACK_2', 'synthetic-new-reserve'); vi.stubEnv('GEMINI_API_KEY_FALLBACK', 'synthetic-old-reserve');
+  mocks.fetch.mockResolvedValueOnce(new Response('unavailable', { status: 503 })).mockResolvedValueOnce(new Response('unavailable', { status: 503 })).mockResolvedValueOnce(successResponse());
+  expect(await readPhotoWithGemini(input)).toMatchObject({ ok: true });
+  expect(mocks.fetch.mock.calls.map(([, init]) => init.headers['x-goog-api-key'])).toEqual(['synthetic-provider-key', 'synthetic-new-reserve', 'synthetic-old-reserve']);
+  expect(new Set(mocks.fetch.mock.calls.map(([, init]) => init.signal)).size).toBe(1);
+});
+it('deduplicates all three credentials and accepts only the additional reserve when configured', async () => {
+  vi.stubEnv('GEMINI_API_KEY_FALLBACK_2', ' synthetic-provider-key '); vi.stubEnv('GEMINI_API_KEY_FALLBACK', 'synthetic-provider-key');
+  mocks.fetch.mockResolvedValue(new Response('unavailable', { status: 503 }));
+  await readPhotoWithGemini(input); expect(mocks.fetch).toHaveBeenCalledOnce();
+  mocks.fetch.mockClear(); vi.stubEnv('GEMINI_API_KEY', ''); vi.stubEnv('GEMINI_API_KEY_FALLBACK', ''); vi.stubEnv('GEMINI_API_KEY_FALLBACK_2', 'synthetic-new-reserve');
+  mocks.fetch.mockResolvedValue(successResponse()); expect(await readPhotoWithGemini(input)).toMatchObject({ ok: true });
+  expect(mocks.fetch.mock.calls[0]![1].headers['x-goog-api-key']).toBe('synthetic-new-reserve'); expect(mocks.fetch).toHaveBeenCalledOnce();
+});
+it.each([402, 403, 429])('never uses extra credentials to bypass a quota or billing rejection (%s)', async status => {
+  vi.stubEnv('GEMINI_API_KEY_FALLBACK_2', 'synthetic-new-reserve'); vi.stubEnv('GEMINI_API_KEY_FALLBACK', 'synthetic-old-reserve');
+  mocks.fetch.mockResolvedValue(new Response(JSON.stringify({ error: { message: status === 429 ? 'Quota per day exhausted' : 'Billing account required' } }), { status }));
+  expect(await readPhotoWithGemini(input)).toMatchObject({ ok: false }); expect(mocks.fetch).toHaveBeenCalledOnce();
 });

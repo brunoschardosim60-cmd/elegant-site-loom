@@ -11,15 +11,15 @@ export const checkPhotoProviders = createServerFn({ method: 'POST' }).inputValid
   const auth = createClient(process.env['SUPABASE_URL'] || supabaseConfig.url, process.env['SUPABASE_PUBLISHABLE_KEY'] || supabaseConfig.key, { auth: { persistSession: false, autoRefreshToken: false }, global: { fetch: (url, init) => fetch(url, { ...init, signal }) } });
   const user = await auth.auth.getUser(data.accessToken);
   signal.throwIfAborted();
-  if (user.error || user.data.user?.email?.toLowerCase() !== 'brunoschardosim60@gmail.com') return { error: 'Diagnóstico disponível apenas para o responsável pelo serviço.', checks: [] };
+  if (user.error || user.data.user?.email?.toLowerCase() !== (process.env['GEMINI_SERVICE_OWNER_EMAIL'] || 'brunoschardosim60@gmail.com').toLowerCase()) return { error: 'Diagnóstico disponível apenas para o responsável pelo serviço.', checks: [] };
   if (Date.now() < nextCheck) return { error: 'Aguarde cinco minutos antes de repetir o diagnóstico.', checks: [] };
   nextCheck = Date.now() + 300000;
-  const keys = [{ label: 'Principal', key: process.env['GEMINI_API_KEY']?.trim() }, { label: 'Reserva', key: process.env['GEMINI_API_KEY_FALLBACK']?.trim() }];
+  const keys = [{ label: 'Principal', key: process.env['GEMINI_API_KEY']?.trim() }, { label: 'Reserva', key: process.env['GEMINI_API_KEY_FALLBACK']?.trim() }, ...(process.env['GEMINI_API_KEY_FALLBACK_2']?.trim() ? [{ label: 'Reserva adicional', key: process.env['GEMINI_API_KEY_FALLBACK_2'].trim() }] : [])];
   const models = [{ label: 'Gemini normal', id: process.env['GEMINI_OCR_MODEL'] || 'gemini-3.8-flash' }, { label: 'Flash Lite', id: 'gemini-3.5-flash-lite' }];
   const checks = await Promise.all(keys.flatMap(({ label, key }, index) => models.map(async model => {
     const result = { key: label, model: model.label, status: 'Não configurada' };
     if (!key) return result;
-    if (index && key === keys[0]!.key) return { ...result, status: 'Mesma chave da principal' };
+    if (keys.slice(0, index).some(previous => previous.key === key)) return { ...result, status: key === keys[0]!.key ? 'Mesma chave da principal' : 'Mesma chave de outra reserva' };
     try {
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model.id)}:generateContent`, { method: 'POST', signal, headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify({ contents: [{ parts: [{ text: 'Responda apenas OK.' }] }], generationConfig: { maxOutputTokens: 64, thinkingConfig: { thinkingLevel: 'LOW' } } }) });
       if (response.ok) {

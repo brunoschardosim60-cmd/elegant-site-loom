@@ -3,7 +3,7 @@ import { pathToFileURL } from 'node:url';
 /** Build-only metadata probe. Never sends photos or generates content. */
 export async function checkGeminiBackup({ env = process.env, fetch = globalThis.fetch, log = console.log } = {}) {
   const emit = outcome => { log(`[gemini_backup_check] ${outcome}`); return outcome; };
-  const key = env.GEMINI_API_KEY_FALLBACK?.trim();
+  const key = env.GEMINI_API_KEY_FALLBACK_2?.trim() || env.GEMINI_API_KEY_FALLBACK?.trim();
   if (!key) return emit('SKIP');
   const model = env.GEMINI_OCR_MODEL?.trim() || 'gemini-3.8-flash';
   const controller = new AbortController();

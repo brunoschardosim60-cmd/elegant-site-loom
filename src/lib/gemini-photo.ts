@@ -41,11 +41,12 @@ export function normalizeGeminiPhoto(value: unknown): PhotoFields {
     const review = [...row.review];
     const ctc = row.ctc.trim(); const volumes = row.volumes.trim();
     if (!/^\d{10}$/.test(ctc)) review.push('CTC ilegível: informe 10 dígitos');
-    if (!/^\d+$/.test(volumes) || Number(volumes) < 1) review.push('Confira volumes');
+    const validVolumes = /^\d+$/.test(volumes) && Number.isSafeInteger(Number(volumes)) && Number(volumes) > 0;
+    if (!validVolumes) review.push('Confira volumes');
     if (!/^\d{1,9}-\d{1,3}$/.test(row.nf.trim())) review.push('Confira NF e série');
     if (!row.client.trim()) review.push('Confira cliente/laboratório');
     if (!row.recipient.trim()) review.push('Confira destinatário');
-    return { ...row, ctc: /^\d{10}$/.test(ctc) ? ctc : '', volumes: /^\d+$/.test(volumes) && Number(volumes) > 0 ? volumes : '', review };
+    return { ...row, ctc: /^\d{10}$/.test(ctc) ? ctc : '', volumes: validVolumes ? volumes : '', review };
   });
   const warnings: string[] = [];
   const plate = normalizePlate(data.plate);
@@ -56,10 +57,13 @@ export function normalizeGeminiPhoto(value: unknown): PhotoFields {
   if (data.kind === 'pre' && !/^[A-Z]{3}\d[A-Z0-9]\d{2}$/.test(plate)) warnings.push('Confira placa: possível confusão entre letra e número');
   if (data.kind === 'pre' && !/^DI\d{8,12}$/.test(data.id.trim().toUpperCase())) headerReview.push('Confira o número do pré.');
   if (data.kind === 'pre' && !data.driver.trim()) headerReview.push('Confira o motorista.');
+  if (data.kind === 'pre' && !data.expectedRows) headerReview.push('Confira a quantidade de CTCs no cabeçalho.');
+  if (data.kind === 'pre' && !data.totalVolumes) headerReview.push('Confira o total de volumes no cabeçalho.');
   if (!documents.length) headerReview.push('Nenhum CTC legível nesta foto.');
   if (new Set(documents.map(d => d.ctc).filter(Boolean)).size !== documents.length) warnings.push('CTC repetido ou ilegível: confira todas as linhas');
   if (data.expectedRows && data.expectedRows !== documents.length) warnings.push(`Cabeçalho informa ${data.expectedRows} CTCs; foram lidos ${documents.length}`);
   if (data.totalVolumes && documents.reduce((sum, d) => sum + Number(d.volumes), 0) !== data.totalVolumes) warnings.push(`Confira a soma: cabeçalho informa ${data.totalVolumes} volumes`);
   documents.forEach(d => d.review.push(...warnings));
-  return { kind: data.kind, readingSource: 'gemini', ...(issueDate ? { issueDate } : {}), id: /^DI\d{8,12}$/.test(data.id.trim().toUpperCase()) ? data.id.trim().toUpperCase() : '', plate, rawPlate: data.plate, driver: data.driver.trim(), expectedRows: data.expectedRows, totalVolumes: data.totalVolumes, headerReview: [...headerReview, ...warnings], ctcs: documents.map(d => d.ctc).filter(Boolean), documents };
+  const driver = data.kind === 'pre' ? data.driver.trim().replace(/\s+-\s*\d{1,8}$/, '').trim() : data.driver.trim();
+  return { kind: data.kind, readingSource: 'gemini', ...(issueDate ? { issueDate } : {}), id: /^DI\d{8,12}$/.test(data.id.trim().toUpperCase()) ? data.id.trim().toUpperCase() : '', plate, rawPlate: data.plate, driver, expectedRows: data.expectedRows, totalVolumes: data.totalVolumes, headerReview: [...headerReview, ...warnings], ctcs: documents.map(d => d.ctc).filter(Boolean), documents };
 }
