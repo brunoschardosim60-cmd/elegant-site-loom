@@ -28,9 +28,14 @@ describe('Photo table extraction', () => {
     const fields = parsePhotoFields(page([
       word('CTC', 100, 200), word('Remetente', 250, 200), word('NF-Série', 400, 200, 90), word('Vols.', 600, 200),
       word('00000', 100, 240, 45), word('00001', 148, 240, 40),
-      word('12345-1', 400, 238, 80), word('8', 610, 235, 20),
+      word('000000000', 100, 290, 90), word('2', 192, 290, 10),
+      word('12345-1', 400, 238, 80), word('54321-2', 400, 288, 80),
+      word('8', 610, 235, 20), word('4', 610, 285, 20),
     ]));
-    expect(fields.documents).toMatchObject([{ ctc: '0000000001', nf: '12345-1', volumes: '8' }]);
+    expect(fields.documents).toMatchObject([
+      { ctc: '0000000001', nf: '12345-1', volumes: '8' },
+      { ctc: '0000000002', nf: '54321-2', volumes: '4' },
+    ]);
   });
   it('does not supply default volumes or invent a missing NF series', () => {
     const fields = parsePhotoFields(page([word('CTC', 100, 200), word('NF-Série', 400, 200, 90), word('Vols.', 600, 200), word('1234567890', 100, 240, 100), word('123451', 400, 240, 80)]));
