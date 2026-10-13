@@ -18,7 +18,7 @@ export type NumericTableRegion = { field: 'ctc' | 'nf' | 'volumes' | 'expectedRo
 export const pageWords = (page: OcrPage): OcrWord[] => page.blocks?.flatMap(b => b.paragraphs.flatMap(p => p.lines.flatMap(l => l.words))) ?? [];
 const cx = (w: OcrWord) => (w.bbox.x0 + w.bbox.x1) / 2;
 const cy = (w: OcrWord) => (w.bbox.y0 + w.bbox.y1) / 2;
-const clean = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+export const clean = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 const digits = (s: string) => s.toUpperCase().replace(/[OQ]/g, '0').replace(/[IL|]/g, '1').replace(/B/g, '8').replace(/S/g, '5').replace(/Z/g, '2');
 const median = (values: number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)] ?? 0;
 const nfValue = (s: string) => { const n = digits(s.replace(/\s/g, '').replace(/[–—]/g, '-')); return /^\d{2,9}-\d{1,3}$/.test(n) ? n : ''; };
