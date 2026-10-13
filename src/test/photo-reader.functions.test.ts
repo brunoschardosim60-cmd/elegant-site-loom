@@ -51,6 +51,19 @@ it('keeps the verified service owner on the fast path and passes the member bear
   expect(mocks.client.mock.calls[0]![2].global.headers.Authorization).toBe('Bearer synthetic-session-token');
   expect(mocks.fetch.mock.calls[0]![1].headers.Authorization).toBeUndefined();
 });
+it('preserves a primary technical failure instead of blaming both credentials when the reserve denies access', async () => {
+  vi.stubEnv('GEMINI_API_KEY_FALLBACK', 'synthetic-reserve-key');
+  mocks.fetch.mockResolvedValueOnce(new Response('unavailable', { status: 503 })).mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: 'permission denied synthetic-reserve-key' } }), { status: 403 }));
+  const result = await readPhotoWithGemini(input);
+  expect(result).toMatchObject({ ok: false, unavailable: true, error: expect.stringContaining('Principal: HTTP 503. Reserva: acesso negado pelo Google') });
+  expect(JSON.stringify(result)).not.toContain('synthetic-reserve-key');
+});
+it('reports a blocked credential without exposing the provider message or credential', async () => {
+  mocks.fetch.mockResolvedValue(new Response(JSON.stringify({ error: { message: 'Your API key was reported as leaked. synthetic-provider-key' } }), { status: 403 }));
+  const result = await readPhotoWithGemini(input);
+  expect(result).toMatchObject({ ok: false, error: expect.stringContaining('credencial bloqueada pelo Google') });
+  expect(JSON.stringify(result)).not.toContain('synthetic-provider-key');
+});
 
 it('uses Lite for a complete independent transcription with the full schema, names, date and LOW thinking', async () => {
   vi.stubEnv('GEMINI_OCR_MODEL', 'gemini-3.8-flash');

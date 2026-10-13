@@ -9,6 +9,16 @@ const requests = new Map<string, { count: number; until: number }>();
 function providerKeys() {
   return [...new Set([process.env['GEMINI_API_KEY'], process.env['GEMINI_API_KEY_FALLBACK']].map(key => key?.trim()).filter((key): key is string => Boolean(key)))];
 }
+function accessCategory(message: string) {
+  if (/leaked|compromised|revoked|reported.{0,30}key/i.test(message)) return 'blocked-key';
+  if (/billing|payment|paid tier|prepay|spend limit/i.test(message)) return 'billing';
+  if (/service_disabled|api.{0,60}(disabled|not.{0,10}enabled|not been used)/i.test(message)) return 'disabled-api';
+  if (/referer|referrer|ip.{0,20}restrict|api_key.{0,20}block/i.test(message)) return 'key-restriction';
+  return 'access';
+}
+function accessLabel(category: string) {
+  return category === 'blocked-key' ? 'credencial bloqueada pelo Google' : category === 'billing' ? 'faturamento exigido pelo Google' : category === 'disabled-api' ? 'API Gemini não habilitada no projeto' : category === 'key-restriction' ? 'restrições da chave impedem o servidor' : 'acesso negado pelo Google';
+}
 
 /** Bound library calls as well as fetch; a late operation cannot resume reading. */
 async function withinSignal<T>(operation: () => Promise<T>, signal: AbortSignal): Promise<T> {
@@ -79,16 +89,23 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
       let response: Response | undefined;
       let invalidRequestCategory = 'request';
       let attemptedKey = 0;
+      const failures: { status: number; category: string }[] = [];
       for (const [index, key] of keys.entries()) {
         signal.throwIfAborted();
         attemptedKey = index;
         try { response = await request(key); }
         catch (error) {
           signal.throwIfAborted();
+          failures.push({ status: 0, category: 'connection' });
           if (index + 1 < keys.length) continue;
           throw error;
         }
         signal.throwIfAborted();
+        if (response.status === 401 || response.status === 403) {
+          const body = await withinSignal(() => response!.json(), signal).catch(() => null) as { error?: { message?: string } } | null;
+          signal.throwIfAborted();
+          failures.push({ status: response.status, category: accessCategory(body?.error?.message ?? '') });
+        } else if (!response.ok) failures.push({ status: response.status, category: 'http' });
         if (response.status === 400) {
           const body = await withinSignal(() => response!.json(), signal).catch(() => null) as { error?: { message?: string } } | null;
           signal.throwIfAborted();
@@ -122,8 +139,10 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
         return { ok: false as const, unavailable: category === 'schema' || category === 'model-options' || category === 'credentials', retryable: false, error: 'O Gemini rejeitou a solicitação de leitura. A reserva local pode ser usada para esta foto.' };
       }
       if (!response.ok) {
-        console.warn('ocr_provider_failure', { status: response.status, elapsedMs: Math.round(performance.now() - startedAt) });
-        return { ok: false as const, unavailable: true, retryable: false, error: response.status === 402 ? 'O Gemini está sem créditos. Confira o faturamento no Google AI Studio.' : response.status === 403 || response.status === 401 ? 'Chave do Gemini sem acesso. Confira a configuração na Vercel.' : `Gemini indisponível (${response.status}). Tente novamente.` };
+        console.warn('ocr_provider_failure', { status: response.status, attempts: failures, elapsedMs: Math.round(performance.now() - startedAt) });
+        const accessFailure = failures.at(-1);
+        const chain = failures.length > 1 ? failures.map((failure, index) => `${index ? 'Reserva' : 'Principal'}: ${failure.status === 401 || failure.status === 403 ? accessLabel(failure.category) : failure.status ? `HTTP ${failure.status}` : 'falha de conexão'}`).join('. ') : '';
+        return { ok: false as const, unavailable: true, retryable: false, error: chain ? `A conferência por IA falhou. ${chain}. Leitura local preservada.` : response.status === 402 ? 'O Gemini está sem créditos. Confira o faturamento no Google AI Studio.' : response.status === 403 || response.status === 401 ? `Gemini: ${accessLabel(accessFailure?.category ?? 'access')}. Leitura local preservada.` : `Gemini indisponível (${response.status}). Tente novamente.` };
       }
       stage = 'provider-json';
       const result = await withinSignal(() => finalResponse.json(), signal) as { candidates?: { finishReason?: string; content?: { parts?: { text?: string; thought?: boolean }[] } }[] };
