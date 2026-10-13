@@ -33,6 +33,9 @@ describe('Conferência por CTC', () => {
   it('extracts labelled CTCs and normalizes OCR noise in header fields', () => {
     expect(parsePreText('Pre D1 0060l86918 Placa IYA 7J31\nCTC: 0012345678\nCT C: 1234567890')).toEqual({ id: 'DI0060186918', plate: 'IYA7J31', ctcs: ['0012345678', '1234567890'] });
   });
+  it('recovers a pre-manifest number when OCR inserts spaces between digits', () => {
+    expect(parsePreText('PRÉ-MANIFESTO\nDI 0 0 6 0 1 8 6 9 1 8\nCTC: 0012345678').id).toBe('DI0060186918');
+  });
   it('does not infer CTC from fiscal keys or other labels', () => {
     expect(parsePreText(key('57', '365569') + '\nCT-e: 1234567890\nNF: 1234567890').ctcs).toEqual([]);
   });
