@@ -89,7 +89,12 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
       const volumeSum = candidate.pre.documents.reduce((sum, row) => sum + Number(row.volumes || 0), 0);
       const volumesMatch = !candidate.pre.totalVolumes || candidate.pre.totalVolumes === volumeSum;
       const totalMismatch = Boolean(candidate.pre.totalVolumes && !volumesMatch);
-      const needsMoreWork = hasTableEvidence || rowCountMismatch || totalMismatch || incompleteRows;
+      // Table headings alone are not a reason to repeat a full-page OCR:
+      // clean rows can proceed immediately when header totals were not readable.
+      // Retry only for an explicit mismatch, missing field, or a detected table
+      // whose rows were entirely missed.
+      const needsMoreWork = rowCountMismatch || totalMismatch || incompleteRows
+        || (!candidate.pre.documents.length && hasTableEvidence);
       if (!needsMoreWork || (rowCountMatches && rowsAreComplete && volumesMatch)) break;
     } catch { active(); /* Keep a partial result available for manual review. */ }
   }
@@ -115,19 +120,31 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
       } catch { active(); /* Leave unread fields blank and available for review. */ }
     }
   }
-  const confidentVolumes = new Set<string>();
   let gray: GrayImage | undefined;
   if (best.pre.kind === 'pre' && best.pre.documents.length) {
-    try {
-      gray = await readGrayImage(best.source);
-      const templates = buildDigitTemplates(gray, pageWords(best.page));
-      for (const region of tableCellRegions(best.page).filter(r => r.field === 'volumes')) {
-        const row = best.pre.documents[region.row]!;
-        if (row.volumes && !row.review?.includes('volumes')) continue;
-        const reading = matchPrintedNumber(gray, region.box, templates);
-        if (reading?.certain) { row.volumes = reading.value; confidentVolumes.add(row.ctc); row.review = (row.review ?? []).filter(field => field !== 'volumes'); }
-      }
-    } catch { /* Keep the OCR reading when there are too few clear examples. */ }
+    const needsVolumeTemplate = best.pre.documents.some(row => !row.volumes || row.review?.includes('volumes'));
+    const needsNfSeparator = best.pre.documents.some(row => /^\d{3,12}$/.test(row.nf));
+    // Decoding a full-resolution photo into a grayscale buffer is expensive on
+    // phones. Only build it when an actual cell can benefit from pixel analysis.
+    if (needsVolumeTemplate || needsNfSeparator) {
+      try {
+        active();
+        gray = await readGrayImage(best.source);
+        active();
+        if (needsVolumeTemplate) {
+          const templates = buildDigitTemplates(gray, pageWords(best.page));
+          for (const region of tableCellRegions(best.page).filter(r => r.field === 'volumes')) {
+            const row = best.pre.documents[region.row]!;
+            if (row.volumes && !row.review?.includes('volumes')) continue;
+            const reading = matchPrintedNumber(gray, region.box, templates);
+            if (reading?.certain) {
+              row.volumes = reading.value;
+              row.review = (row.review ?? []).filter(field => field !== 'volumes');
+            }
+          }
+        }
+      } catch { active(); /* Pixel recovery is optional; preserve OCR results. */ }
+    }
   }
   if (best.pre.kind === 'pre' && best.pre.documents.length) {
     const regions = tableCellRegions(best.page).filter(region => region.field === 'volumes');
@@ -201,7 +218,11 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
     }
   }
   if (gray && best.pre.kind === 'pre') {
-    for (const region of tableCellRegions(best.page).filter(region => region.field === 'nf')) {
+    for (const region of tableCellRegions(best.page).filter(region => {
+      if (region.field !== 'nf') return false;
+      const row = best.pre.documents[region.row];
+      return Boolean(row && /^\d{3,12}$/.test(row.nf));
+    })) {
       const row = best.pre.documents[region.row]!;
       const recovered = recoverNfSeparator(gray, region.box, row.nf);
       if (recovered) { row.nf = recovered; row.review = [...new Set([...(row.review ?? []), 'NF', 'Separador da NF recuperado da foto. Confira os números e a série.'])]; }
