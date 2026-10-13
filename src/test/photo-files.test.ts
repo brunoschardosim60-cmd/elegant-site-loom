@@ -17,6 +17,25 @@ describe('duplicate import photos', () => {
     expect(await uniquePhotoFiles([photo('already read', 'renamed.jpg'), another], [existing])).toEqual({ files: [another], duplicates: 1 });
   });
 
+  it('hashes a mobile batch with bounded parallelism and preserves selection order', async () => {
+    vi.stubGlobal('navigator', { userAgent: 'Android', hardwareConcurrency: 8, maxTouchPoints: 0 });
+    const files = [photo('first', '1.jpg'), photo('second', '2.jpg'), photo('third', '3.jpg'), photo('fourth', '4.jpg')];
+    let active = 0, maxActive = 0;
+    for (const file of files) {
+      const read = file.arrayBuffer.bind(file);
+      Object.defineProperty(file, 'arrayBuffer', { value: () => {
+        active++;
+        maxActive = Math.max(maxActive, active);
+        return new Promise<ArrayBuffer>((resolve, reject) => setTimeout(() => {
+          void read().then(resolve, reject).finally(() => { active--; });
+        }, 5));
+      } });
+    }
+    const result = await uniquePhotoFiles(files);
+    expect(result.files).toEqual(files);
+    expect(result.duplicates).toBe(0);
+    expect(maxActive).toBe(2);
+  });
   it('does not reuse import results after the form has released its photos', async () => {
     const file = photo('same page');
     expect((await uniquePhotoFiles([file])).files).toEqual([file]);
