@@ -1,73 +1,64 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AccountWorkspace } from '@/components/account-workspace';
-
-const mocks = vi.hoisted(() => ({ rpc: vi.fn(), read: vi.fn(), signOut: vi.fn() }));
+const mocks = vi.hoisted(() => ({ rpc: vi.fn(), save: vi.fn(), read: vi.fn(), signOut: vi.fn() }));
 vi.mock('@/lib/supabase-client', () => ({ getSupabaseClient: async () => ({
-  auth: { getSession: async () => ({ data: { session: { user: { id: 'account-a', email: 'account@example.com' } } } }), onAuthStateChange: () => ({ data: { subscription: { unsubscribe: vi.fn() } } }), signOut: mocks.signOut },
-  from: () => ({ select: () => ({ eq: () => ({ maybeSingle: mocks.read }) }) }), rpc: mocks.rpc,
+  auth: { getSession: async () => ({ data: { session: { user: { id: 'account-a', email: 'account@example.com' } } } }), onAuthStateChange: () => ({ data: { subscription: { unsubscribe: vi.fn() } } }), signOut: mocks.signOut }, rpc: mocks.rpc,
 }) }));
 vi.mock('@/lib/photo-reader.functions', () => ({ photoReaderStatus: async () => ({ configured: true }) }));
 const saved = { manifests: [{ id: 'DI00123456789', driver: 'Teste', plate: 'ABC1234', date: '2026-10-11', documents: [{ id: 'doc', ctc: '0000000001', nf: '123-1', volumes: 2, received: false }] }], activity: [], issues: [] };
-beforeEach(() => { mocks.read.mockResolvedValue({ data: { revision: 7, data: saved }, error: null }); mocks.rpc.mockResolvedValue({ data: 8, error: null }); });
-afterEach(() => { cleanup(); vi.clearAllMocks(); });
-it('restores saved records and photo fingerprints and only saves changes with the loaded revision', async () => {
+const team = (data = saved, revision = 7) => ({ teamId: '00000000-0000-4000-8000-000000000001', name: 'Equipe', owner: true, members: [{ email: 'account@example.com', owner: true, pending: false }], revision, data });
+beforeEach(() => {
+  vi.resetAllMocks(); mocks.read.mockResolvedValue({ data: team(), error: null });
+  mocks.save.mockImplementation(async args => ({ data: { revision: 8, data: args.next_data }, error: null }));
+  mocks.rpc.mockImplementation((name, args) => name.startsWith('get_conference_') ? mocks.read(args) : mocks.save(args));
+});
+afterEach(() => { cleanup(); });
+it('restores shared records and saves only a user action with the loaded base and photo hashes', async () => {
   const photoHash = 'a'.repeat(64);
-  mocks.read.mockResolvedValue({ data: { revision: 7, data: { ...saved, manifests: saved.manifests.map(item => ({ ...item, sourcePhotoHashes: [photoHash] })) } }, error: null });
+  const stored = { ...saved, manifests: saved.manifests.map(m => ({ ...m, sourcePhotoHashes: [photoHash] })) };
+  mocks.read.mockResolvedValue({ data: team(stored), error: null });
   render(<AccountWorkspace />);
   const button = await screen.findByRole('button', { name: 'Marcar CTC 0000000001 como recebido' });
-  expect(mocks.rpc).not.toHaveBeenCalled();
-  fireEvent.click(button);
-  await waitFor(() => expect(mocks.rpc).toHaveBeenCalledTimes(1));
-  expect(mocks.rpc.mock.calls[0]?.[1].expected_revision).toBe(7);
-  expect(mocks.rpc.mock.calls[0]?.[1].next_data.manifests[0].documents[0].received).toBe(true);
-  expect(mocks.rpc.mock.calls[0]?.[1].next_data.manifests[0].sourcePhotoHashes).toEqual([photoHash]);
-  await screen.findByText('Todos os dados salvos');
+  expect(mocks.save).not.toHaveBeenCalled(); fireEvent.click(button);
+  await waitFor(() => expect(mocks.save).toHaveBeenCalledOnce());
+  const payload = mocks.save.mock.calls[0]![0];
+  expect(payload.base_data).toEqual(stored); expect(payload.next_data.manifests[0].documents[0].received).toBe(true);
+  expect(payload.next_data.manifests[0].sourcePhotoHashes).toEqual([photoHash]); await screen.findByText('Todos os dados salvos');
 });
-it('keeps unsaved changes visible and retries after a save failure', async () => {
-  mocks.rpc.mockResolvedValueOnce({ error: { message: 'network' } }).mockResolvedValueOnce({ data: 8, error: null });
-  render(<AccountWorkspace />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Marcar CTC 0000000001 como recebido' }));
+it('keeps unsaved changes visible and retries after a network error', async () => {
+  mocks.save.mockResolvedValueOnce({ error: { message: 'network' } });
+  render(<AccountWorkspace />); fireEvent.click(await screen.findByRole('button', { name: 'Marcar CTC 0000000001 como recebido' }));
   fireEvent.click(await screen.findByRole('button', { name: 'Tentar salvar novamente' }));
-  await screen.findByText('Todos os dados salvos');
-  expect(mocks.rpc).toHaveBeenCalledTimes(2);
-  expect(mocks.rpc.mock.calls[1]?.[1].expected_revision).toBe(7);
+  await screen.findByText('Todos os dados salvos'); expect(mocks.save).toHaveBeenCalledTimes(2);
+  expect(mocks.save.mock.calls[1]![0].base_data).toEqual(saved);
 });
-it('blocks a stale device from silently overwriting another revision', async () => {
-  mocks.rpc.mockResolvedValue({ error: { message: 'CONFERENCE_CONFLICT' } });
-  render(<AccountWorkspace />);
+it('blocks incompatible concurrent edits and duplicates without overwriting or automatic retries', async () => {
+  mocks.save.mockResolvedValue({ error: { message: 'CONFERENCE_DUPLICATE' } }); render(<AccountWorkspace />);
   fireEvent.click(await screen.findByRole('button', { name: 'Marcar CTC 0000000001 como recebido' }));
   expect(await screen.findByRole('button', { name: 'Recarregar dados salvos' })).toBeInTheDocument();
-  expect(screen.getByRole('alert')).toHaveTextContent('Gere o PDF desta página antes de recarregar');
-  expect(screen.getByRole('alert')).not.toHaveTextContent('CSV');
+  expect(screen.getByRole('alert')).toHaveTextContent('Nenhuma duplicata foi salva');
   expect(screen.queryByRole('button', { name: 'Tentar salvar novamente' })).not.toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Sair da conta' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Sair da conta' })).toBeDisabled(); expect(mocks.save).toHaveBeenCalledOnce();
 });
-it('never replaces saved data with an empty workspace after a load error', async () => {
-  mocks.read.mockResolvedValue({ data: null, error: { message: 'network' } });
-  render(<AccountWorkspace />);
-  expect(await screen.findByRole('alert')).toHaveTextContent('Nenhum dado foi substituído');
-  expect(mocks.rpc).not.toHaveBeenCalled();
+it('never replaces records with an empty workspace after a load error', async () => {
+  mocks.read.mockResolvedValue({ data: null, error: { message: 'network' } }); render(<AccountWorkspace />);
+  expect(await screen.findByRole('alert')).toHaveTextContent('Nenhum dado foi substituído'); expect(mocks.save).not.toHaveBeenCalled();
   expect(screen.queryByRole('button', { name: /Novo pré/ })).not.toBeInTheDocument();
 });
-
-it('persists a confirmed deletion with the current revision and keeps it deleted after reloading', async () => {
-  render(<AccountWorkspace />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Excluir pré DI00123456789' }));
-  expect(mocks.rpc).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: 'Excluir pré-manifesto' }));
-  await waitFor(() => expect(mocks.rpc).toHaveBeenCalledOnce());
-  const [operation, payload] = mocks.rpc.mock.calls[0]!;
-  expect(operation).toBe('save_conference');
-  expect(payload.expected_revision).toBe(7);
-  expect(payload.next_data.manifests).toEqual([]);
-  expect(payload.next_data.activity).toMatchObject([{ title: 'Pré-manifesto excluído' }]);
-  await screen.findByText('Todos os dados salvos');
-
-  cleanup();
-  mocks.read.mockResolvedValue({ data: { revision: 8, data: payload.next_data }, error: null });
-  render(<AccountWorkspace />);
-  expect(await screen.findByRole('heading', { name: 'Nenhum pré pendente' })).toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Excluir pré DI00123456789' })).not.toBeInTheDocument();
-  expect(mocks.rpc).toHaveBeenCalledOnce();
+it('saves a confirmed deletion and retains its audit entry without re-registering the pre', async () => {
+  render(<AccountWorkspace />); fireEvent.click(await screen.findByRole('button', { name: 'Excluir pré DI00123456789' }));
+  expect(mocks.save).not.toHaveBeenCalled(); fireEvent.click(screen.getByRole('button', { name: 'Excluir pré-manifesto' }));
+  await waitFor(() => expect(mocks.save).toHaveBeenCalledOnce());
+  expect(mocks.save.mock.calls[0]![0].next_data.manifests).toEqual([]);
+  expect(mocks.save.mock.calls[0]![0].next_data.activity).toMatchObject([{ title: 'Pré-manifesto excluído' }]);
+  await screen.findByText('Todos os dados salvos'); expect(screen.getByRole('heading', { name: 'Nenhum pré pendente' })).toBeInTheDocument();
+});
+it('updates another persons receipt without remounting the scanner or losing its typed value', async () => {
+  render(<AccountWorkspace />); const scanner = await screen.findByRole('textbox', { name: 'Código do CTC' });
+  fireEvent.change(scanner, { target: { value: '00000' } });
+  const remote = structuredClone(saved); remote.manifests[0]!.documents[0]!.received = true;
+  mocks.read.mockResolvedValue({ data: team(remote, 8), error: null }); fireEvent(window, new Event('focus'));
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Marcar CTC 0000000001 como recebido' })).not.toBeInTheDocument());
+  expect(screen.getByRole('textbox', { name: 'Código do CTC' })).toBe(scanner); expect(scanner).toHaveValue('00000'); expect(mocks.save).not.toHaveBeenCalled();
 });

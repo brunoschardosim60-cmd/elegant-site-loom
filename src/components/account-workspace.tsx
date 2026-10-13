@@ -3,9 +3,12 @@ import { type SupabaseClient, type Session } from '@supabase/supabase-js';
 import { Button } from './ui/button';
 import { ConferenceWorkspace } from './conference-workspace';
 import { getSupabaseClient } from '@/lib/supabase-client';
-import { conferenceStateSchema, emptyConference, type ConferenceState } from '@/lib/conference-state';
+import type { ConferenceState } from '@/lib/conference-state';
 import { AccountPanel, Login, PasswordReset } from './account-auth';
 import { passwordRecoveryLocation, setPasswordRecoveryMarker } from '@/lib/password-recovery';
+import { TeamSync, teamSchema, type TeamSyncView } from '@/lib/conference-team';
+import { TeamPanel } from './team-panel';
+import { teamRequest } from '@/lib/team-request';
 
 export function AccountWorkspace() {
   const [client, setClient] = useState<SupabaseClient>();
@@ -73,49 +76,29 @@ export function AccountWorkspace() {
 }
 
 function SavedWorkspace({ client, session }: { client: SupabaseClient; session: Session }) {
-  const [initial, setInitial] = useState<ConferenceState>();
+  const [view, setView] = useState<TeamSyncView>();
   const [loadError, setLoadError] = useState('');
-  const [status, setStatus] = useState('Todos os dados salvos');
-  const [saveError, setSaveError] = useState('');
-  const [conflict, setConflict] = useState(false);
-  const revision = useRef(0); const latest = useRef<ConferenceState | undefined>(undefined);
-  const saved = useRef(''); const saving = useRef(false); const failed = useRef(false);
-  const mounted = useRef(true);
+  const [teamOpen, setTeamOpen] = useState(false); const [auditPre, setAuditPre] = useState('');
+  const sync = useRef<TeamSync | undefined>(undefined);
   useEffect(() => {
-    mounted.current = true;
-    Promise.resolve(client.from('conference_states').select('data,revision').eq('user_id', session.user.id).maybeSingle()).then(({ data, error }) => {
-      if (!mounted.current) return;
+    let active = true;
+    Promise.resolve(teamRequest(client, 'get_conference_team', { accept_invitation: false })).then(({ data, error }) => {
+      if (!active) return;
       if (error) { setLoadError('Não foi possível carregar seus cadastros. Nenhum dado foi substituído.'); return; }
-      const parsed = conferenceStateSchema.safeParse(data?.data ?? emptyConference);
+      const parsed = teamSchema.safeParse(data);
       if (!parsed.success) { setLoadError('Os dados salvos precisam de revisão. Nenhum dado foi substituído.'); return; }
-      revision.current = data?.revision ?? 0; saved.current = JSON.stringify(parsed.data); latest.current = parsed.data; setInitial(parsed.data);
-    }).catch(() => { if (mounted.current) setLoadError('Sem conexão com o banco. Tente novamente; nenhum dado foi substituído.'); });
-    const preventLoss = (event: BeforeUnloadEvent) => { if (saving.current || failed.current || (latest.current && JSON.stringify(latest.current) !== saved.current)) { event.preventDefault(); event.returnValue = ''; } };
+      sync.current = new TeamSync(parsed.data, (name, args) => teamRequest(client, name, args), next => { if (active) setView(next); });
+      setView({ team: parsed.data, state: parsed.data.data, status: 'Todos os dados salvos', error: '', conflict: false, pending: false });
+    }).catch(() => { if (active) setLoadError('Sem conexão com o banco. Tente novamente; nenhum dado foi substituído.'); });
+    const refresh = () => { if (document.visibilityState === 'visible') void sync.current?.refresh(); };
+    const timer = window.setInterval(refresh, 2000);
+    const preventLoss = (event: BeforeUnloadEvent) => { if (sync.current?.pending()) { event.preventDefault(); event.returnValue = ''; } };
     window.addEventListener('beforeunload', preventLoss);
-    return () => { mounted.current = false; window.removeEventListener('beforeunload', preventLoss); };
+    window.addEventListener('online', refresh); window.addEventListener('focus', refresh); document.addEventListener('visibilitychange', refresh);
+    return () => { active = false; sync.current?.stop(); sync.current = undefined; window.clearInterval(timer); window.removeEventListener('beforeunload', preventLoss); window.removeEventListener('online', refresh); window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', refresh); };
   }, [client, session.user.id]);
-  async function flush() {
-    if (saving.current || failed.current || !latest.current) return;
-    saving.current = true; setStatus('Salvando…');
-    try {
-      while (latest.current && JSON.stringify(latest.current) !== saved.current) {
-        const snapshot = latest.current; const encoded = JSON.stringify(snapshot);
-        const { data, error } = await client.rpc('save_conference', { expected_revision: revision.current, next_data: snapshot });
-        if (error) throw error;
-        revision.current = Number(data); saved.current = encoded;
-      }
-      if (mounted.current) { setStatus('Todos os dados salvos'); setSaveError(''); }
-    } catch (error) {
-      failed.current = true;
-      if (mounted.current) {
-        const collision = String((error as { message?: string }).message).includes('CONFERENCE_CONFLICT');
-        setConflict(collision); setStatus('Alterações ainda não salvas');
-        setSaveError(collision ? 'Outro dispositivo salvou alterações. Gere o PDF desta página antes de recarregar para guardar uma cópia das alterações locais.' : 'Não foi possível salvar. Mantenha esta página aberta e tente novamente.');
-      }
-    } finally { saving.current = false; }
-  }
-  function changed(snapshot: ConferenceState) { latest.current = snapshot; void flush(); }
+  function changed(snapshot: ConferenceState) { sync.current?.change(snapshot); }
   if (loadError) return <AccountPanel><p role="alert">{loadError}</p><Button onClick={() => window.location.reload()}>Tentar novamente</Button></AccountPanel>;
-  if (!initial) return <AccountPanel><p>Carregando seus cadastros…</p></AccountPanel>;
-  return <div className="account-shell"><div className="account-bar"><span className="account-identity">{session.user.email} · <span role="status">{status}</span></span><Button size="sm" variant="ghost" disabled={status !== 'Todos os dados salvos'} onClick={() => void client.auth.signOut()}>Sair da conta</Button>{saveError && <div role="alert" className="account-save-error text-destructive">{saveError} {conflict ? <Button size="sm" variant="outline" onClick={() => window.location.reload()}>Recarregar dados salvos</Button> : <Button size="sm" variant="outline" onClick={() => { failed.current = false; void flush(); }}>Tentar salvar novamente</Button>}</div>}</div><ConferenceWorkspace initialState={initial} onSnapshot={changed} accountEmail={session.user.email || ''} /></div>;
+  if (!view) return <AccountPanel><p>Carregando seus cadastros…</p></AccountPanel>;
+  return <div className="account-shell"><div className="account-bar"><span className="account-identity">{session.user.email} · <span role="status">{view.status}</span></span><Button size="sm" variant="ghost" onClick={() => { setAuditPre(''); setTeamOpen(true); void sync.current?.refresh(true); }}>{view.team.invitation ? 'Equipe · convite' : 'Equipe'}</Button><Button size="sm" variant="ghost" disabled={view.pending} onClick={() => void client.auth.signOut()}>Sair da conta</Button>{view.error && <div role="alert" className="account-save-error text-destructive">{view.error} {view.conflict ? <Button size="sm" variant="outline" onClick={() => window.location.reload()}>Recarregar dados salvos</Button> : <Button size="sm" variant="outline" onClick={() => sync.current?.retry()}>Tentar salvar novamente</Button>}</div>}</div><ConferenceWorkspace initialState={view.state} externalState={view.state} onSnapshot={changed} accountEmail={session.user.email || ''} onAuditManifest={id => { setAuditPre(id); setTeamOpen(true); }} /><TeamPanel client={client} team={view.team} open={teamOpen} onOpenChange={setTeamOpen} onRefresh={() => void sync.current?.refresh(true)} selectedPre={auditPre} canJoin={!view.pending} /></div>;
 }

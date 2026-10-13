@@ -10,7 +10,7 @@
 <!-- LOVABLE:END -->
 
 ## Application rules
-- Persist registered conference state in Supabase behind authentication and per-user RLS. Never persist unsaved import drafts or photos. Use revision checks to reject concurrent overwrites. Never expose service-role keys.
+- Persist registered conference state in Supabase behind authentication. Each team has at most three confirmed accounts admitted by explicit email invitation; shared RPCs must verify membership and all tables keep RLS. Preserve the owner's original records and never merge unrelated personal accounts automatically. Use transactional three-way merges, server-side duplicate checks and immutable authenticated audit; reject conflicting field edits. Never persist unsaved import drafts or photos or expose service-role keys.
 - Isolate CTC parsing and conference transitions in a browser-safe domain module so barcode rules can be tested independently.
 - Confer by the Luft CTC identifier (10 digits), as requested by the user. Preserve leading zeroes and never derive a CTC from a CT-e or NF-e key.
 - Show one document editor at a time with an Add CTC button; keep all photo-imported documents accessible without rendering a long list of forms.

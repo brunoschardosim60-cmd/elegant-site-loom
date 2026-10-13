@@ -25,7 +25,7 @@ it('collapses and expands the same workspace without clearing scans, filters or 
   expect(screen.getByRole('button', { name: 'Expandir menu lateral' })).toHaveAttribute('aria-expanded', 'false');
   expect(screen.getByRole('button', { name: 'Conferência' })).toHaveAttribute('aria-current', 'page');
   expect(scanner).toHaveValue('00000'); expect(query).toHaveValue('123-1'); expect(filter).toHaveValue('old');
-  expect(screen.getByText(/Cadastros vinculados a operacao@example.test/)).toBeInTheDocument();
+  expect(screen.getByText(/Cadastros compartilhados com sua equipe/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Expandir menu lateral' }));
   expect(workspace).not.toHaveClass('workspace-sidebar-collapsed');
   expect(screen.getByRole('button', { name: 'Recolher menu lateral' })).toHaveAttribute('aria-expanded', 'true');

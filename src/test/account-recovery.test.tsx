@@ -52,6 +52,7 @@ beforeEach(() => {
   });
   mocks.from.mockReturnValue({ select: () => ({ eq: () => ({ maybeSingle: mocks.read }) }) });
   mocks.read.mockResolvedValue({ data: { revision: 0, data: { manifests: [], activity: [], issues: [] } }, error: null });
+  mocks.rpc.mockResolvedValue({data:{teamId:'00000000-0000-4000-8000-000000000001',name:'Equipe',owner:true,members:[{email:'recovery@example.test',owner:true,pending:false}],revision:0,data:{manifests:[],activity:[],issues:[]}},error:null});
   mocks.resetPasswordForEmail.mockResolvedValue({ data: {}, error: null });
   mocks.updateUser.mockResolvedValue({ data: { user: session.user }, error: null });
 });
@@ -217,8 +218,7 @@ it('loads saved records only after a successful password change is explicitly co
   fireEvent.click(screen.getByRole('button', { name: 'Continuar' }));
   expect(await screen.findByRole('main', { name: 'Conferência carregada' })).toBeInTheDocument();
   expect(new URLSearchParams(window.location.search).has('recovery')).toBe(false);
-  expect(mocks.read).toHaveBeenCalledOnce();
-  expect(mocks.rpc).not.toHaveBeenCalled();
+  expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith('get_conference_team', {accept_invitation:false});
 });
 
 it('still reports a genuine initial session error when no newer auth event exists', async () => {
@@ -231,9 +231,8 @@ it('still reports a genuine initial session error when no newer auth event exist
 it('loads the normal saved workspace when there is no recovery event or URL marker', async () => {
   render(<AccountWorkspace />);
   expect(await screen.findByRole('main', { name: 'Conferência carregada' })).toBeInTheDocument();
-  expect(mocks.from).toHaveBeenCalledExactlyOnceWith('conference_states');
-  expect(mocks.read).toHaveBeenCalledOnce();
-  expect(mocks.rpc).not.toHaveBeenCalled();
+  expect(mocks.from).not.toHaveBeenCalled();
+  expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith('get_conference_team', {accept_invitation:false});
   expect(screen.queryByRole('heading', { name: 'Definir nova senha' })).not.toBeInTheDocument();
 });
 
@@ -244,8 +243,7 @@ it('loads records after a normal SIGNED_IN event without entering recovery', asy
   expectNoConferenceAccess();
   await emit('SIGNED_IN', session);
   expect(await screen.findByRole('main', { name: 'Conferência carregada' })).toBeInTheDocument();
-  expect(mocks.read).toHaveBeenCalledOnce();
-  expect(mocks.rpc).not.toHaveBeenCalled();
+  expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith('get_conference_team', {accept_invitation:false});
 });
 
 it('unsubscribes and ignores delayed session or recovery callbacks after unmount', async () => {
