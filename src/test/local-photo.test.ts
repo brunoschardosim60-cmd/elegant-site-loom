@@ -25,7 +25,7 @@ it('explains differences from printed counts and volumes without filling the mis
     expectedRows: 11, totalVolumes: 132, documents: [{ ctc: '0000000001', nf: '', volumes: '20' }] });
   expect(result.headerReview).toEqual(expect.arrayContaining([
     'Cabeçalho informa 11 CTCs; a leitura local encontrou 1. Confira todas as linhas.',
-    'Cabeçalho informa 132 volumes; a leitura local somou 20. Confira os volumes na foto.',
+    'Cabeçalho informa 132 volumes; a leitura local somou 20. Alguns volumes podem não ter sido reconhecidos. Confira a coluna inteira na foto.',
   ]));
   expect(result.documents).toHaveLength(1);
   expect(result.documents[0]?.volumes).toBe('20');
