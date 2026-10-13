@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ recognize: vi.fn(), terminate: vi.fn(), setParameters: vi.fn() }));
 vi.mock('tesseract.js', () => ({ PSM: { AUTO: '3', SPARSE_TEXT: '11', SINGLE_LINE: '7', SINGLE_BLOCK: '6' }, createWorker: vi.fn(async () => mocks) }));
 vi.mock('@/lib/image-prep', () => ({ prepareForOcr: vi.fn(async (file: File) => file), preparePrintedField: vi.fn(async (file: File) => file),
@@ -10,6 +10,7 @@ import { createWorker } from 'tesseract.js';
 import { prepareForOcr } from '@/lib/image-prep';
 import { getLocalOcrPoolSize, montageReadings, readPrePhoto, readPrePhotos } from '@/lib/photo-ocr';
 beforeEach(() => { Object.defineProperty(navigator, 'hardwareConcurrency', { value: 2, configurable: true }); vi.clearAllMocks(); vi.mocked(createWorker).mockResolvedValue(mocks as never); mocks.recognize.mockReset(); mocks.terminate.mockResolvedValue(undefined); });
+afterEach(() => { vi.useRealTimers(); });
 const result = (text: string, confidence = 80) => ({ data: { text, confidence } });
 const pre = 'PRÉ-MANIFESTO DI00123456789 Placa ABC1D23 CTC: 1234567890';
 describe('Photo OCR batches', () => {
@@ -19,6 +20,19 @@ describe('Photo OCR batches', () => {
     expect(getLocalOcrPoolSize(20, 8, false, 8)).toBe(3);
     expect(getLocalOcrPoolSize(1, 8, false, 8)).toBe(1);
     expect(getLocalOcrPoolSize(0, 8, true, 2)).toBe(0);
+  });
+  it('returns a terminal error when local OCR stops making progress without AI fallback', async () => {
+    vi.useFakeTimers();
+    mocks.recognize.mockImplementation(() => new Promise(() => {}));
+    const receive = vi.fn();
+    const reading = readPrePhotos([new File(['1'], 'slow.jpg')], receive);
+    for (let i = 0; i < 20 && mocks.recognize.mock.calls.length === 0; i++) await Promise.resolve();
+    expect(mocks.recognize).toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(60000);
+    await reading;
+    expect(receive).toHaveBeenCalledOnce();
+    expect(receive.mock.calls[0]?.[1]).toMatchObject({ error: expect.stringContaining('60 segundos') });
+    expect(mocks.terminate).toHaveBeenCalled();
   });
   it('rereads a confident existing volume when the header total disagrees, preserving a conflict notice', async () => {
     const word = (text: string, x: number, y: number, width = 50) => ({ text, confidence: 95, bbox: { x0: x, x1: x + width, y0: y, y1: y + 20 } });
