@@ -6,18 +6,25 @@ export const LOCAL_HEADER_NOTICE = 'Leitura feita no navegador. Confira todas as
 /** Browser OCR is a reviewable draft, never an independent AI agreement. */
 export function markLocalPhoto(pre: PhotoFields): PhotoFields {
   const documents: PhotoDocument[] = pre.documents.length ? pre.documents : pre.ctcs.map(ctc => ({ ctc, nf: '', volumes: '' }));
-  const warnings = [...(pre.headerReview ?? [])];
+  const warnings = (pre.headerReview ?? []).filter(message => !/Cabeçalho informa .* volumes; a leitura local somou|Totais do cabeçalho não foram confirmados na leitura local/i.test(message));
   if (pre.kind === 'pre') {
     const uniqueCtcCount = new Set(documents.map(row => row.ctc).filter(Boolean)).size;
     if (pre.expectedRows && pre.expectedRows !== uniqueCtcCount) warnings.push(`Cabeçalho informa ${pre.expectedRows} CTCs; a leitura local encontrou ${uniqueCtcCount}. Confira todas as linhas.`);
-    const sum = documents.reduce((total, row) => total + (/^\d+$/.test(row.volumes) && Number(row.volumes) > 0 ? Number(row.volumes) : 0), 0);
-    if (pre.totalVolumes && pre.totalVolumes !== sum) warnings.push(`Cabeçalho informa ${pre.totalVolumes} volumes; a leitura local somou ${sum}. Alguns volumes podem não ter sido reconhecidos. Confira a coluna inteira na foto.`);
-    if (!pre.expectedRows || !pre.totalVolumes) warnings.push('Totais do cabeçalho não foram confirmados na leitura local. Confira a quantidade de CTCs e volumes.');
+    if (!pre.expectedRows) warnings.push('Quantidade de CTCs do cabeçalho não pôde ser lida.');
+    if (!pre.totalVolumes) warnings.push('Total de volumes do cabeçalho não pôde ser lido.');
   }
   return {
     ...pre,
     readingSource: 'local',
-    documents: documents.map(row => ({ ...row, review: [...new Set([...(row.review ?? []), LOCAL_ROW_NOTICE])] })),
+    documents: documents.map(row => {
+      const review = (row.review ?? []).filter(message => message !== LOCAL_ROW_NOTICE);
+      if (!/^\d{10}$/.test(row.ctc || '')) review.push('CTC não pôde ser lido com segurança.');
+      if (!/^\d{2,9}-\d{1,3}$/.test(row.nf || '')) review.push('NF-série não pôde ser lida com segurança.');
+      if (!/^\d{1,4}$/.test(row.volumes || '') || Number(row.volumes) <= 0) review.push('Volumes não puderam ser lidos com segurança.');
+      if (!row.client?.trim()) review.push('Cliente / laboratório não pôde ser lido.');
+      if (!row.recipient?.trim()) review.push('Destinatário não pôde ser lido.');
+      return { ...row, review: [...new Set(review)] };
+    }),
     headerReview: [...new Set([...warnings, LOCAL_HEADER_NOTICE])],
     verification: { status: 'unavailable', checkedFields: 0, conflicts: 0 },
   };
