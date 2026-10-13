@@ -219,12 +219,18 @@ export function parsePhotoFields(page: OcrPage): PhotoFields {
     const nf = nfValue(nfRaw);
     const volumeRaw = digits(groupText(volumeGroup).replace(/\s/g, ''));
     const volumes = /^\d{1,4}$/.test(volumeRaw) && Number(volumeRaw) > 0 ? volumeRaw : '';
-    const client = groupText(groupFor(columns.client.groups, index, ctcWords.length, columnBaseline(t, 'client', row), step * .45));
-    const recipient = groupText(groupFor(columns.recipient.groups, index, ctcWords.length, columnBaseline(t, 'recipient', row), step * .45));
+    const clientGroup = groupFor(columns.client.groups, index, ctcWords.length, columnBaseline(t, 'client', row), step * .45);
+    const recipientGroup = groupFor(columns.recipient.groups, index, ctcWords.length, columnBaseline(t, 'recipient', row), step * .45);
+    const client = groupText(clientGroup);
+    const recipient = groupText(recipientGroup);
     const review: string[] = [];
+    // Well-formed 10-digit CTCs can still contain a misread digit. Flag low
+    // confidence on the exact row rather than showing a generic table warning.
+    if (row.confidence < 85) review.push('CTC');
     if (!nf || nfGroup?.some(w => w.confidence < 85) || nf !== nfRaw) review.push('NF');
     if (!volumes || volumeGroup?.some(w => w.confidence < 90)) review.push('volumes');
-    if (!client) review.push('cliente / laboratório');
+    if (!client || clientGroup?.some(w => w.confidence < 60)) review.push('cliente / laboratório');
+    if (!recipient || recipientGroup?.some(w => w.confidence < 60)) review.push('Destinatário');
     fields.documents.push({ ctc: row.text, nf: nf || (/^\d{2,12}$/.test(digits(nfRaw)) ? digits(nfRaw) : ''), volumes, client, recipient, review });
   }
   fields.ctcs = fields.documents.map(row => row.ctc);
