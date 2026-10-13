@@ -7,6 +7,17 @@ import { markLocalPhoto } from './local-photo';
 
 type Result = { text: string; pre: PhotoFields; milliseconds: number; angle?: Angle };
 type Angle = 0 | 90 | 180 | 270;
+
+/** Mobile browsers have much tighter memory limits than desktop browsers.
+ * More OCR workers do not improve a single photo's accuracy and can cause
+ * large image buffers/WASM heaps to compete or get killed on phones.
+ */
+export function getLocalOcrPoolSize(fileCount: number, hardwareConcurrency: number, mobile: boolean, deviceMemory?: number): number {
+  if (fileCount <= 0) return 0;
+  const memoryLimited = deviceMemory !== undefined && Number.isFinite(deviceMemory) && deviceMemory <= 4;
+  const maxWorkers = mobile || memoryLimited ? 1 : hardwareConcurrency >= 6 ? 3 : hardwareConcurrency >= 4 ? 2 : 1;
+  return Math.min(fileCount, Math.max(1, maxWorkers));
+}
 /** Position-based association keeps an unread montage cell from shifting later fields. */
 export function montageReadings(page: OcrPage, cells: Awaited<ReturnType<typeof prepareNumericMontage>>['cells']): (OcrWord | undefined)[] {
   const words = pageWords(page);
@@ -196,9 +207,17 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
 export async function readPrePhotos(files: File[], onResult: (index: number, result: Result | { error: string; fallback?: boolean }) => void, progress: (index: number, message: string) => void = () => {}, signal?: AbortSignal, detailed = false) {
   if (signal?.aborted || !files.length) return;
   progress(0, 'Preparando leitor…');
-  // Batches of many pre-manifests read in parallel on capable devices.
+  // A phone can report 6–8 CPU cores while still having little free memory.
+  // Keep one WASM worker on mobile/low-memory devices to avoid competing OCR heaps.
   const cores = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 2 : 2;
-  const poolSize = Math.min(files.length, cores >= 6 ? 3 : cores >= 4 ? 2 : 1);
+  const mobile = typeof navigator !== 'undefined' && (
+    /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+    || (/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1)
+  );
+  const deviceMemory = typeof navigator !== 'undefined' && 'deviceMemory' in navigator
+    ? Number((navigator as Navigator & { deviceMemory?: number }).deviceMemory)
+    : undefined;
+  const poolSize = getLocalOcrPoolSize(files.length, cores, mobile, deviceMemory);
   const startingAll = Array.from({ length: poolSize }, () => createWorker('por'));
   let cancelStartup = () => {};
   const aborted = new Promise<undefined>(resolve => { cancelStartup = () => resolve(undefined); signal?.addEventListener('abort', cancelStartup, { once: true }); });
