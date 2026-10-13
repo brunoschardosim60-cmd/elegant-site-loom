@@ -3,7 +3,7 @@ import { Loader2, ArrowRight, Barcode, Check, CheckCheck, ChevronRight, CircleCh
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { demoManifests, findMatches, parseReading, setReceived, type Manifest } from '@/lib/conference';
+import { findMatches, parseScan, setReceived, type Manifest } from '@/lib/conference';
 
 import { ManifestImportDialog } from './manifest-import-dialog';
 import { DriverManifestList } from './driver-manifest-list';
@@ -20,7 +20,7 @@ const titles: Record<View, string> = { pending: 'Conferência de documentos', mi
 const timeNow = () => new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
 export function ConferenceWorkspace({ initialState, externalState, onSnapshot, accountEmail, onAuditManifest }: { initialState?: ConferenceState; externalState?: ConferenceState; onSnapshot?: (state: ConferenceState) => void; accountEmail?: string; onAuditManifest?: (id: string) => void } = {}) {
-  const [manifests, setManifests] = useState<Manifest[]>(initialState?.manifests ?? demoManifests);
+  const [manifests, setManifests] = useState<Manifest[]>(initialState?.manifests ?? []);
   const current = useRef(manifests);
   const [view, setView] = useState<View>('pending');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -45,7 +45,7 @@ export function ConferenceWorkspace({ initialState, externalState, onSnapshot, a
   const [newOpen, setNewOpen] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const pendingDeleteId = useRef<string | null>(null);
-  const [now, setNow] = useState('2026-10-09T09:36:00');
+  const [now, setNow] = useState('');
   const [prefillId, setPrefillId] = useState('');
   const sequence = useRef(0);
   const [pdfBusy, setPdfBusy] = useState(false);
@@ -95,11 +95,11 @@ export function ConferenceWorkspace({ initialState, externalState, onSnapshot, a
       else { setPrefillId(input.toUpperCase()); setNewOpen(true); }
       return;
     }
-    const reading = parseReading(input);
+    const reading = parseScan(input);
     if (reading.kind === 'nfe') { notify('Isso é uma NF-e. Bipe somente o CTC.', true); log('NF-e não aceita', 'Bipe o código de barras do CTC.', true); return; }
     if (reading.kind === 'invalid') { notify('Código inválido. Confira e bipe o CTC novamente.', true); return; }
     const matches = findMatches(current.current, reading);
-    if (!matches.length) { setBlocked(`O CTC ${reading.number} não está em nenhum pré-manifesto cadastrado.`); log('CTC sem pré-manifesto', `CTC ${reading.number}`, true); return; }
+    if (!matches.length) { setBlocked(reading.cteNumber ? `O CT-e ${reading.cteNumber} (CTC ${reading.number}) não está em nenhum pré-manifesto cadastrado.` : `O CTC ${reading.number} não está em nenhum pré-manifesto cadastrado.`); log('CTC sem pré-manifesto', `CTC ${reading.number}`, true); return; }
     if (matches.length > 1) { setBlocked(`O CTC ${reading.number} aparece em mais de um pré. Confira o vínculo desse CTC nos pré-manifestos antes de continuar.`); log('CTC com vínculo ambíguo', `CTC ${reading.number}`, true); return; }
     const match = matches[0];
     if (!match) return;
@@ -195,7 +195,7 @@ export function ConferenceWorkspace({ initialState, externalState, onSnapshot, a
       </div>
     </aside>
     <main className="main">
-      <header className="topbar"><div className="topbar-trail"><span>Operação</span><ChevronRight size={12} /><span className="text-foreground font-semibold">{view === 'pending' ? 'Conferência' : view === 'missing' ? 'Pendências' : view === 'finished' ? 'Finalizados' : 'Ocorrências'}</span></div><div className="topbar-meta"><span className="date-meta">{new Date(now).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}</span><span><i className="online-dot" />Sessão ativa</span></div></header>
+      <header className="topbar"><div className="topbar-trail"><span>Operação</span><ChevronRight size={12} /><span className="text-foreground font-semibold">{view === 'pending' ? 'Conferência' : view === 'missing' ? 'Pendências' : view === 'finished' ? 'Finalizados' : 'Ocorrências'}</span></div><div className="topbar-meta"><span className="date-meta">{now ? new Date(now).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' }) : ''}</span><span><i className="online-dot" />Sessão ativa</span></div></header>
       <div className="page-content">
         <div className="page-heading"><div><h1>{titles[view]}</h1><p className="subtitle">{view === 'pending' ? 'Seus prés separados por motorista. Confira os CTCs e acompanhe o que falta.' : view === 'missing' ? 'Todos os CTCs que ainda faltam voltar, do mais antigo ao mais novo.' : view === 'finished' ? 'Documentos recebidos. Conferência concluída.' : 'Documentos que precisam de atenção.'}</p></div><Button onClick={() => { setPrefillId(''); setNewOpen(true); }}><Plus size={15} /> Novo pré<span className="hidden sm:inline">-manifesto</span></Button></div>
         <div className="metric-grid">
