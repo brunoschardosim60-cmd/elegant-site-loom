@@ -7,7 +7,7 @@ vi.mock('@/lib/image-prep', () => ({ prepareForOcr: vi.fn(async (file: File) => 
     cells: boxes.map((box, index) => ({ box, target: { x0: 16, x1: 116, y0: 16 + index * 80, y1: 56 + index * 80 } })) })),
   prepareTableCells: vi.fn(async () => []) }));
 import { createWorker } from 'tesseract.js';
-import { prepareForOcr } from '@/lib/image-prep';
+import { prepareForOcr, readGrayImage } from '@/lib/image-prep';
 import { getLocalOcrPoolSize, montageReadings, readPrePhoto, readPrePhotos } from '@/lib/photo-ocr';
 beforeEach(() => { Object.defineProperty(navigator, 'hardwareConcurrency', { value: 2, configurable: true }); vi.clearAllMocks(); vi.mocked(createWorker).mockResolvedValue(mocks as never); mocks.recognize.mockReset(); mocks.terminate.mockResolvedValue(undefined); });
 afterEach(() => { vi.useRealTimers(); });
@@ -33,6 +33,18 @@ describe('Photo OCR batches', () => {
     expect(receive).toHaveBeenCalledOnce();
     expect(receive.mock.calls[0]?.[1]).toMatchObject({ error: expect.stringContaining('60 segundos') });
     expect(mocks.terminate).toHaveBeenCalled();
+  });
+  it('uses one full-page OCR pass and skips grayscale recovery when all key fields are readable', async () => {
+    const word = (text: string, x: number, y: number, width = 50) => ({ text, confidence: 95, bbox: { x0: x, x1: x + width, y0: y, y1: y + 20 } });
+    const source = { data: { text: 'PRÉ-MANIFESTO', confidence: 95, blocks: [{ paragraphs: [{ lines: [{ words: [
+      word('CTC', 100, 200), word('Remetente', 250, 200, 90), word('NF-Série', 400, 200, 90), word('Vols.', 600, 200),
+      word('0000000001', 100, 240, 100), word('12345-1', 400, 238, 80), word('8', 610, 235, 20),
+    ] }] }] }] } };
+    mocks.recognize.mockResolvedValueOnce(result('PRÉ-MANIFESTO')).mockResolvedValueOnce(source);
+    const reading = await readPrePhoto(new File(['image'], 'clean.jpg'));
+    expect(reading.pre.documents).toMatchObject([{ ctc: '0000000001', nf: '12345-1', volumes: '8' }]);
+    expect(mocks.recognize).toHaveBeenCalledTimes(2);
+    expect(readGrayImage).not.toHaveBeenCalled();
   });
   it('rereads a confident existing volume when the header total disagrees, preserving a conflict notice', async () => {
     const word = (text: string, x: number, y: number, width = 50) => ({ text, confidence: 95, bbox: { x0: x, x1: x + width, y0: y, y1: y + 20 } });
