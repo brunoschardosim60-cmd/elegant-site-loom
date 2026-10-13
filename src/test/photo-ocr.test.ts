@@ -91,6 +91,7 @@ describe('Photo OCR batches', () => {
     expect(readings[2]?.bbox.y0).toBe(502);
   });
   it('finds orientation using thumbnails and reads the full page once', async () => {
+    vi.mocked(prepareForOcr).mockImplementation(async (_file, angle, maxSize) => new Blob([String(angle), String(maxSize)]));
     mocks.recognize.mockResolvedValueOnce(result('unreadable')).mockResolvedValue(result(pre));
     const reading = await readPrePhoto(new File(['image'], 'sideways.jpg'));
     expect(reading.pre).toMatchObject({ id: 'DI00123456789', ctcs: ['1234567890'] });
@@ -122,10 +123,10 @@ describe('Photo OCR batches', () => {
     expect(mocks.terminate).toHaveBeenCalledOnce();
   });
   it('continues after a failed photo and releases the worker', async () => {
-    let calls = 0;
-    mocks.recognize.mockImplementation(async () => { if (++calls <= 6) throw new Error('decode'); return result(pre); });
+    const bad = new File(['1'], 'bad.jpg'), good = new File(['2'], 'good.jpg');
+    mocks.recognize.mockImplementation(async (image: Blob) => { if (image === bad) throw new Error('decode'); return result(pre); });
     const receive = vi.fn();
-    await readPrePhotos([new File(['1'], 'bad.jpg'), new File(['2'], 'good.jpg')], receive);
+    await readPrePhotos([bad, good], receive);
     expect(receive.mock.calls[0]?.[1]).toHaveProperty('error');
     expect(receive.mock.calls[1]?.[1].pre.id).toBe('DI00123456789');
     expect(mocks.terminate).toHaveBeenCalledOnce();
