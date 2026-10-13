@@ -36,6 +36,9 @@ describe('Conferência por CTC', () => {
   it('recovers a pre-manifest number when OCR inserts spaces between digits', () => {
     expect(parsePreText('PRÉ-MANIFESTO\nDI 0 0 6 0 1 8 6 9 1 8\nCTC: 0012345678').id).toBe('DI0060186918');
   });
+  it('recovers a spaced pre number when OCR omits the DI prefix but keeps the label nearby', () => {
+    expect(parsePreText('PRÉ-MANIFESTO\n0 0 6 0 1 8 6 9 1 8\nCTC: 0012345678').id).toBe('DI0060186918');
+  });
   it('does not infer CTC from fiscal keys or other labels', () => {
     expect(parsePreText(key('57', '365569') + '\nCT-e: 1234567890\nNF: 1234567890').ctcs).toEqual([]);
   });
