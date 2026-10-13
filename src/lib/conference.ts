@@ -34,8 +34,11 @@ const toDigits = (v: string) => v.replace(/[OQD]/g, '0').replace(/[IL|]/g, '1').
 export function parsePreText(text: string): PreDraft {
   const upper = text.toUpperCase();
   const idMatch = upper.match(/\bD\s?[I1L|]\s?[-:.]?\s?([0-9OQIL|SB](?:\s*[0-9OQIL|SB]){7,11})\b/);
-  const idDigits = idMatch?.[1] ? toDigits(idMatch[1]) : '';
-  const id = idDigits.length >= 8 ? `DI${idDigits}` : '';
+  // Some scans omit the printed DI prefix or split the prefix and number into separate OCR lines.
+  // Only recover a bare number when it is immediately associated with a pre-manifest label.
+  const labelledNumber = upper.match(/(?:PR[EÉ][- ]?MANIFESTO|N[º°O.]?\s*(?:DO?\s*)?PR[EÉ])[^\d\n]{0,24}([0-9OQIL|SB](?:[\s.-]*[0-9OQIL|SB]){7,11})/);
+  const idDigits = idMatch?.[1] ? toDigits(idMatch[1]) : labelledNumber?.[1] ? toDigits(labelledNumber[1]) : '';
+  const id = idDigits.length >= 8 && idDigits.length <= 12 ? `DI${idDigits}` : '';
   const plateMatch = upper.match(/\b([A-Z]{3})[\s-]?([0-9OIL])\s?([A-Z0-9])\s?([0-9OIL])\s?([0-9OIL])\b/);
   const plate = plateMatch ? `${plateMatch[1]}${toDigits(plateMatch[2]!)}${plateMatch[3]}${toDigits(plateMatch[4]!)}${toDigits(plateMatch[5]!)}` : '';
   const ctcs = new Set<string>();
