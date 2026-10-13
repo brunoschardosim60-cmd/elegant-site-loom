@@ -97,9 +97,9 @@ export async function readPhotosWithFallback(files: File[], onResult: OnResult, 
   const localAbort = new AbortController();
   const stopLocal = () => localAbort.abort();
   signal?.addEventListener('abort', stopLocal, { once: true });
-  // A local worker that stays silent for 20 s is stopped; AI then recovers the photo.
+  // Mobile browsers can take longer during a single Tesseract pass; only stop after 60 s without progress.
   let stall: ReturnType<typeof setTimeout> | undefined;
-  const alive = () => { clearTimeout(stall); stall = setTimeout(stopLocal, 20000); };
+  const alive = () => { clearTimeout(stall); stall = setTimeout(stopLocal, 60000); };
   alive();
   try {
     const { readPrePhotos } = await import('./photo-ocr');
