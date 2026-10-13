@@ -33,7 +33,7 @@ const toDigits = (v: string) => v.replace(/[OQD]/g, '0').replace(/[IL|]/g, '1').
 /** Extract labelled CTC identifiers without converting fiscal keys. */
 export function parsePreText(text: string): PreDraft {
   const upper = text.toUpperCase();
-  const idMatch = upper.match(/\bD\s?[I1L|]\s?[-:.]?\s?([0-9OQIL|SB]{8,12})\b/);
+  const idMatch = upper.match(/\bD\s?[I1L|]\s?[-:.]?\s?([0-9OQIL|SB](?:\s*[0-9OQIL|SB]){7,11})\b/);
   const idDigits = idMatch?.[1] ? toDigits(idMatch[1]) : '';
   const id = idDigits.length >= 8 ? `DI${idDigits}` : '';
   const plateMatch = upper.match(/\b([A-Z]{3})[\s-]?([0-9OIL])\s?([A-Z0-9])\s?([0-9OIL])\s?([0-9OIL])\b/);
