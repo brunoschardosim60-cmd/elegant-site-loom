@@ -22,7 +22,7 @@ const blank = (): Draft => ({ key: crypto.randomUUID(), filename: 'Cadastro manu
 const documentCount = (item: Draft) => item.rows.filter(row => row.ctc).length;
 const volumeCount = (item: Draft) => item.rows.reduce((sum, row) => sum + (Number.isInteger(Number(row.volumes)) && Number(row.volumes) > 0 ? Number(row.volumes) : 0), 0);
 const reviewCount = (item: Draft) => item.rows.filter(row => row.review?.length).length;
-const needsReview = (item: Draft) => item.status === 'error' || item.readingSource === 'local' || !!item.headerReview?.length || !!reviewCount(item) || item.verification?.status === 'review' || item.verification?.status === 'unavailable';
+const needsReview = (item: Draft) => item.status === 'error' || !!item.headerReview?.some(message => message !== LOCAL_HEADER_NOTICE) || !!reviewCount(item) || item.verification?.status === 'review' || item.verification?.status === 'unavailable';
 const statusText = (item: Draft) => item.status === 'read' ? item.readingSource === 'local' ? needsReview(item) ? 'Leitura local · campos a conferir' : 'Leitura local' : item.edited ? 'Ajustado manualmente' : needsReview(item) ? 'Conferir campos' : 'Leitura concluída' : item.status === 'checking' ? 'Conferindo por IA' : item.status === 'error' ? 'Leitura interrompida' : item.status === 'reading' ? 'Lendo documento' : item.status === 'waiting' ? 'Aguardando leitura' : 'Cadastro manual';
 const hasManualContent = (item: Draft) => item.id || item.issueDate || item.plate || item.driver || item.rows.some(row => row.ctc || row.nf || row.client || row.recipient || (row.volumes && row.volumes !== '1'));
 
