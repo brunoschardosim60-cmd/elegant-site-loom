@@ -14,10 +14,17 @@ describe('Reviewed batch import', () => {
     const bad = draft('DI00123456790', '1234567890'); bad.rows.push({ ctc: '2345678901', nf: '', volumes: '' });
     expect(applyImports([], [draft(), bad], 'now')).toMatchObject({ ok: false, index: 1, row: 1 });
   });
-  it('rejects repeated pre-manifests and CTCs', () => {
+  it('rejects repeated pre-manifests but combines multiple NF rows sharing one CTC', () => {
     expect(applyImports([], [draft(), draft()], 'now')).toMatchObject({ ok: false, index: 1 });
-    const duplicated = draft(); duplicated.rows.push({ ...duplicated.rows[0]! });
-    expect(applyImports([], [duplicated], 'now')).toMatchObject({ ok: false, row: 1 });
+    const sharedCtc = draft();
+    sharedCtc.rows.push({ ctc: sharedCtc.rows[0]!.ctc, nf: '67890-2', volumes: '2', client: 'Laboratório Alfa', recipient: 'Farmácia Beta' });
+    expect(findImportConflicts([], [sharedCtc]).filter(conflict => conflict.kind === 'ctc')).toEqual([]);
+    const result = applyImports([], [sharedCtc], 'now');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.manifests[0]!.documents).toHaveLength(1);
+      expect(result.manifests[0]!.documents[0]).toMatchObject({ ctc: '0012345678', nf: '12345-1, 67890-2', volumes: 5 });
+    }
   });
   it('appends a DACTE to an explicitly selected pre and reopens completion', () => {
     const first = applyImports([], [{ ...draft(), issueDate: '2026-08-27' }], 'now'); if (!first.ok) throw new Error('setup');
@@ -64,9 +71,9 @@ describe('Reviewed batch import', () => {
     expect(original).toEqual(before);
   });
 
-  it('reports every repeated row within one pre and every repeated pre ID in a batch', () => {
-    const repeatedRows = draft(); repeatedRows.rows.push({ ...repeatedRows.rows[0]! });
-    expect(findImportConflicts([], [repeatedRows]).map(conflict => [conflict.index, conflict.row])).toEqual([[0, 0], [0, 1]]);
+  it('does not report same-CTC NF rows in one pre, and still reports repeated pre IDs in a batch', () => {
+    const repeatedRows = draft(); repeatedRows.rows.push({ ...repeatedRows.rows[0]!, nf: '99999-1' });
+    expect(findImportConflicts([], [repeatedRows]).filter(conflict => conflict.kind === 'ctc')).toEqual([]);
     const repeatedIds = findImportConflicts([], [draft(), draft(undefined, '0000000002')]).filter(conflict => conflict.kind === 'manifest');
     expect(repeatedIds.map(conflict => conflict.index)).toEqual([0, 1]);
     expect(repeatedIds.every(conflict => conflict.message.includes('Motorista') && conflict.message.includes('DI00123456789'))).toBe(true);
