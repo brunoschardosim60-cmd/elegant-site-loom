@@ -103,25 +103,49 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
   }
   if (best.pre.kind === 'pre' && best.pre.documents.length) {
     const regions = tableCellRegions(best.page).filter(region => region.field === 'volumes');
-    const sum = best.pre.documents.reduce((total, row) => total + Number(row.volumes || 0), 0);
-    const totalMismatch = Boolean(best.pre.totalVolumes && best.pre.totalVolumes !== sum);
+    const sumVolumes = () => best.pre.documents.reduce((total, row) => total + Number(row.volumes || 0), 0);
+    const totalMismatch = Boolean(best.pre.totalVolumes && best.pre.totalVolumes !== sumVolumes());
     if (regions.length && (totalMismatch || best.pre.documents.some(row => !row.volumes || row.review?.includes('volumes')))) {
-      progress('Ampliando os volumes em uma leitura agrupada…');
-      try {
-        active(); const montage = await prepareNumericMontage(best.source, regions.map(region => region.box), { separateDigits: true, signal });
-        await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_BLOCK, tessedit_char_whitelist: '0123456789', user_defined_dpi: '300' });
-        const { data } = await worker.recognize(montage.image, {}, { text: true, blocks: true }); active();
-        for (const [index, reading] of montageReadings(data, montage.cells).entries()) {
-          const cell = regions[index]!;
-          const row = best.pre.documents[cell.row]!;
-          if (!totalMismatch && (confidentVolumes.has(row.ctc) || (row.volumes && !row.review?.includes('volumes')))) continue;
-          if (!reading || !/^\d{1,4}$/.test(reading.text) || Number(reading.text) <= 0 || reading.confidence < (row.volumes ? 80 : 70)) continue;
-          const value = reading.text;
-          if (reading.confidence < 80) row.review = [...new Set([...(row.review ?? []), 'volumes', 'Volumes recuperados com leitura incerta. Confira na foto.'])];
-          if (row.volumes && row.volumes !== value) row.review = [...(row.review ?? []), `Volumes relidos: ${row.volumes} / ${value}. Confira na foto.`];
-          row.volumes = value;
-        }
-      } catch { active(); /* Keep existing numbers when the column is inconclusive. */ }
+      progress('Relendo todos os volumes em recortes ampliados…');
+      // Try two independent image preparations. Keep a pass only when it improves
+      // agreement with the printed header total; a poor second OCR must not replace
+      // better values already read from the original photo.
+      const original = best.pre.documents.map(row => ({ volumes: row.volumes, review: [...(row.review ?? [])] }));
+      let bestDistance = best.pre.totalVolumes ? Math.abs(best.pre.totalVolumes - sumVolumes()) : Number.POSITIVE_INFINITY;
+      for (const separateDigits of [true, false]) {
+        try {
+          active();
+          const montage = await prepareNumericMontage(best.source, regions.map(region => region.box), { separateDigits, signal });
+          await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_BLOCK, tessedit_char_whitelist: '0123456789', user_defined_dpi: '300' });
+          const { data } = await worker.recognize(montage.image, {}, { text: true, blocks: true }); active();
+          const readings = montageReadings(data, montage.cells);
+          const candidate = original.map((row, index) => {
+            const reading = readings[index];
+            const value = reading && /^\d{1,4}$/.test(reading.text) && Number(reading.text) > 0
+              && reading.confidence >= (row.volumes ? 70 : 60) ? reading.text : row.volumes;
+            return { ...row, volumes: value ?? '' };
+          });
+          const candidateSum = candidate.reduce((sum, row) => sum + Number(row.volumes || 0), 0);
+          const distance = best.pre.totalVolumes ? Math.abs(best.pre.totalVolumes - candidateSum) : Number.POSITIVE_INFINITY;
+          const fillsMore = candidate.filter(row => row.volumes).length > best.pre.documents.filter(row => row.volumes).length;
+          if (distance < bestDistance || (!best.pre.totalVolumes && fillsMore)) {
+            bestDistance = distance;
+            candidate.forEach((value, index) => {
+              const row = best.pre.documents[index]!;
+              const prior = row.volumes;
+              if (value.volumes && value.volumes !== prior) {
+                if (prior && prior !== value.volumes) row.review = [...new Set([...(row.review ?? []), `Volumes relidos: ${prior} / ${value.volumes}. Confira na foto.`])];
+                if (readings[index] && readings[index]!.confidence < 80) row.review = [...new Set([...(row.review ?? []), 'volumes', 'Volume recuperado com leitura de menor confiança. Confira na foto.'])];
+                row.volumes = value.volumes;
+              }
+            });
+          }
+        } catch { active(); /* Continue with the next image preparation and retain existing readings. */ }
+      }
+      if (best.pre.totalVolumes && sumVolumes() !== best.pre.totalVolumes) {
+        best.pre.headerReview = [...new Set([...(best.pre.headerReview ?? []),
+          `Cabeçalho informa ${best.pre.totalVolumes} volumes; a leitura local somou ${sumVolumes()}. Alguns volumes podem não ter sido reconhecidos. Confira a coluna inteira na foto.`])];
+      }
     }
   }
   if (best.pre.kind === 'pre' && best.pre.documents.length) {
