@@ -20,5 +20,5 @@ jobs:
           bun-version: latest
       - name: Install dependencies
         run: bun install --frozen-lockfile
-      - name: Run tests
-        run: bun run test
+      - name: Run OCR regression tests
+        run: bun run test src/test/photo-ocr.test.ts src/test/photo-fields.test.ts src/test/local-photo.test.ts
