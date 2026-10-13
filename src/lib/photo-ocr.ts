@@ -54,18 +54,28 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
   const angles = [...new Set<Angle>([preferred ?? 0, 0, 270, 90, 180])];
   let angle: Angle = 0;
   let successful = false;
+  let rotationPreparationUnavailable = false;
   for (const candidateAngle of angles) {
     active();
     progress('Ajustando orientação da foto…');
     try {
       const preview = await prepareForOcr(file, candidateAngle, 1400, signal);
+      // If the canvas/bitmap fallback returns the untouched file, rotated passes
+      // would reread the same bytes and cannot correct the document orientation.
+      if (preview === file && candidateAngle !== 0) { rotationPreparationUnavailable = true; continue; }
+      rotationPreparationUnavailable = preview === file;
       const { data } = await worker.recognize(preview);
       active();
       successful = true;
       const previewFields = parsePhotoFields(data);
       if (photoScore(previewFields) > photoScore(best.pre)) best = { page: data, pre: previewFields, confidence: data.confidence, angle: candidateAngle, source: preview };
+      if (rotationPreparationUnavailable) { angle = 0; break; }
       if (/PR[EÉ][- ]?MANIFESTO|DACTE|\bDI\d{8,12}/i.test(data.text)) { angle = candidateAngle; break; }
-    } catch { active(); /* A different orientation may still be readable. */ }
+    } catch {
+      active();
+      if (rotationPreparationUnavailable) break;
+      /* A different orientation may still be readable. */
+    }
   }
   if (best.angle && angle === 0 && !/PR[EÉ][- ]?MANIFESTO|DACTE|\bDI\d{8,12}/i.test(best.page.text)) angle = best.angle;
   active();
