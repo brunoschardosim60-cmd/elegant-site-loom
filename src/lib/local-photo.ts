@@ -8,7 +8,8 @@ export function markLocalPhoto(pre: PhotoFields): PhotoFields {
   const documents: PhotoDocument[] = pre.documents.length ? pre.documents : pre.ctcs.map(ctc => ({ ctc, nf: '', volumes: '' }));
   const warnings = [...(pre.headerReview ?? [])];
   if (pre.kind === 'pre') {
-    if (pre.expectedRows && pre.expectedRows !== documents.length) warnings.push(`Cabeçalho informa ${pre.expectedRows} CTCs; a leitura local encontrou ${documents.length}. Confira todas as linhas.`);
+    const uniqueCtcCount = new Set(documents.map(row => row.ctc).filter(Boolean)).size;
+    if (pre.expectedRows && pre.expectedRows !== uniqueCtcCount) warnings.push(`Cabeçalho informa ${pre.expectedRows} CTCs; a leitura local encontrou ${uniqueCtcCount}. Confira todas as linhas.`);
     const sum = documents.reduce((total, row) => total + (/^\d+$/.test(row.volumes) && Number(row.volumes) > 0 ? Number(row.volumes) : 0), 0);
     if (pre.totalVolumes && pre.totalVolumes !== sum) warnings.push(`Cabeçalho informa ${pre.totalVolumes} volumes; a leitura local somou ${sum}. Alguns volumes podem não ter sido reconhecidos. Confira a coluna inteira na foto.`);
     if (!pre.expectedRows || !pre.totalVolumes) warnings.push('Totais do cabeçalho não foram confirmados na leitura local. Confira a quantidade de CTCs e volumes.');
