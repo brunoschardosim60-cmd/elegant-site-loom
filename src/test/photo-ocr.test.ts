@@ -8,11 +8,18 @@ vi.mock('@/lib/image-prep', () => ({ prepareForOcr: vi.fn(async (file: File) => 
   prepareTableCells: vi.fn(async () => []) }));
 import { createWorker } from 'tesseract.js';
 import { prepareForOcr } from '@/lib/image-prep';
-import { montageReadings, readPrePhoto, readPrePhotos } from '@/lib/photo-ocr';
+import { getLocalOcrPoolSize, montageReadings, readPrePhoto, readPrePhotos } from '@/lib/photo-ocr';
 beforeEach(() => { Object.defineProperty(navigator, 'hardwareConcurrency', { value: 2, configurable: true }); vi.clearAllMocks(); vi.mocked(createWorker).mockResolvedValue(mocks as never); mocks.recognize.mockReset(); mocks.terminate.mockResolvedValue(undefined); });
 const result = (text: string, confidence = 80) => ({ data: { text, confidence } });
 const pre = 'PRÉ-MANIFESTO DI00123456789 Placa ABC1D23 CTC: 1234567890';
 describe('Photo OCR batches', () => {
+  it('limits OCR concurrency on mobile and low-memory devices', () => {
+    expect(getLocalOcrPoolSize(20, 8, true, 8)).toBe(1);
+    expect(getLocalOcrPoolSize(20, 8, false, 4)).toBe(1);
+    expect(getLocalOcrPoolSize(20, 8, false, 8)).toBe(3);
+    expect(getLocalOcrPoolSize(1, 8, false, 8)).toBe(1);
+    expect(getLocalOcrPoolSize(0, 8, true, 2)).toBe(0);
+  });
   it('rereads a confident existing volume when the header total disagrees, preserving a conflict notice', async () => {
     const word = (text: string, x: number, y: number, width = 50) => ({ text, confidence: 95, bbox: { x0: x, x1: x + width, y0: y, y1: y + 20 } });
     const source = { data: { text: 'PRÉ-MANIFESTO', confidence: 95, blocks: [{ paragraphs: [{ lines: [{ words: [
