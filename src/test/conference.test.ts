@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findMatches, parsePreText, parseReading, setReceived, type Manifest } from '@/lib/conference';
+import { findMatches, parsePreText, parseReading, parseScan, setReceived, type Manifest } from '@/lib/conference';
 
 function key(model: string, number: string) {
   const base = '43' + '2610' + '12345678000195' + model + '001' + number.padStart(9, '0') + '1' + '12345678';
@@ -11,7 +11,7 @@ function key(model: string, number: string) {
 const manifest: Manifest = { id: 'DI0060186918', driver: 'Luciano', plate: 'IYA7J31', date: '2026-10-08', documents: [
   { id: '1', ctc: '0012345678', nf: '1127276-1', volumes: 27, received: false },
   { id: '2', ctc: '1234567890', nf: '1126736-1', volumes: 45, received: false },
-] };
+]};
 describe('Conferência por CTC', () => {
   it('accepts ten digits preserving leading zeros', () => expect(parseReading('0012345678')).toEqual({ kind: 'ctc', number: '0012345678' }));
   it('rejects CT-e keys rather than converting them into CTC', () => expect(parseReading(key('57', '365569')).kind).toBe('invalid'));
@@ -38,22 +38,11 @@ describe('Conferência por CTC', () => {
   });
 });
 
-
-import { accessKeyIsValid, parseScan } from '@/lib/conference';
-
 describe('bipe do CT-e (DACTE)', () => {
   const REAL = '31260952134798000591570020003652411736399041';
 
-  it('validates the real access key check digit', () => {
-    expect(accessKeyIsValid(REAL)).toBe(true);
-  });
-
-  it('rejects a key with an incorrect check digit', () => {
-    expect(parseScan(REAL.slice(0, 43) + (REAL[43] === '0' ? '1' : '0')).kind).toBe('invalid');
-  });
-
-  it('maps the CT-e number to the corresponding CTC identifier', () => {
-    expect(parseScan(REAL)).toEqual({ kind: 'ctc', number: '4400365241', cteNumber: '365241' });
+  it('does not convert a CT-e access key into a CTC', () => {
+    expect(parseScan(REAL).kind).toBe('invalid');
   });
 
   it('continues accepting a ten-digit CTC directly', () => {
@@ -62,9 +51,5 @@ describe('bipe do CT-e (DACTE)', () => {
 
   it('continues identifying NF-e keys separately', () => {
     expect(parseScan(key('55', '1127276')).kind).toBe('nfe');
-  });
-
-  it('keeps import parsing from converting CT-e keys', () => {
-    expect(parseReading(REAL).kind).toBe('invalid');
   });
 });
