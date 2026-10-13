@@ -10,36 +10,9 @@ export function parseReading(value: string): Reading {
   return { kind: 'invalid' };
 }
 
-/** Validates the modulo-11 check digit of a 44-digit fiscal access key. */
-export function accessKeyIsValid(key: string): boolean {
-  if (!/^\\d{44}$/.test(key)) return false;
-  let sum = 0;
-  let weight = 2;
-  for (let i = 42; i >= 0; i--) {
-    sum += Number(key[i]) * weight;
-    weight = weight === 9 ? 2 : weight + 1;
-  }
-  const remainder = sum % 11;
-  return Number(key[43]) === (remainder < 2 ? 0 : 11 - remainder);
-}
-
-/**
- * Parses a scanner input. CT-e access keys (model 57) are mapped to an existing
- * CTC using the CT-e number. Import parsing remains unchanged to avoid guessing
- * CTC values from fiscal documents during manifest import.
- */
-export function parseScan(value: string): Reading & { cteNumber?: string } {
-  const code = value.trim().replace(/\\s/g, '');
-  const direct = parseReading(code);
-  if (direct.kind !== 'invalid') return direct;
-
-  if (/^\\d{44}$/.test(code) && code.slice(20, 22) === '57' && accessKeyIsValid(code)) {
-    const cteNumber = String(Number(code.slice(25, 34)));
-    if (cteNumber !== '0' && cteNumber.length <= 6) {
-      return { kind: 'ctc', number: `4400${cteNumber.padStart(6, '0')}`, cteNumber };
-    }
-  }
-  return { kind: 'invalid' };
+/** A scan is accepted only when it directly contains a CTC or a recognized NF-e key. */
+export function parseScan(value: string): Reading {
+  return parseReading(value);
 }
 
 export function findMatches(manifests: Manifest[], reading: Extract<Reading, { kind: 'ctc' }>) {
