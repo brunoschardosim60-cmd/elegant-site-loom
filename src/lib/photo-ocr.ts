@@ -214,10 +214,9 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
           }
         } catch { active(); /* Continue with the next image preparation and retain existing readings. */ }
       }
-      if (best.pre.totalVolumes && sumVolumes() !== best.pre.totalVolumes) {
-        best.pre.headerReview = [...new Set([...(best.pre.headerReview ?? []),
-          `Cabeçalho informa ${best.pre.totalVolumes} volumes; a leitura local somou ${sumVolumes()}. Alguns volumes podem não ter sido reconhecidos. Confira a coluna inteira na foto.`])];
-      }
+      // If the total still differs after targeted rereads, keep the mismatch as an
+      // internal signal only. The UI flags the specific rows/cells with missing or
+      // conflicting readings instead of asking the user to recheck the entire column.
     }
   }
   if (best.pre.kind === 'pre' && best.pre.documents.length) {
