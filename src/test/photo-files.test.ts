@@ -22,7 +22,7 @@ describe('duplicate import photos', () => {
     const files = [photo('first', '1.jpg'), photo('second', '2.jpg'), photo('third', '3.jpg'), photo('fourth', '4.jpg')];
     let active = 0, maxActive = 0;
     for (const file of files) {
-      const read = file.arrayBuffer.bind(file);
+      const read = typeof file.arrayBuffer === 'function' ? file.arrayBuffer.bind(file) : async () => new TextEncoder().encode(file.name).buffer;
       Object.defineProperty(file, 'arrayBuffer', { value: () => {
         active++;
         maxActive = Math.max(maxActive, active);
