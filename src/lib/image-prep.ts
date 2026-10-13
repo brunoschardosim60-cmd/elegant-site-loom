@@ -28,8 +28,12 @@ export async function prepareForOcr(file: File, rotation: 0 | 90 | 180 | 270 = 0
     const prepared = await new Promise<Blob>(resolve => canvas.toBlob(b => resolve(b ?? file), 'image/jpeg', 0.96));
     signal?.throwIfAborted();
     return prepared;
-  } catch { return file; }
-  finally { bitmap?.close(); }
+  } catch (error) {
+    // Cancellation must remain cancellation; returning the original file here
+    // would let the caller start a costly full-resolution OCR anyway.
+    if (signal?.aborted) throw signal.reason ?? new DOMException('Leitura interrompida.', 'AbortError');
+    return file;
+  } finally { bitmap?.close(); }
 }
 
 /** Enhance small table cells; process one decoded bitmap for all regions. */
