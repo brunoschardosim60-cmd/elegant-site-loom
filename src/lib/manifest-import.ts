@@ -91,9 +91,9 @@ export function applyImports(existing: Manifest[], drafts: ImportDraft[], now: s
     const issueDate = !target ? normalizeIssueDate(draft.issueDate ?? '') : undefined;
     if (!target && draft.issueDate?.trim() && !issueDate) return fail('Confira a data de emissão do pré.');
     if (!draft.rows.length) return fail('Inclua pelo menos um CTC.');
-    const registeredCtcs = new Set(manifests
-      .filter(manifest => normalizedId(manifest.id) !== normalizedId(id))
-      .flatMap(manifest => manifest.documents.map(document => document.ctc)));
+    // Existing CTCs remain conflicts (including a selected target for a DACTE).
+    // Repeated rows in this incoming draft are grouped below as multiple NFs for one CTC.
+    const registeredCtcs = new Set(manifests.flatMap(manifest => manifest.documents.map(document => document.ctc)));
     const grouped = new Map<string, { rows: ManifestDraftRow[]; firstRow: number }>();
     for (const [row, item] of draft.rows.entries()) {
       const reading = parseReading(item.ctc);
