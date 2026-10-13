@@ -18,6 +18,14 @@ export function getLocalOcrPoolSize(fileCount: number, hardwareConcurrency: numb
   const maxWorkers = mobile || memoryLimited ? 1 : hardwareConcurrency >= 6 ? 3 : hardwareConcurrency >= 4 ? 2 : 1;
   return Math.min(fileCount, Math.max(1, maxWorkers));
 }
+
+function isMobileOrLowMemoryDevice(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const mobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+    || (/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+  const memory = 'deviceMemory' in navigator ? Number((navigator as Navigator & { deviceMemory?: number }).deviceMemory) : undefined;
+  return mobile || (memory !== undefined && Number.isFinite(memory) && memory <= 4);
+}
 /** Position-based association keeps an unread montage cell from shifting later fields. */
 export function montageReadings(page: OcrPage, cells: Awaited<ReturnType<typeof prepareNumericMontage>>['cells']): (OcrWord | undefined)[] {
   const words = pageWords(page);
@@ -62,7 +70,11 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
   if (best.angle && angle === 0 && !/PR[EÉ][- ]?MANIFESTO|DACTE|\bDI\d{8,12}/i.test(best.page.text)) angle = best.angle;
   active();
   progress('Lendo documento e tabela…');
-  const source = await prepareForOcr(file, angle, 3840, signal);
+  const mobileFastPath = isMobileOrLowMemoryDevice();
+  // Fast first pass on mobile. Only upscale to the high-resolution path if the
+  // first recognition exposes a missing row, field or total mismatch.
+  const fullPageMaxSize = mobileFastPath ? 3000 : 3840;
+  let source = await prepareForOcr(file, angle, fullPageMaxSize, signal);
   for (const psm of [PSM.SPARSE_TEXT, PSM.AUTO]) {
     active();
     await worker.setParameters({ tessedit_pageseg_mode: psm });
@@ -82,20 +94,21 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
       const hasCtcHeading = words.some(word => /^CTCS?$/.test(normalizeHeading(word)));
       const hasOtherHeading = words.some(word => /^(?:REMETENTE|NFSERIE|NF|VOLS?)$/.test(normalizeHeading(word)));
       const hasTableEvidence = hasCtcHeading && hasOtherHeading;
-      const rowCountMatches = Boolean(candidate.pre.expectedRows && candidate.pre.documents.length === candidate.pre.expectedRows);
       const rowCountMismatch = Boolean(candidate.pre.expectedRows && candidate.pre.documents.length !== candidate.pre.expectedRows);
-      const rowsAreComplete = candidate.pre.documents.length > 0 && candidate.pre.documents.every(row => Boolean(row.nf && row.volumes));
       const incompleteRows = candidate.pre.documents.some(row => !row.nf || !row.volumes);
       const volumeSum = candidate.pre.documents.reduce((sum, row) => sum + Number(row.volumes || 0), 0);
-      const volumesMatch = !candidate.pre.totalVolumes || candidate.pre.totalVolumes === volumeSum;
-      const totalMismatch = Boolean(candidate.pre.totalVolumes && !volumesMatch);
+      const totalMismatch = Boolean(candidate.pre.totalVolumes && candidate.pre.totalVolumes !== volumeSum);
       // Table headings alone are not a reason to repeat a full-page OCR:
       // clean rows can proceed immediately when header totals were not readable.
-      // Retry only for an explicit mismatch, missing field, or a detected table
-      // whose rows were entirely missed.
       const needsMoreWork = rowCountMismatch || totalMismatch || incompleteRows
         || (!candidate.pre.documents.length && hasTableEvidence);
-      if (!needsMoreWork || (rowCountMatches && rowsAreComplete && volumesMatch)) break;
+      if (!needsMoreWork) break;
+      // A missed row/field on the fast mobile pass gets one high-resolution
+      // attempt before the alternate segmentation mode; clean pages skip it.
+      if (mobileFastPath && psm === PSM.SPARSE_TEXT && fullPageMaxSize < 3840) {
+        source = await prepareForOcr(file, angle, 3840, signal);
+        active();
+      }
     } catch { active(); /* Keep a partial result available for manual review. */ }
   }
   if (!successful) throw new Error('Não foi possível processar a foto.');
@@ -294,10 +307,7 @@ export async function readPrePhotos(files: File[], onResult: (index: number, res
   // A phone can report 6–8 CPU cores while still having little free memory.
   // Keep one WASM worker on mobile/low-memory devices to avoid competing OCR heaps.
   const cores = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 2 : 2;
-  const mobile = typeof navigator !== 'undefined' && (
-    /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
-    || (/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1)
-  );
+  const mobile = isMobileOrLowMemoryDevice();
   const deviceMemory = typeof navigator !== 'undefined' && 'deviceMemory' in navigator
     ? Number((navigator as Navigator & { deviceMemory?: number }).deviceMemory)
     : undefined;
