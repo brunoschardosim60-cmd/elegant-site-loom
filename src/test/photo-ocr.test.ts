@@ -46,6 +46,24 @@ describe('Photo OCR batches', () => {
     expect(mocks.recognize).toHaveBeenCalledTimes(2);
     expect(readGrayImage).not.toHaveBeenCalled();
   });
+  it('does not repeat full-page OCR when 15 NF rows contain the 11 CTCs printed in the header', async () => {
+    const word = (text: string, x: number, y: number, width = 50) => ({ text, confidence: 95, bbox: { x0: x, x1: x + width, y0: y, y1: y + 20 } });
+    const source = { data: { text: 'PRÉ-MANIFESTO', confidence: 95, blocks: [{ paragraphs: [{ lines: [{ words: [
+      word('CTCs', 100, 100), word('NFs', 250, 100), word('VOLS', 400, 100), word('PESO', 550, 100),
+      word('1', 130, 130, 20), word('2', 280, 130, 20), word('98', 430, 130, 30),
+      word('CTC', 100, 200), word('Remetente', 250, 200), word('NF-Série', 400, 200, 90), word('Vols.', 600, 200),
+      word('0000000001', 100, 240, 100), word('0000000001', 100, 290, 100),
+      word('12345-1', 400, 238, 80), word('23456-1', 400, 283, 80),
+      word('49', 610, 235, 25), word('49', 610, 280, 25),
+    ] }] }] }] } };
+    mocks.recognize.mockResolvedValueOnce(result('PRÉ-MANIFESTO')).mockResolvedValueOnce(source);
+    const reading = await readPrePhoto(new File(['image'], 'repeated-ctc.jpg'));
+    expect(reading.pre.expectedRows).toBe(1);
+    expect(reading.pre.documents).toHaveLength(2);
+    expect(reading.pre.documents.map(row => row.ctc)).toEqual(['0000000001', '0000000001']);
+    expect(mocks.recognize).toHaveBeenCalledTimes(2);
+  });
+
   it('rereads a confident existing volume when the header total disagrees, preserving a conflict notice', async () => {
     const word = (text: string, x: number, y: number, width = 50) => ({ text, confidence: 95, bbox: { x0: x, x1: x + width, y0: y, y1: y + 20 } });
     const source = { data: { text: 'PRÉ-MANIFESTO', confidence: 95, blocks: [{ paragraphs: [{ lines: [{ words: [
