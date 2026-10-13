@@ -27,7 +27,7 @@ describe('duplicate import photos', () => {
         active++;
         maxActive = Math.max(maxActive, active);
         return new Promise<ArrayBuffer>((resolve, reject) => setTimeout(() => {
-          void read().then(resolve, reject).finally(() => { active--; });
+          void read().then(buffer => { active--; resolve(buffer); }, error => { active--; reject(error); });
         }, 5));
       } });
     }
