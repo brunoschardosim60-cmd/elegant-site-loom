@@ -196,34 +196,39 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
 export async function readPrePhotos(files: File[], onResult: (index: number, result: Result | { error: string; fallback?: boolean }) => void, progress: (index: number, message: string) => void = () => {}, signal?: AbortSignal, detailed = false) {
   if (signal?.aborted || !files.length) return;
   progress(0, 'Preparando leitor…');
-  const starting = createWorker('por');
+  // Batches of many pre-manifests read in parallel on capable devices.
+  const cores = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 2 : 2;
+  const poolSize = Math.min(files.length, cores >= 6 ? 3 : cores >= 4 ? 2 : 1);
+  const startingAll = Array.from({ length: poolSize }, () => createWorker('por'));
   let cancelStartup = () => {};
   const aborted = new Promise<undefined>(resolve => { cancelStartup = () => resolve(undefined); signal?.addEventListener('abort', cancelStartup, { once: true }); });
-  let worker: Worker | undefined;
-  try { worker = await Promise.race([starting, aborted]); }
+  let workers: Worker[] | undefined;
+  try { workers = await Promise.race([Promise.all(startingAll), aborted]); }
   finally { signal?.removeEventListener('abort', cancelStartup); }
-  if (!worker) { void starting.then(late => late.terminate()).catch(() => {}); return; }
+  if (!workers) { for (const starting of startingAll) void starting.then(late => late.terminate()).catch(() => {}); return; }
+  const pool = workers;
   let preferred: Angle | undefined;
-  const cancel = () => { void worker.terminate().catch(() => {}); };
+  let next = 0;
+  const cancel = () => { for (const worker of pool) void worker.terminate().catch(() => {}); };
   signal?.addEventListener('abort', cancel, { once: true });
-  try {
-    if (signal?.aborted) return;
-    for (const [index, file] of files.entries()) {
-      if (signal?.aborted) break;
+  const run = async (worker: Worker) => {
+    while (!signal?.aborted && next < files.length) {
+      const index = next++;
       try {
-        const result = await readWithWorker(worker, file, message => progress(index, message), preferred, detailed, signal);
-        if (signal?.aborted) break;
+        const result = await readWithWorker(worker, files[index]!, message => progress(index, message), preferred, detailed, signal);
+        if (signal?.aborted) return;
         if (result.pre.kind === 'pre') preferred = result.angle;
         onResult(index, { ...result, pre: markLocalPhoto(result.pre) });
-      } catch { if (signal?.aborted) break; onResult(index, { error: 'Não foi possível ler esta foto. Tente outra foto ou preencha os dados.' }); }
+      } catch { if (signal?.aborted) return; onResult(index, { error: 'Não foi possível ler esta foto. Tente outra foto ou preencha os dados.' }); }
     }
-  } finally { signal?.removeEventListener('abort', cancel); await worker.terminate().catch(() => {}); }
+  };
+  try { await Promise.all(pool.map(run)); }
+  finally { signal?.removeEventListener('abort', cancel); await Promise.all(pool.map(worker => worker.terminate().catch(() => {}))); }
 }
 
-export async function readPrePhoto(file: File, progress: (message: string) => void = () => {}): Promise<Result> {
-  let result: Result | undefined;
-  let error = '';
-  await readPrePhotos([file], (_, value) => { if ('error' in value) error = value.error; else result = value; }, (_, message) => progress(message));
-  if (!result) throw new Error(error);
-  return result;
+/** Read a single photo with a dedicated worker. */
+export async function readPrePhoto(file: File, progress: (message: string) => void = () => {}, detailed = false) {
+  const worker = await createWorker('por');
+  try { const result = await readWithWorker(worker, file, progress, undefined, detailed); return { ...result, pre: markLocalPhoto(result.pre) }; }
+  finally { await worker.terminate().catch(() => {}); }
 }

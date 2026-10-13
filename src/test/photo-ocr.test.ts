@@ -9,7 +9,7 @@ vi.mock('@/lib/image-prep', () => ({ prepareForOcr: vi.fn(async (file: File) => 
 import { createWorker } from 'tesseract.js';
 import { prepareForOcr } from '@/lib/image-prep';
 import { montageReadings, readPrePhoto, readPrePhotos } from '@/lib/photo-ocr';
-beforeEach(() => { vi.clearAllMocks(); vi.mocked(createWorker).mockResolvedValue(mocks as never); mocks.recognize.mockReset(); mocks.terminate.mockResolvedValue(undefined); });
+beforeEach(() => { Object.defineProperty(navigator, 'hardwareConcurrency', { value: 2, configurable: true }); vi.clearAllMocks(); vi.mocked(createWorker).mockResolvedValue(mocks as never); mocks.recognize.mockReset(); mocks.terminate.mockResolvedValue(undefined); });
 const result = (text: string, confidence = 80) => ({ data: { text, confidence } });
 const pre = 'PRÉ-MANIFESTO DI00123456789 Placa ABC1D23 CTC: 1234567890';
 describe('Photo OCR batches', () => {

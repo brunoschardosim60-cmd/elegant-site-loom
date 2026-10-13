@@ -77,7 +77,16 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
       const compact = data.mode === 'survey' || data.mode === 'verify';
       const model = data.orientationOnly || data.mode === 'survey' || liteFull ? 'gemini-3.5-flash-lite' : data.mode === 'verify' ? process.env['GEMINI_OCR_VERIFY_MODEL'] || 'gemini-3.5-flash-lite' : process.env['GEMINI_OCR_MODEL'] || 'gemini-3.8-flash';
       stage = 'connection';
-      const request = (key: string) => withinSignal(() => fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+      // A retired model returns 404; retry once with Google's stable alias of the same tier.
+      const fallbackModel = model.includes('lite') ? 'gemini-flash-lite-latest' : 'gemini-flash-latest';
+      const request = async (key: string) => {
+        const first = await requestModel(key, model);
+        if (first.status !== 404 || fallbackModel === model) return first;
+        void first.body?.cancel().catch(() => {});
+        console.warn('ocr_model_retired', { model, fallbackModel });
+        return requestModel(key, fallbackModel);
+      };
+      const requestModel = (key: string, model: string) => withinSignal(() => fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
         method: 'POST', signal,
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
         body: JSON.stringify({

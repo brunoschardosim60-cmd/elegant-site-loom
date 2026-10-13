@@ -69,7 +69,8 @@ export async function readPhotosWithFallback(files: File[], onResult: OnResult, 
       await readAiPhotos([files[index]!], (_position, result) => {
         if (signal?.aborted || finished.has(index)) return;
         if ('error' in result) {
-          fallback(index, result.error);
+          if ('fallback' in result && result.fallback === false && /Entre .*conta|sess[aã]o|autentica/i.test(result.error)) deliver(index, { error: safeCause(result.error), fallback: false });
+          else fallback(index, result.error);
         } else {
           const pre = reading && !('error' in reading) ? correctLocalPhoto(reading.pre, result.pre) : result.pre;
           deliver(index, { ...result, pre, text: JSON.stringify(pre, null, 2), milliseconds: elapsed(), pendingVerification: false });
@@ -96,17 +97,21 @@ export async function readPhotosWithFallback(files: File[], onResult: OnResult, 
   const localAbort = new AbortController();
   const stopLocal = () => localAbort.abort();
   signal?.addEventListener('abort', stopLocal, { once: true });
+  // A local worker that stays silent for 20 s is stopped; AI then recovers the photo.
+  let stall: ReturnType<typeof setTimeout> | undefined;
+  const alive = () => { clearTimeout(stall); stall = setTimeout(stopLocal, 20000); };
+  alive();
   try {
     const { readPrePhotos } = await import('./photo-ocr');
     if (signal?.aborted) return;
     await untilCancelled(readPrePhotos(files, (index, result) => {
       if (signal?.aborted || localAbort.signal.aborted || local.has(index) || !files[index]) return;
-      local.set(index, result);
+      local.set(index, result); alive();
       if (!('error' in result)) onResult(index, { ...result, pre: markLocalPhoto(result.pre), milliseconds: elapsed(), pendingVerification: true });
       enqueue(index);
-    }, (index, message) => { if (!localAbort.signal.aborted) progress(index, `Leitura local · ${message}`); }, localAbort.signal, detailed), localAbort.signal);
+    }, (index, message) => { if (!localAbort.signal.aborted) alive(); if (!localAbort.signal.aborted) progress(index, `Leitura local · ${message}`); }, localAbort.signal, detailed), localAbort.signal);
   } catch { /* AI may recover photos that the local worker could not decode. */ }
-  finally { signal?.removeEventListener('abort', stopLocal); }
+  finally { clearTimeout(stall); signal?.removeEventListener('abort', stopLocal); }
   if (signal?.aborted) return;
   for (const index of files.keys()) {
     if (!local.has(index)) local.set(index, { error: 'Não foi possível iniciar ou concluir o leitor no navegador. Tente novamente; a foto será mantida na lista.' });

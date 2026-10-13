@@ -99,7 +99,7 @@ export function ConferenceWorkspace({ initialState, externalState, onSnapshot, a
     if (reading.kind === 'nfe') { notify('Isso é uma NF-e. Bipe somente o CTC.', true); log('NF-e não aceita', 'Bipe o código de barras do CTC.', true); return; }
     if (reading.kind === 'invalid') { notify('Código inválido. Confira e bipe o CTC novamente.', true); return; }
     const matches = findMatches(current.current, reading);
-    if (!matches.length) { setBlocked(reading.cteNumber ? `O CT-e ${reading.cteNumber} (CTC ${reading.number}) não está em nenhum pré-manifesto cadastrado.` : `O CTC ${reading.number} não está em nenhum pré-manifesto cadastrado.`); log('CTC sem pré-manifesto', `CTC ${reading.number}`, true); return; }
+    if (!matches.length) { setBlocked(`O CTC ${reading.number} não está em nenhum pré-manifesto cadastrado.`); log('CTC sem pré-manifesto', `CTC ${reading.number}`, true); return; }
     if (matches.length > 1) { setBlocked(`O CTC ${reading.number} aparece em mais de um pré. Confira o vínculo desse CTC nos pré-manifestos antes de continuar.`); log('CTC com vínculo ambíguo', `CTC ${reading.number}`, true); return; }
     const match = matches[0];
     if (!match) return;
