@@ -60,7 +60,15 @@ function table(page: OcrPage) {
     const ordered = [...group].sort((a, b) => a.bbox.x0 - b.bbox.x0);
     const raw = ordered.map(w => w.text).join('').replace(/[.,;:]/g, '');
     if (raw.length < 9 || raw.length > 11) continue;
-    if (rowWords.some(w => Math.abs(cy(w) - cy(ordered[0]!)) < height * .55)) continue;
+    const sameRow = rowWords.filter(w => Math.abs(cy(w) - cy(ordered[0]!)) < height * .55);
+    if (sameRow.some(w => literalCtc(w.text))) continue;
+    // Replace partial numeric tokens from this row, rather than leaving a
+    // second malformed candidate that could create a duplicate during repair.
+    if (sameRow.some(w => !ordered.includes(w))) continue;
+    for (const partial of sameRow) {
+      const index = rowWords.indexOf(partial);
+      if (index >= 0) rowWords.splice(index, 1);
+    }
     rowWords.push({
       text: raw,
       confidence: Math.min(...ordered.map(w => w.confidence)),
