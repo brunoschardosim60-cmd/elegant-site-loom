@@ -78,7 +78,7 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
       // If a table is visible, compare both page-segmentation modes unless the printed
       // row count, required row fields, and volume total already agree.
       const words = pageWords(data);
-      const normalizeHeading = (word: OcrWord) => word.text.normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toUpperCase().replace(/[^A-Z]/g, '');
+      const normalizeHeading = (word: OcrWord) => clean(word.text);
       const hasCtcHeading = words.some(word => /^CTCS?$/.test(normalizeHeading(word)));
       const hasOtherHeading = words.some(word => /^(?:REMETENTE|NFSERIE|NF|VOLS?)$/.test(normalizeHeading(word)));
       const hasTableEvidence = hasCtcHeading && hasOtherHeading;
