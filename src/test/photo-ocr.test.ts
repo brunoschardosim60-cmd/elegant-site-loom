@@ -33,11 +33,11 @@ describe('Photo OCR batches', () => {
     const checked = { data: { text: '10\n36', confidence: 95, blocks: [{ paragraphs: [{ lines: [{ words: [
       word('10', 20, 20, 30), word('36', 20, 100, 30),
     ] }] }] }] } };
-    mocks.recognize.mockResolvedValueOnce(result('PRÉ-MANIFESTO')).mockResolvedValueOnce(source).mockResolvedValueOnce(checked);
+    mocks.recognize.mockResolvedValueOnce(result('PRÉ-MANIFESTO')).mockResolvedValueOnce(source).mockResolvedValueOnce(source).mockResolvedValueOnce(checked);
     const reading = await readPrePhoto(new File(['image'], 'photo.jpg'));
     expect(reading.pre.documents.map(row => [row.ctc, row.volumes])).toEqual([['0000000001', '10'], ['0000000002', '36']]);
     expect(reading.pre.documents[1]?.review).toContain('Volumes relidos: 38 / 36. Confira na foto.');
-    expect(mocks.recognize).toHaveBeenCalledTimes(3);
+    expect(mocks.recognize).toHaveBeenCalledTimes(4);
   });
   it('stops immediately during worker startup and terminates the worker if it arrives later', async () => {
     let finish!: (value: never) => void;
