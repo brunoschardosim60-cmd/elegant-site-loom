@@ -85,12 +85,16 @@ export async function preparePrintedField(source: Blob, box: { x0: number; y0: n
     const y = Math.max(0, box.y0 - height * 0.3);
     const width = Math.min(bitmap.width - x, box.x1 - x + height * 6);
     const cropHeight = Math.min(bitmap.height - y, height * 1.6);
+    // Upscale the header field crop 3x before thresholding; small DI digits are often split by OCR.
+    const zoom = 3;
     const canvas = document.createElement('canvas');
-    canvas.width = Math.ceil(width + 40); canvas.height = Math.ceil(cropHeight + 40);
+    canvas.width = Math.ceil(width * zoom + 40); canvas.height = Math.ceil(cropHeight * zoom + 40);
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return source;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(bitmap, x, y, width, cropHeight, 20, 20, width, cropHeight);
+    ctx.drawImage(bitmap, x, y, width, cropHeight, 20, 20, width * zoom, cropHeight * zoom);
     const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height);
     for (let i = 0; i < pixels.data.length; i += 4) {
       const g = (pixels.data[i]! + pixels.data[i + 1]! + pixels.data[i + 2]!) / 3 < 160 ? 0 : 255;
