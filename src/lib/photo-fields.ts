@@ -134,16 +134,29 @@ export function parsePhotoFields(page: OcrPage): PhotoFields {
     const issueDate = preIssueDate(page);
     if (issueDate) fields.issueDate = issueDate;
   }
-  const driverLabel = words.find(w => /PLACA.*MOTOR/i.test(clean(w.text)));
+  const driverLabel = words.find(w => /PLACA.*MOTOR|MOTOR.*PLACA/i.test(clean(w.text)));
   if (driverLabel) {
-    const h = driverLabel.bbox.y1 - driverLabel.bbox.y0;
-    const below = words.filter(w => w.bbox.x0 >= driverLabel.bbox.x0 - h * 2 && w.bbox.y0 > driverLabel.bbox.y1 && w.bbox.y0 < driverLabel.bbox.y1 + h * 4);
-    const nearest = below.sort((a, b) => a.bbox.y0 - b.bbox.y0)[0];
-    const line = below.filter(w => nearest && Math.abs(cy(w) - cy(nearest)) < h * .9).sort((a, b) => a.bbox.x0 - b.bbox.x0).map(w => w.text).join(' ');
-    const plate = parsePreText(line).plate;
+    const h = Math.max(1, driverLabel.bbox.y1 - driverLabel.bbox.y0);
+    // The printed plate and driver's name can occupy separate columns below the same heading.
+    const below = words.filter(w => w.bbox.y0 > driverLabel.bbox.y1 - h * .1
+      && w.bbox.y0 < driverLabel.bbox.y1 + h * 5
+      && w.bbox.x0 >= driverLabel.bbox.x0 - h * 2
+      && w.bbox.x0 < driverLabel.bbox.x1 + h * 28)
+      .sort((a, b) => cy(a) - cy(b) || a.bbox.x0 - b.bbox.x0);
+    const nearest = below[0];
+    const lineWords = below.filter(w => nearest && Math.abs(cy(w) - cy(nearest)) < h * .9);
+    const line = lineWords.sort((a, b) => a.bbox.x0 - b.bbox.x0).map(w => w.text).join(' ').trim();
+    const plate = parsePreText(line).plate || parsePreText(below.map(w => w.text).join(' ')).plate;
     if (plate) fields.plate = plate;
-    const driver = plate ? line.replace(/^[A-Z]{3}[0-9OIL][A-Z0-9][0-9OIL]{2}\s*[-–]?\s*/i, '') : line.replace(/^[A-Z0-9]{6,9}\s*[-–]\s*/i, '');
-    if (plate || driver !== line) fields.driver = driver.replace(/\s*[-–]\s*\d+\s*$/, '').trim();
+    const withoutPlate = line.replace(/[A-Z]{3}[\s-]?[0-9OIL][\s-]?[A-Z0-9][\s-]?[0-9OIL][\s-]?[0-9OIL]/i, ' ');
+    const driver = withoutPlate.replace(/^[\s:;|/–-]+|[\s:;|/–-]+$/g, '').replace(/\s{2,}/g, ' ').trim();
+    if (driver && /[A-ZÀ-ÖØ-Þ]{2,}/i.test(driver) && !/^MOTORISTA$/i.test(driver)) fields.driver = driver;
+    // Fallback: when the OCR puts plate and driver on separate lines, use the first plausible name below the label.
+    if (!fields.driver) {
+      const nameWords = below.filter(w => /[A-ZÀ-ÖØ-Þ]{2,}/i.test(w.text) && !/^(PLACA|MOTORISTA|VEICULO|VEÍCULO)$/i.test(w.text) && !parsePreText(w.text).plate);
+      const candidate = nameWords.map(w => w.text).join(' ').replace(/\s+/g, ' ').trim();
+      if (candidate && !/^\d+$/.test(candidate)) fields.driver = candidate;
+    }
   }
   if (kind === 'dacte') return parseDacte(fields, words, page.text);
   const t = table(page);
