@@ -5,6 +5,7 @@ Controle de retorno de CTCs e pré-manifestos, com leitura de fotos pelo Gemini 
 ## Dados e acesso
 
 - Login por e-mail e senha, com confirmação de e-mail pelo Supabase.
+- A tela de entrada oferece **Esqueci minha senha**. O Supabase envia um link para a origem do site; essa origem deve estar autorizada em Authentication → URL Configuration. O aplicativo mantém a tela de recuperação enquanto a sessão do link é validada e permite definir e confirmar uma nova senha. Links inválidos/expirados oferecem nova solicitação, mesmo quando há outra sessão aberta. Nenhuma senha é guardada nos cadastros; a confirmação do envio não revela se o e-mail possui conta.
 - Cadastros, conferências, atividades e ocorrências ficam em `conference_states`, isolados por usuário com RLS.
 - A mesma conta pode carregar os cadastros em outros dispositivos. Alterações concorrentes são rejeitadas por revisão; a interface pede gerar um PDF para guardar uma cópia das alterações locais antes de recarregar em caso de conflito.
 - O status no topo confirma quando o banco terminou de salvar. Falhas mantêm os dados na tela e oferecem nova tentativa.

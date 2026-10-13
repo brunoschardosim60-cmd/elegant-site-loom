@@ -1,55 +1,75 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { type SupabaseClient, type Session } from '@supabase/supabase-js';
 import { Button } from './ui/button';
 import { ConferenceWorkspace } from './conference-workspace';
 import { getSupabaseClient } from '@/lib/supabase-client';
 import { conferenceStateSchema, emptyConference, type ConferenceState } from '@/lib/conference-state';
+import { AccountPanel, Login, PasswordReset } from './account-auth';
+import { passwordRecoveryLocation, setPasswordRecoveryMarker } from '@/lib/password-recovery';
 
 export function AccountWorkspace() {
   const [client, setClient] = useState<SupabaseClient>();
   const [session, setSession] = useState<Session | null>(null);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState('');
+  const [authScreen, setAuthScreen] = useState<'normal' | 'recovery' | 'forgot'>('normal');
+  const [invalidRecoveryLink, setInvalidRecoveryLink] = useState(false);
+  const [awaitingRecovery, setAwaitingRecovery] = useState(false);
+  const recoveryAccountId = useRef<string | undefined>(undefined);
+  const recoveryActive = useRef(false);
   useEffect(() => {
     let active = true; let unsubscribe: (() => void) | undefined;
+    let authVersion = 0;
+    recoveryAccountId.current = undefined;
+    // The SDK can consume the fragment before getSession resolves or its
+    // PASSWORD_RECOVERY notification arrives. Capture intent first.
+    const recovery = passwordRecoveryLocation(window.location);
+    recoveryActive.current = recovery.requested;
+    if (recovery.requested) { setAuthScreen('recovery'); setPasswordRecoveryMarker(true, recovery.invalidLink, recovery.requiresVerification); }
+    setInvalidRecoveryLink(recovery.invalidLink);
+    setAwaitingRecovery(recovery.requiresVerification);
     getSupabaseClient().then(async supabase => {
       if (!active) return;
       setClient(supabase);
-      const { data, error } = await supabase.auth.getSession();
-      if (error) throw error;
-      if (!active) return;
-      setSession(data.session); setReady(true);
-      const { data: listener } = supabase.auth.onAuthStateChange((_event, next) => { if (active) setSession(next); });
+      const { data: listener } = supabase.auth.onAuthStateChange((event, next) => {
+        if (!active) return;
+        authVersion++;
+        if (event === 'PASSWORD_RECOVERY') {
+          recoveryActive.current = true;
+          recoveryAccountId.current = next?.user.id;
+          setAuthScreen('recovery'); setInvalidRecoveryLink(false); setAwaitingRecovery(false); setPasswordRecoveryMarker(true);
+        } else if (event === 'SIGNED_OUT') {
+          recoveryActive.current = false;
+          recoveryAccountId.current = undefined;
+          setAuthScreen('normal'); setInvalidRecoveryLink(false); setAwaitingRecovery(false); setPasswordRecoveryMarker(false);
+        } else if (recoveryActive.current && next && recoveryAccountId.current && next.user.id !== recoveryAccountId.current) {
+          // A sign-in from another tab must not reuse a password typed for the
+          // account that opened this recovery link.
+          setInvalidRecoveryLink(true); setPasswordRecoveryMarker(true, true);
+        } else if (next && recoveryActive.current && !recovery.requiresVerification && !recoveryAccountId.current) {
+          recoveryAccountId.current = next.user.id;
+        }
+        setSession(next);
+      });
       unsubscribe = () => listener.subscription.unsubscribe();
+      const initialVersion = authVersion;
+      const { data, error } = await supabase.auth.getSession();
+      if (!active) return;
+      if (authVersion === initialVersion) {
+        if (error) throw error;
+        if (recovery.requested && !recovery.requiresVerification) recoveryAccountId.current = data.session?.user.id;
+        setSession(data.session);
+      }
+      setReady(true);
     }).catch(() => { if (active) { setError('Não foi possível conectar à sua conta. Recarregue a página para tentar novamente.'); setReady(true); } });
     return () => { active = false; unsubscribe?.(); };
   }, []);
   if (!ready) return <AccountPanel><p>Conectando à sua conta…</p></AccountPanel>;
   if (!client || error) return <AccountPanel><p role="alert">{error}</p><Button onClick={() => window.location.reload()}>Tentar novamente</Button></AccountPanel>;
-  if (!session) return <Login client={client} />;
+  const finishAuth = () => { recoveryActive.current = false; recoveryAccountId.current = undefined; setAuthScreen('normal'); setInvalidRecoveryLink(false); setAwaitingRecovery(false); setPasswordRecoveryMarker(false); };
+  if (authScreen === 'recovery') return <PasswordReset key={session?.user.id ?? 'no-session'} client={client} hasSession={!!session && !invalidRecoveryLink && !awaitingRecovery} email={session?.user.email} onComplete={finishAuth} onRequestLink={() => { recoveryActive.current = false; recoveryAccountId.current = undefined; setPasswordRecoveryMarker(false); setInvalidRecoveryLink(false); setAwaitingRecovery(false); setAuthScreen('forgot'); }} />;
+  if (!session || authScreen === 'forgot') return <Login client={client} initialMode={authScreen === 'forgot' ? 'forgot' : 'login'} onAuthenticated={finishAuth} onBack={finishAuth} />;
   return <SavedWorkspace key={session.user.id} client={client} session={session} />;
-}
-
-function AccountPanel({ children }: { children: React.ReactNode }) {
-  return <main className="min-h-dvh flex items-center justify-center bg-background p-5"><section className="w-full max-w-sm rounded-xl border bg-card p-7 shadow-sm grid gap-5"><h1 className="text-3xl font-bold text-primary">confere.</h1>{children}</section></main>;
-}
-
-function Login({ client }: { client: SupabaseClient }) {
-  const [mode, setMode] = useState<'login' | 'signup'>('login');
-  const [email, setEmail] = useState(''); const [password, setPassword] = useState('');
-  const [busy, setBusy] = useState(false); const [message, setMessage] = useState('');
-  async function submit(event: FormEvent) {
-    event.preventDefault(); setBusy(true); setMessage('');
-    try {
-      const credentials = { email: email.trim(), password };
-      const result = mode === 'login' ? await client.auth.signInWithPassword(credentials) : await client.auth.signUp({ ...credentials, options: { emailRedirectTo: window.location.origin } });
-      if (result.error) {
-        setMessage(result.error.code === 'email_not_confirmed' ? 'Confirme seu e-mail antes de entrar.' : mode === 'login' ? 'Não foi possível entrar. Confira e-mail e senha.' : 'Não foi possível criar a conta. Tente novamente ou use uma conta existente.');
-      } else if (mode === 'signup' && !result.data.session) setMessage('Confira seu e-mail para confirmar a conta e depois entre.');
-    } catch { setMessage('Sem conexão. Tente novamente.'); }
-    finally { setBusy(false); }
-  }
-  return <AccountPanel><div><h2 className="text-lg font-semibold">{mode === 'login' ? 'Entrar na sua conta' : 'Criar conta'}</h2><p className="text-sm text-muted-foreground mt-2">Seus pré-manifestos e conferências salvos, no computador e no celular.</p></div><form onSubmit={submit} className="grid gap-4"><label className="form-field">E-mail<input type="email" required autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} /></label><label className="form-field">Senha<input type="password" required minLength={8} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} value={password} onChange={e => setPassword(e.target.value)} /></label><Button disabled={busy} type="submit">{busy ? 'Aguarde…' : mode === 'login' ? 'Entrar' : 'Criar conta'}</Button></form>{message && <p role="status" className="text-sm">{message}</p>}<Button variant="ghost" disabled={busy} onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setMessage(''); setPassword(''); }}>{mode === 'login' ? 'Ainda não tenho conta' : 'Já tenho conta'}</Button></AccountPanel>;
 }
 
 function SavedWorkspace({ client, session }: { client: SupabaseClient; session: Session }) {
