@@ -39,6 +39,33 @@ function untilCancelled(hash: Promise<string | undefined>, signal?: AbortSignal)
   });
 }
 
+/** Hash a few photos in parallel without allocating one full ArrayBuffer per
+ * selected file at once. Mobile devices stay at two concurrent file reads.
+ */
+async function fingerprintFiles(files: File[], signal?: AbortSignal): Promise<(string | undefined)[]> {
+  const result: (string | undefined)[] = Array(files.length).fill(undefined);
+  if (!files.length || signal?.aborted) return result;
+  const mobile = typeof navigator !== 'undefined' && (
+    /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+    || (/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1)
+  );
+  const memory = typeof navigator !== 'undefined' && 'deviceMemory' in navigator
+    ? Number((navigator as Navigator & { deviceMemory?: number }).deviceMemory)
+    : undefined;
+  const lowMemory = memory !== undefined && Number.isFinite(memory) && memory <= 4;
+  const cores = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 2 : 2;
+  const parallelism = Math.min(files.length, mobile || lowMemory ? 2 : cores >= 8 ? 4 : 2);
+  let next = 0;
+  await Promise.all(Array.from({ length: parallelism }, async () => {
+    while (!signal?.aborted) {
+      const index = next++;
+      if (index >= files.length) return;
+      result[index] = await untilCancelled(photoFingerprint(files[index]!), signal);
+    }
+  }));
+  return result;
+}
+
 export type RegisteredPhoto = { hash: string; manifestId: string };
 export type PhotoSelection = { files: File[]; duplicates: number; registeredDuplicates?: { filename: string; manifestId: string }[] };
 
@@ -54,15 +81,16 @@ export async function uniquePhotoFiles(selected: File[], existing: File[] = [], 
   const saved = new Map(registered.filter(item => /^[a-f0-9]{64}$/i.test(item.hash)).map(item => [item.hash.toLowerCase(), item.manifestId]));
   const registeredDuplicates: NonNullable<PhotoSelection['registeredDuplicates']> = [];
   let duplicates = 0;
-  for (const file of existing) {
-    if (signal?.aborted) return { files: [], duplicates: 0 };
-    const hash = await untilCancelled(photoFingerprint(file), signal);
-    if (hash) fingerprints.add(hash);
-  }
-  for (const file of selected) {
-    if (signal?.aborted) return { files: [], duplicates: 0 };
-    const hash = await untilCancelled(photoFingerprint(file), signal);
-    if (signal?.aborted) return { files: [], duplicates: 0 };
+  const existingHashes = await fingerprintFiles(existing, signal);
+  if (signal?.aborted) return { files: [], duplicates: 0 };
+  for (const hash of existingHashes) if (hash) fingerprints.add(hash);
+
+  // Preserve original order for duplicate resolution, but hash photos in a
+  // small parallel pool so large batches can start OCR sooner.
+  const selectedHashes = await fingerprintFiles(selected, signal);
+  if (signal?.aborted) return { files: [], duplicates: 0 };
+  for (const [index, file] of selected.entries()) {
+    const hash = selectedHashes[index];
     const manifestId = hash ? saved.get(hash) : undefined;
     if (manifestId) {
       duplicates++;
