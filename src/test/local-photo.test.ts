@@ -20,6 +20,17 @@ it('keeps leading-zero CTCs from a partial page as editable, explicitly unverifi
   expect(result.headerReview?.join(' ')).toContain('incompleta');
 });
 
+it('compares the printed CTC total with unique identifiers, not NF rows', () => {
+  const ctcs = Array.from({ length: 11 }, (_, index) => String(index + 1).padStart(10, '0'));
+  const rowCtcs = [...ctcs, ...ctcs.slice(0, 4)];
+  const result = markLocalPhoto({ id: 'DI00601869631', plate: '', driver: '', kind: 'pre', ctcs: rowCtcs,
+    expectedRows: 11, totalVolumes: 15,
+    documents: rowCtcs.map((ctc, index) => ({ ctc, nf: `${10000 + index}-1`, volumes: '1' })) });
+  expect(result.documents).toHaveLength(15);
+  expect(new Set(result.documents.map(row => row.ctc)).size).toBe(11);
+  expect(result.headerReview?.some(message => message.includes('informa 11 CTCs'))).toBe(false);
+});
+
 it('explains differences from printed counts and volumes without filling the missing values', () => {
   const volumeWarning = 'Cabeçalho informa 132 volumes; a leitura local somou 20. Alguns volumes podem não ter sido reconhecidos. Confira a coluna inteira na foto.';
   const result = markLocalPhoto({ id: '', plate: '', driver: '', kind: 'pre', ctcs: ['0000000001'],
