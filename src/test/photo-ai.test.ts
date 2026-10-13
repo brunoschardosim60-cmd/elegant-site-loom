@@ -739,3 +739,25 @@ describe('AI photo import pipeline', () => {
     expect(receive).not.toHaveBeenCalled();
   });
 });
+
+it('uses Lite after a transient normal failure, skips the unhealthy normal on the next photo, then restores it', async () => {
+  let now = Date.now(); vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const options = { singlePass: true, quotaFallback: true, orientations: [0] as const };
+  const first = readAiPhotos([photo('transient-normal.jpg')], vi.fn(), undefined, undefined, options);
+  (await pendingCall('transient-normal.jpg', 'full')).pending.resolve({ ok: false, unavailable: true, tryLite: true, retryable: false, error: 'Gemini indisponível (503).' });
+  (await pendingCall('transient-normal.jpg', 'full-lite')).pending.resolve(responses(1, 0, false).full); await first;
+  const receive = vi.fn(), second = readAiPhotos([photo('transient-direct-lite.jpg')], receive, undefined, undefined, options);
+  (await pendingCall('transient-direct-lite.jpg', 'full-lite')).pending.resolve(responses(2, 0, false).full); await second;
+  expect(receive.mock.calls[0]![1].pre.aiReader).toBe('lite'); expect(mocks.decode).toHaveBeenCalledTimes(2);
+  now += 120001;
+  const recovered = readAiPhotos([photo('normal-restored.jpg')], vi.fn(), undefined, undefined, options);
+  (await pendingCall('normal-restored.jpg', 'full')).pending.resolve(responses(3, 0, false).full); await recovered;
+  expect(calls.map(call => call.input.data.mode)).toEqual(['full', 'full-lite', 'full-lite', 'full']);
+});
+it('returns a transient Lite failure for local review and keeps cancellation instead of looping through models', async () => {
+  const receive = vi.fn(), batch = readAiPhotos([photo('both-transient.jpg')], receive, undefined, undefined, { singlePass: true, quotaFallback: true, orientations: [0] });
+  (await pendingCall('both-transient.jpg', 'full')).pending.resolve({ ok: false, unavailable: true, tryLite: true, retryable: false, error: 'Modelo temporariamente indisponível.' });
+  (await pendingCall('both-transient.jpg', 'full-lite')).pending.resolve({ ok: false, unavailable: true, tryLite: true, retryable: false, error: 'Sem resposta.' }); await batch;
+  expect(receive).toHaveBeenCalledExactlyOnceWith(0, { error: 'O Gemini normal ficou indisponível. Flash Lite: Sem resposta.' }); expect(calls).toHaveLength(2);
+  await readAiPhotos([photo('both-transient-next.jpg')], receive, undefined, undefined, { singlePass: true, quotaFallback: true, orientations: [0] }); expect(calls).toHaveLength(2);
+});

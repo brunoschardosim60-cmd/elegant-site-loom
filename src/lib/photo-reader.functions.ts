@@ -138,7 +138,7 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
         const failure = photoQuotaFailure(body);
         // Reserve quota says nothing about the primary's quota after its
         // technical failure. Use only the existing short unavailability pause.
-        if (attemptedKey > 0) return { ok: false as const, unavailable: true, retryable: false, error: failure.error };
+        if (attemptedKey > 0) return { ok: false as const, unavailable: true, tryLite: true, retryable: false, error: failure.error };
         return failure;
       }
       if (response.status === 400) {
@@ -151,7 +151,7 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
         console.warn('ocr_provider_failure', { status: response.status, attempts: failures, elapsedMs: Math.round(performance.now() - startedAt) });
         const accessFailure = failures.at(-1);
         const chain = failures.length > 1 ? failures.map((failure, index) => `${index ? 'Reserva' : 'Principal'}: ${failure.status === 401 || failure.status === 403 ? accessLabel(failure.category) : failure.status ? `HTTP ${failure.status}` : 'falha de conexão'}`).join('. ') : '';
-        return { ok: false as const, unavailable: true, retryable: false, error: chain ? `A conferência por IA falhou. ${chain}. Leitura local preservada.` : response.status === 402 ? 'O Gemini está sem créditos. Confira o faturamento no Google AI Studio.' : response.status === 403 || response.status === 401 ? `Gemini: ${accessLabel(accessFailure?.category ?? 'access')}. Leitura local preservada.` : `Gemini indisponível (${response.status}). Tente novamente.` };
+        return { ok: false as const, unavailable: true, tryLite: response.status !== 402 && accessFailure?.category !== 'billing' && (response.status === 404 || failures.some(failure => failure.status === 0 || failure.status >= 500)), retryable: false, error: chain ? `A conferência por IA falhou. ${chain}. Leitura local preservada.` : response.status === 402 ? 'O Gemini está sem créditos. Confira o faturamento no Google AI Studio.' : response.status === 403 || response.status === 401 ? `Gemini: ${accessLabel(accessFailure?.category ?? 'access')}. Leitura local preservada.` : `Gemini indisponível (${response.status}). Tente novamente.` };
       }
       stage = 'provider-json';
       const result = await withinSignal(() => finalResponse.json(), signal) as { candidates?: { finishReason?: string; content?: { parts?: { text?: string; thought?: boolean }[] } }[] };
@@ -170,6 +170,6 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
       if (requestSignal?.aborted) return { ok: false as const, retryable: false, fallback: false, error: 'Leitura cancelada.' };
       const fields = error instanceof z.ZodError ? [...new Set(error.issues.map(issue => issue.path.join('.')))] : [];
       console.warn('ocr_failure', { stage, type: error instanceof Error ? error.name : 'unknown', fields, elapsedMs: Math.round(performance.now() - startedAt) });
-      return { ok: false as const, retryable: false, unavailable: deadline.aborted || stage === 'connection' || stage === 'authentication', error: deadline.aborted ? `O Gemini excedeu o limite de ${timeoutMs / 1000} s; a leitura local pode ser usada.` : stage === 'schema' ? `A IA retornou campos incompletos (${fields.join(', ') || 'formato'}). Releia esta foto.` : stage === 'transcription-json' || stage === 'provider-json' ? 'A IA retornou uma resposta incompleta. Releia esta foto.' : 'Não foi possível conectar ao Gemini. A leitura local pode ser usada para esta foto.' };
+      return { ok: false as const, retryable: false, tryLite: stage !== 'authentication' && (deadline.aborted || stage === 'connection'), unavailable: deadline.aborted || stage === 'connection' || stage === 'authentication', error: deadline.aborted ? `O Gemini excedeu o limite de ${timeoutMs / 1000} s; a leitura local pode ser usada.` : stage === 'schema' ? `A IA retornou campos incompletos (${fields.join(', ') || 'formato'}). Releia esta foto.` : stage === 'transcription-json' || stage === 'provider-json' ? 'A IA retornou uma resposta incompleta. Releia esta foto.' : 'Não foi possível conectar ao Gemini. A leitura local pode ser usada para esta foto.' };
     }
   });

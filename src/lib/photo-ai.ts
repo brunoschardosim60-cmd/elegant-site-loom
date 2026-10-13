@@ -17,6 +17,8 @@ const providerScope = (userId: string, stage: ProviderStage) => `${userId}:photo
 const verificationQuotaMessage = 'A cota diária da conferência adicional esgotou. A leitura completa foi mantida; confira os campos sinalizados.';
 const verificationUnavailableMessage = 'A conferência adicional está temporariamente indisponível. A leitura completa foi mantida; confira os campos sinalizados.';
 const isQuotaFailure = (failure: ProviderFailure) => 'quota' in failure;
+const canUseLite = (failure: ProviderFailure) => !('fallback' in failure && failure.fallback === false) && (isQuotaFailure(failure) || ('tryLite' in failure && failure.tryLite === true));
+const fullFailureReason = (failure: ProviderFailure) => isQuotaFailure(failure) ? 'O Gemini normal atingiu a cota.' : 'O Gemini normal ficou indisponível.';
 
 function stageFailure(stage: ProviderStage, failure: ProviderFailure): ProviderFailure {
   if (stage !== 'verify') return failure;
@@ -79,9 +81,9 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
   const providerBlocks: Record<ProviderStage, ProviderFailure | undefined> = { full: stageBlock('full'), lite: stageBlock('lite'), verify: stageBlock('verify') };
   const getBlockedError = () => {
     const full = providerBlocks.full;
-    if (!full || !options.quotaFallback || !isQuotaFailure(full)) return full;
+    if (!full || !options.quotaFallback || !canUseLite(full)) return full;
     const lite = providerBlocks.lite;
-    return lite ? { ...lite, error: `O Gemini normal atingiu a cota. Flash Lite: ${lite.error}` } : undefined;
+    return lite ? { ...lite, error: `${fullFailureReason(full)} Flash Lite: ${lite.error}` } : undefined;
   };
   const initialBlock = getBlockedError();
   if (initialBlock) {
@@ -118,7 +120,7 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
       if (!('quota' in result && result.quota === 'daily')) temporaryBlocks.set(scope, { until: Date.now() + 60000, result });
       return providerBlocks[stage] = result;
     }
-    if (!result.ok && 'unavailable' in result && result.unavailable === true) temporaryBlocks.set(scope, { until: Date.now() + providerCooldown, result: stageFailure(stage, { ok: false, unavailable: true, retryable: false, error: 'Gemini temporariamente indisponível. O leitor local será usado por alguns minutos antes de uma nova tentativa por IA.' }) });
+    if (!result.ok && 'unavailable' in result && result.unavailable === true) temporaryBlocks.set(scope, { until: Date.now() + providerCooldown, result: stageFailure(stage, { ok: false, unavailable: true, ...('tryLite' in result && result.tryLite ? { tryLite: true } : {}), retryable: false, error: 'Gemini temporariamente indisponível. A leitura local permanece disponível enquanto o serviço se recupera.' }) });
     if (!result.ok && (('quota' in result && result.quota === 'daily') || ('unavailable' in result && result.unavailable === true))) return providerBlocks[stage] = stageFailure(stage, result);
     return result;
   };
@@ -140,14 +142,15 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
         const payload = photoPayload(image, orientation);
         let full = await providerAwareRequest({ data: { ...payload, accessToken, mode: 'full' }, signal: photoSignal });
         let usedLite = false;
-        if (options.quotaFallback && !full.ok && isQuotaFailure(full) && !photoSignal.aborted) {
-          usedLite = true;
-          progress('Cota do Gemini normal atingida · conferindo pelo Flash Lite…');
+        let normalFailure = '';
+        if (options.quotaFallback && !full.ok && canUseLite(full) && !photoSignal.aborted) {
+          usedLite = true; normalFailure = fullFailureReason(full);
+          progress(isQuotaFailure(full) ? 'Cota do Gemini normal atingida · conferindo pelo Flash Lite…' : 'Gemini normal indisponível · conferindo pelo Flash Lite…');
           full = await providerAwareRequest({ data: { ...payload, accessToken, mode: 'full-lite' }, signal: photoSignal });
         }
         if (full.ok) completedPhoto = { ...full.pre, aiReader: usedLite ? 'lite' : 'normal', verification: { status: 'single', checkedFields: 0, conflicts: 0 } };
         if (photoSignal.aborted) throw new Error('Leitura interrompida.');
-        if (!full.ok) { if (!signal?.aborted) onResult(index, { error: usedLite ? `O Gemini normal atingiu a cota. Flash Lite: ${full.error}` : full.error, ...('fallback' in full && full.fallback === false ? { fallback: false } : {}) }); continue; }
+        if (!full.ok) { if (!signal?.aborted) onResult(index, { error: usedLite ? `${normalFailure} Flash Lite: ${full.error}` : full.error, ...('fallback' in full && full.fallback === false ? { fallback: false } : {}) }); continue; }
         let pre = completedPhoto!;
         if (!options.singlePass && needsPhotoVerification(full.pre)) {
           if (!providerBlocks.verify) progress('Conferindo campos sinalizados em uma segunda leitura…');

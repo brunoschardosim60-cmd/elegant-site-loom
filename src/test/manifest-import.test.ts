@@ -182,3 +182,15 @@ describe('Reviewed batch import', () => {
     expect(applyImports([], [dacte, pre], 'later')).toMatchObject({ ok: false, index: 1, error: 'Confira a data de emissão do pré.' });
   });
 });
+
+it('rejects identical CTC/NF rows in one import rather than silently doubling their volumes', () => {
+ const incoming = draft(); incoming.rows.push({ ...incoming.rows[0]! });
+ expect(findImportConflicts([], [incoming]).filter(c => c.kind === 'ctc')).toHaveLength(2);
+ expect(applyImports([], [incoming], 'now')).toMatchObject({ ok: false, row: 0, error: expect.stringContaining('somar volumes duas vezes') });
+});
+it('rejects unsafe row quantities and overflowing sums for a CTC with multiple NFs', () => {
+ const incoming = draft(); incoming.rows[0]!.volumes = '9007199254740993';
+ expect(applyImports([], [incoming], 'now')).toMatchObject({ ok: false, row: 0 });
+ incoming.rows[0]!.volumes = String(Number.MAX_SAFE_INTEGER); incoming.rows.push({ ...incoming.rows[0]!, nf: '67890-1', volumes: '1' });
+ expect(applyImports([], [incoming], 'now')).toMatchObject({ ok: false, row: 0, error: expect.stringContaining('soma de volumes') });
+});

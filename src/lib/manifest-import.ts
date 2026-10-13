@@ -62,8 +62,10 @@ export function findImportConflicts(existing: Manifest[], drafts: ImportDraft[])
     // Multiple NF rows may legitimately share one CTC inside the same pre.
     // Only report repeated CTCs when they belong to different manifests/drafts.
     for (const reference of savedCtcs.get(ctc) ?? []) {
-      if (normalizedId(reference.id) !== owner.id) push('ctc', owner, reference, `CTC ${ctc} já está cadastrado no ${ownerLabel(reference)}.`);
+      push('ctc', owner, reference, `CTC ${ctc} já está cadastrado no ${ownerLabel(reference)}.`);
     }
+    const repeatedNf = owners.find(candidate => candidate !== owner && candidate.index === owner.index && (drafts[candidate.index]?.rows[candidate.row!]?.nf.trim() || '') === (drafts[owner.index]?.rows[owner.row!]?.nf.trim() || ''));
+    if (repeatedNf) push('ctc', owner, repeatedNf, `CTC ${ctc} e NF repetidos no mesmo pré. Remova a linha duplicada para não somar volumes duas vezes.`);
     const other = owners.find(candidate => candidate.index !== owner.index);
     if (other) push('ctc', owner, other, `CTC ${ctc} repetido no ${ownerLabel(other)} do lote.`);
   }
@@ -88,6 +90,8 @@ export function applyImports(existing: Manifest[], drafts: ImportDraft[], now: s
     const conflicts = findImportConflicts(manifests, [draft]);
     const manifestConflict = conflicts.find(conflict => conflict.kind === 'manifest');
     if (manifestConflict) return fail(manifestConflict.message);
+    const ctcConflict = conflicts.find(conflict => conflict.kind === 'ctc');
+    if (ctcConflict) return fail(ctcConflict.message, ctcConflict.row);
     const issueDate = !target ? normalizeIssueDate(draft.issueDate ?? '') : undefined;
     if (!target && draft.issueDate?.trim() && !issueDate) return fail('Confira a data de emissão do pré.');
     if (!draft.rows.length) return fail('Inclua pelo menos um CTC.');
@@ -98,7 +102,7 @@ export function applyImports(existing: Manifest[], drafts: ImportDraft[], now: s
     for (const [row, item] of draft.rows.entries()) {
       const reading = parseReading(item.ctc);
       if (reading.kind !== 'ctc') return fail('Confira o CTC de 10 dígitos.', row);
-      if (!Number.isInteger(Number(item.volumes)) || Number(item.volumes) < 1) return fail('Confira a quantidade de volumes (inteiro maior que zero).', row);
+      if (!Number.isSafeInteger(Number(item.volumes)) || Number(item.volumes) < 1) return fail('Confira a quantidade de volumes (inteiro maior que zero).', row);
       if (registeredCtcs.has(reading.number)) {
         const registeredOwner = manifests.find(manifest => manifest.documents.some(document => document.ctc === reading.number));
         const message = conflicts.find(conflict => conflict.kind === 'ctc' && conflict.row === row)?.message
@@ -121,6 +125,8 @@ export function applyImports(existing: Manifest[], drafts: ImportDraft[], now: s
         received: false,
       };
     });
+    const invalidSum = docs.find(document => !Number.isSafeInteger(document.volumes));
+    if (invalidSum) return fail('Confira a soma de volumes deste CTC.', grouped.get(invalidSum.ctc)!.firstRow);
     if (target) manifests = manifests.map(m => m.id === id ? { ...m, documents: [...m.documents, ...docs], ...(sourcePhotoHash ? { sourcePhotoHashes: [...new Set([...(m.sourcePhotoHashes ?? []).map(hash => hash.toLowerCase()), sourcePhotoHash])] } : {}), finishedAt: undefined } : m);
     else manifests.push({ id, driver: draft.driver.trim(), plate: draft.plate.trim().toUpperCase(), date: now, ...(issueDate ? { issueDate } : {}), ...(sourcePhotoHash ? { sourcePhotoHashes: [sourcePhotoHash] } : {}), documents: docs });
   }

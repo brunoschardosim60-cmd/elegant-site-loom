@@ -24,7 +24,8 @@ export function markLocalPhoto(pre: PhotoFields): PhotoFields {
       if (!row.client?.trim()) review.push('Cliente / laboratório não pôde ser lido.');
       if (!row.recipient?.trim()) review.push('Destinatário não pôde ser lido.');
       const uniqueReview = [...new Set(review)];
-      return { ...row, review: uniqueReview.length ? uniqueReview : undefined };
+      const { review: _previousReview, ...fields } = row;
+      return { ...fields, ...(uniqueReview.length ? { review: uniqueReview } : {}) };
     }),
     headerReview: [...new Set([...warnings, LOCAL_HEADER_NOTICE])],
     verification: { status: 'unavailable', checkedFields: 0, conflicts: 0 },

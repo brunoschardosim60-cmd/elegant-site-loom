@@ -32,7 +32,7 @@ it('identifies Lite confirmation while keeping field review and requiring explic
   render(<ManifestImportDialog open onOpenChange={vi.fn()} manifests={[]} onCreate={create} />);
   await waitFor(() => expect(screen.getByLabelText('Enviar várias fotos')).toBeEnabled());
   fireEvent.change(screen.getByLabelText('Enviar várias fotos'), { target: { files: [new File(['a'], 'lite.jpg', { type: 'image/jpeg' })] } });
-  expect(await screen.findByText('Conferência por Flash Lite · cota do Gemini normal atingida')).toBeInTheDocument();
+  expect(await screen.findByText('Conferência por Flash Lite · leitor de reserva')).toBeInTheDocument();
   expect(screen.getByLabelText('NF-série')).toHaveValue('100-1');
   expect(screen.getByText('NF corrigido pela IA: 10-1 / 100-1. Confira na foto.')).toBeInTheDocument();
   expect(create).not.toHaveBeenCalled();
@@ -269,7 +269,7 @@ it('identifies a local fallback and never shows automatic double-read agreement 
   await waitFor(() => expect(screen.getByLabelText('Enviar várias fotos')).not.toBeDisabled());
   fireEvent.change(screen.getByLabelText('Enviar várias fotos'), { target: { files: [new File(['a'], 'foto.jpg', { type: 'image/jpeg' })] } });
   expect(await screen.findByText('Leitura local de reserva')).toBeInTheDocument();
-  expect(screen.getByText(/Os dados foram lidos no navegador, sem conferência pela IA/)).toBeInTheDocument();
+  expect(screen.getByText(/Leitura feita no navegador, sem conferência independente por IA/)).toBeInTheDocument();
   expect(screen.queryByText('Cabeçalho e números conferidos')).not.toBeInTheDocument();
   expect(screen.queryByText('A segunda leitura não foi concluída')).not.toBeInTheDocument();
   expect(screen.getByLabelText('NF-série')).toHaveValue('11-1');
@@ -552,4 +552,27 @@ it('locks only the draft being reread during delayed fingerprint preparation and
   expect(screen.getByLabelText('NF-série')).not.toBeDisabled();
   fireEvent.click(screen.getByRole('button', { name: 'Revisar arquivo 1: DI00000000002' }));
   expect(screen.getByLabelText('NF-série')).toHaveValue('23-1');
+});
+
+it('keeps clean local rows free of field-review badges and puts provider failures in an optional detail', async () => {
+ const reading = result('DI00000000001', '0000000001', '100-1');
+ mocks.read.mockImplementation(async (_files: File[], receive: (index: number, value: PhotoReadResult) => void) => receive(0, { ...reading, pre: { ...reading.pre, readingSource: 'local', headerReview: [LOCAL_HEADER_NOTICE, 'Gemini: Serviço temporariamente indisponível.'], verification: { status: 'unavailable', checkedFields: 0, conflicts: 0 } } }));
+ render(<ManifestImportDialog open onOpenChange={vi.fn()} manifests={[]} onCreate={vi.fn()} />);
+ await waitFor(() => expect(screen.getByLabelText('Enviar várias fotos')).toBeEnabled());
+ fireEvent.change(screen.getByLabelText('Enviar várias fotos'), { target: { files: [new File(['a'], 'clean-local.jpg', { type: 'image/jpeg' })] } });
+ expect(await screen.findByText('Por que a IA não conferiu')).toBeInTheDocument();
+ expect(screen.queryByText('Leitura local · campos a conferir')).not.toBeInTheDocument();
+ expect(screen.getByText('Gemini: Serviço temporariamente indisponível.')).not.toBeVisible();
+ expect(screen.queryByText('Cabeçalho e números conferidos')).not.toBeInTheDocument();
+});
+it('counts multiple NF lines under one CTC once and flags only an actual total mismatch', async () => {
+ const reading = result('DI00000000001', '0000000001', '100-1');
+ mocks.read.mockImplementation(async (_files: File[], receive: (index: number, value: PhotoReadResult) => void) => receive(0, { ...reading, pre: { ...reading.pre, totalVolumes: 5, documents: [...reading.pre.documents, { ...reading.pre.documents[0]!, nf: '101-1' }] } }));
+ render(<ManifestImportDialog open onOpenChange={vi.fn()} manifests={[]} onCreate={vi.fn()} />);
+ await waitFor(() => expect(screen.getByLabelText('Enviar várias fotos')).toBeEnabled());
+ fireEvent.change(screen.getByLabelText('Enviar várias fotos'), { target: { files: [new File(['a'], 'multiple-nf.jpg', { type: 'image/jpeg' })] } });
+ const totals = await screen.findByRole('group', { name: 'Totais da foto' });
+ expect(within(totals).getByText('CTCs lidos').textContent).toContain('1');
+ expect(within(totals).queryByText('Confira a contagem')).not.toBeInTheDocument(); expect(within(totals).getByText('Confira a soma')).toBeInTheDocument();
+ expect(within(totals).getByText('Confira a soma').parentElement).toHaveAttribute('data-mismatch','true');
 });

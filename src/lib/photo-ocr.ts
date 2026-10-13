@@ -334,6 +334,9 @@ export async function readPrePhotos(files: File[], onResult: (index: number, res
     workers = await Promise.race([Promise.all(startingAll), aborted]);
   } catch (error) {
     clearIdleTimer();
+    // Promise.all may reject while other workers have already started or are
+    // still loading. Release both completed and late workers before leaving.
+    for (const starting of startingAll) void starting.then(worker => worker.terminate()).catch(() => {});
     throw error;
   } finally { readSignal.removeEventListener('abort', cancelStartup); }
   if (!workers) {

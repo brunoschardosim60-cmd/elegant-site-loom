@@ -60,10 +60,12 @@ export function normalizeGeminiPhoto(value: unknown): PhotoFields {
   if (data.kind === 'pre' && !data.expectedRows) headerReview.push('Confira a quantidade de CTCs no cabeçalho.');
   if (data.kind === 'pre' && !data.totalVolumes) headerReview.push('Confira o total de volumes no cabeçalho.');
   if (!documents.length) headerReview.push('Nenhum CTC legível nesta foto.');
-  if (new Set(documents.map(d => d.ctc).filter(Boolean)).size !== documents.length) warnings.push('CTC repetido ou ilegível: confira todas as linhas');
-  if (data.expectedRows && data.expectedRows !== documents.length) warnings.push(`Cabeçalho informa ${data.expectedRows} CTCs; foram lidos ${documents.length}`);
+  const ctcs = [...new Set(documents.map(d => d.ctc).filter(Boolean))];
+  const rowIdentities = documents.map(row => JSON.stringify([row.ctc, row.nf.trim()]));
+  if (documents.some(row => !row.ctc) || new Set(rowIdentities).size !== documents.length) warnings.push('CTC repetido ou ilegível: confira todas as linhas');
+  if (data.expectedRows && data.expectedRows !== ctcs.length) warnings.push(`Cabeçalho informa ${data.expectedRows} CTCs; foram lidos ${ctcs.length}`);
   if (data.totalVolumes && documents.reduce((sum, d) => sum + Number(d.volumes), 0) !== data.totalVolumes) warnings.push(`Confira a soma: cabeçalho informa ${data.totalVolumes} volumes`);
   documents.forEach(d => d.review.push(...warnings));
   const driver = data.kind === 'pre' ? data.driver.trim().replace(/\s+-\s*\d{1,8}$/, '').trim() : data.driver.trim();
-  return { kind: data.kind, readingSource: 'gemini', ...(issueDate ? { issueDate } : {}), id: /^DI\d{8,12}$/.test(data.id.trim().toUpperCase()) ? data.id.trim().toUpperCase() : '', plate, rawPlate: data.plate, driver, expectedRows: data.expectedRows, totalVolumes: data.totalVolumes, headerReview: [...headerReview, ...warnings], ctcs: documents.map(d => d.ctc).filter(Boolean), documents };
+  return { kind: data.kind, readingSource: 'gemini', ...(issueDate ? { issueDate } : {}), id: /^DI\d{8,12}$/.test(data.id.trim().toUpperCase()) ? data.id.trim().toUpperCase() : '', plate, rawPlate: data.plate, driver, expectedRows: data.expectedRows, totalVolumes: data.totalVolumes, headerReview: [...headerReview, ...warnings], ctcs, documents };
 }

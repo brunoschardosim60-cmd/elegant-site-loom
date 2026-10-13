@@ -51,3 +51,9 @@ describe('placa', () => {
   it('fixes letter/digit swaps by position', () => expect(normalizePlate('1YA-7J3I')).toBe('IYA7J31'));
   it('does not invent characters on partial plates', () => expect(normalizePlate('IYA7J')).toBe('IYA7J'));
 });
+
+it('counts a CTC with distinct NFs once without treating its fiscal rows as duplicate CTCs', () => {
+  const input = example(); input.documents.push({ ...input.documents[0]!, nf: '999-1', volumes: '1' }); input.totalVolumes = 67;
+  const result = normalizeGeminiPhoto(input);
+  expect(result.documents).toHaveLength(12); expect(result.ctcs).toHaveLength(11); expect(result.headerReview).toEqual([]); expect(result.documents.every(row => !row.review?.length)).toBe(true);
+});

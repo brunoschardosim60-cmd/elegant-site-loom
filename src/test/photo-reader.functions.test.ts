@@ -327,7 +327,7 @@ it.each(['connection', '503'] as const)('does not block the primary until midnig
   else mocks.fetch.mockResolvedValueOnce(new Response('unavailable', { status: 503 }));
   mocks.fetch.mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: 'Quota per day exhausted' } }), { status: 429 }));
   const result = await readPhotoWithGemini(input);
-  expect(result).toEqual({ ok: false, unavailable: true, retryable: false, error: 'Cota diária do Gemini esgotada. Aguarde a renovação da cota ou ative o faturamento no Google AI Studio.' });
+  expect(result).toEqual({ ok: false, unavailable: true, tryLite: true, retryable: false, error: 'Cota diária do Gemini esgotada. Aguarde a renovação da cota ou ative o faturamento no Google AI Studio.' });
   expect(result).not.toHaveProperty('quota');
   expect(mocks.fetch).toHaveBeenCalledTimes(2);
   expect(mocks.fetch.mock.calls.map(([, init]) => init.headers['x-goog-api-key'])).toEqual(['synthetic-provider-key', 'synthetic-reserve-key']);
@@ -434,4 +434,20 @@ it.each([402, 403, 429])('never uses extra credentials to bypass a quota or bill
   vi.stubEnv('GEMINI_API_KEY_FALLBACK_2', 'synthetic-new-reserve'); vi.stubEnv('GEMINI_API_KEY_FALLBACK', 'synthetic-old-reserve');
   mocks.fetch.mockResolvedValue(new Response(JSON.stringify({ error: { message: status === 429 ? 'Quota per day exhausted' : 'Billing account required' } }), { status }));
   expect(await readPhotoWithGemini(input)).toMatchObject({ ok: false }); expect(mocks.fetch).toHaveBeenCalledOnce();
+});
+
+it.each([500, 503])('allows Lite after a model HTTP %s failure but preserves the cause without exposing credentials', async status => {
+  mocks.fetch.mockResolvedValue(new Response('internal synthetic-provider-key', { status }));
+  const result = await readPhotoWithGemini(input);
+  expect(result).toMatchObject({ ok: false, unavailable: true, tryLite: true }); expect(JSON.stringify(result)).not.toContain('synthetic-provider-key');
+});
+it.each([402, 403])('does not send the same photo to Lite after HTTP %s access or billing denial', async status => {
+  mocks.fetch.mockResolvedValue(new Response(JSON.stringify({ error: { message: 'Billing account required' } }), { status }));
+  expect(await readPhotoWithGemini(input)).toMatchObject({ ok: false, tryLite: false }); expect(mocks.fetch).toHaveBeenCalledOnce();
+});
+it('recovers a retired model with its stable alias, sharing the original key and deadline', async () => {
+  mocks.fetch.mockResolvedValueOnce(new Response('{}', { status: 404 })).mockResolvedValueOnce(successResponse());
+  expect(await readPhotoWithGemini(input)).toMatchObject({ ok: true }); expect(mocks.fetch).toHaveBeenCalledTimes(2);
+  expect(mocks.fetch.mock.calls[1]![0]).toContain('/gemini-flash-latest:generateContent');
+  expect(mocks.fetch.mock.calls[1]![1].signal).toBe(mocks.fetch.mock.calls[0]![1].signal);
 });

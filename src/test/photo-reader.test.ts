@@ -135,13 +135,13 @@ describe('local-first photo reading with independent AI correction', () => {
     expect(receive).toHaveBeenCalledOnce(); expect(receive.mock.calls[0]![1].error).toContain('terminou sem retornar');
   });
 
-  it('stops a stalled local worker after 20 seconds and lets AI recover the photo', async () => {
+  it('stops a stalled local worker after 60 seconds without progress and lets AI recover the photo', async () => {
     vi.useFakeTimers(); const gate = deferred(); let send!: OnResult;
     mocks.local.mockImplementation(async (_files: File[], result: OnResult) => { send = result; await gate.promise; });
     mocks.ai.mockImplementation(async (_files: File[], result: OnResult) => result(0, reading(0)));
     const receive = vi.fn(); const run = readPhotosWithFallback([files[0]!], receive);
     await vi.advanceTimersByTimeAsync(0); expect(mocks.local).toHaveBeenCalledOnce();
-    await vi.advanceTimersByTimeAsync(20000); await run;
+    await vi.advanceTimersByTimeAsync(60000); await run;
     expect(mocks.local.mock.calls[0]![3].aborted).toBe(true);
     expect(mocks.ai).toHaveBeenCalledOnce(); expect(finals(receive)).toHaveLength(1);
     send(0, reading(0, true)); gate.resolve(); await Promise.resolve();

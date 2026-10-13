@@ -737,3 +737,11 @@ h1 { font-size: 28px; font-weight: 750; line-height: 1.3; }
 @media (max-width: 760px) {
   .workspace-sidebar-toggle, .workspace-sidebar-tooltip { display: none; }
 }
+
+/* Local OCR needs field warnings only where data is uncertain. Provider status
+   stays available on demand so the document editor has more room. */
+.import-alert.local { color: var(--muted-foreground); background: var(--muted); }
+.import-provider-details { margin-top: 7px; font-size: 10px; line-height: 1.6; }
+.import-provider-details summary { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.import-document-totals span[data-mismatch="true"] strong { color: var(--warning); }
+.import-document-totals small { display: block; margin-top: 4px; color: var(--warning); font-size: 9px; }

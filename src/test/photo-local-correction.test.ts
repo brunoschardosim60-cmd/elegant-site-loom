@@ -12,7 +12,7 @@ describe('AI correction of a local OCR draft', () => {
     expect(result.verification).toMatchObject({ status: 'matched', conflicts: 0 });
     expect(result.verification!.checkedFields).toBe(14); expect(result.headerReview).toEqual([]);
     expect(result.documents.every(row => row.review?.length === 0)).toBe(true);
-    expect(local.readingSource).toBe('local'); expect(local.documents[0]!.review!.length).toBeGreaterThan(0);
+    expect(local.readingSource).toBe('local'); expect(local.documents[0]!.review).toBeUndefined();
   });
 
   it('matches reordered rows by CTC and corrects NF, volumes and literal client names', () => {
@@ -77,3 +77,18 @@ describe('AI correction of a local OCR draft', () => {
     expect(result.verification!.status).toBe('review');
   });
 });
+
+ it('compares multiple NFs under one CTC by their exact pair, without changing row alignment or counts', () => {
+  const local = data(); local.documents.push({ ...local.documents[0]!, nf: '102-1', volumes: '4' }); local.totalVolumes = 9;
+  const ai = structuredClone(local); ai.documents.reverse();
+  const result = correctLocalPhoto(markLocalPhoto(local), ai);
+  expect(result.documents).toHaveLength(3); expect(result.ctcs).toHaveLength(2); expect(result.verification?.status).toBe('matched');
+  expect(result.documents.map(row => [row.ctc, row.nf, row.volumes])).toEqual(ai.documents.map(row => [row.ctc, row.nf, row.volumes]));
+ });
+ it('preserves a second local NF omitted by AI even when that CTC appears elsewhere in its response', () => {
+  const local = data(); local.documents.push({ ...local.documents[0]!, nf: '102-1', volumes: '4' }); local.totalVolumes = 9;
+  const ai = structuredClone(local); ai.documents.pop();
+  const result = correctLocalPhoto(markLocalPhoto(local), ai);
+  expect(result.documents.find(row => row.nf === '102-1')).toMatchObject({ ctc: '0000000001', volumes: '4', review: expect.arrayContaining([expect.stringContaining('NF não confirmada')]) });
+  expect(result.verification?.status).toBe('review'); expect(result.ctcs).toHaveLength(2);
+ });

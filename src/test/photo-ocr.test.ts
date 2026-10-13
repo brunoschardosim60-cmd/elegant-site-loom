@@ -162,3 +162,14 @@ describe('Photo OCR batches', () => {
     expect(mocks.setParameters).toHaveBeenLastCalledWith({ tessedit_pageseg_mode: '7', tessedit_char_whitelist: 'DI0123456789' });
   });
 });
+
+it('releases a completed worker and a late worker when another worker fails during startup', async () => {
+ Object.defineProperty(navigator, 'hardwareConcurrency', { value: 8, configurable: true });
+ let finish!: (value: never) => void;
+ const first = { ...mocks, terminate: vi.fn().mockResolvedValue(undefined) }, late = { ...mocks, terminate: vi.fn().mockResolvedValue(undefined) };
+ vi.mocked(createWorker).mockResolvedValueOnce(first as never).mockRejectedValueOnce(new Error('worker startup failed')).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+ const files = [1, 2, 3].map(n => new File([String(n)], `startup-${n}.jpg`));
+ await expect(readPrePhotos(files, vi.fn())).rejects.toThrow('worker startup failed');
+ await vi.waitFor(() => expect(first.terminate).toHaveBeenCalledOnce()); finish(late as never);
+ await vi.waitFor(() => expect(late.terminate).toHaveBeenCalledOnce());
+});
