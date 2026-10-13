@@ -41,7 +41,7 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
       const { createClient } = await withinSignal(() => import('@supabase/supabase-js'), signal);
       const auth = createClient(process.env['SUPABASE_URL'] || supabaseConfig.url, process.env['SUPABASE_PUBLISHABLE_KEY'] || supabaseConfig.key, {
         auth: { persistSession: false, autoRefreshToken: false },
-        global: { fetch: (input, init) => {
+        global: { headers: { Authorization: `Bearer ${data.accessToken}` }, fetch: (input, init) => {
           signal.throwIfAborted();
           return fetch(input, { ...init, signal: init?.signal ? AbortSignal.any([signal, init.signal]) : signal });
         } },
@@ -50,6 +50,12 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
       // Do not consume the user's request bucket or start Gemini after closing.
       signal.throwIfAborted();
       if (authError || !user.user) return { ok: false as const, fallback: false, error: 'Entre novamente na sua conta para ler fotos.' };
+      const serviceOwner = (process.env['GEMINI_SERVICE_OWNER_EMAIL'] || 'brunoschardosim60@gmail.com').toLowerCase();
+      if (user.user.email?.toLowerCase() !== serviceOwner) {
+        const membership = await withinSignal(() => Promise.resolve(auth.rpc('conference_reader_owner')), signal);
+        signal.throwIfAborted();
+        if (membership.error || membership.data !== serviceOwner) return { ok: false as const, fallback: false, error: 'Sua conta ainda não foi incluída na equipe autorizada a usar a leitura por IA. Confira o convite em Equipe.' };
+      }
       const keys = providerKeys();
       if (!keys.length) return { ok: false as const, unavailable: true, error: 'Configure a chave Gemini no servidor da Vercel para ativar a leitura por IA.' };
       const now = Date.now();

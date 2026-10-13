@@ -18,6 +18,7 @@ beforeAll(async () => {
   for (let i = 1; i <= 5; i++) await db.query('insert into auth.users values($1,$2,$3)', [uid(i), `person${i}@example.com`, i === 5 ? null : '2026-10-13']);
   await db.exec(await readFile('supabase/migrations/20261011040000_conference.sql', 'utf8'));
   await db.exec(await readFile('supabase/migrations/20261013040000_teams.sql', 'utf8'));
+  await db.exec(await readFile('supabase/migrations/20261013050000_reader_team_access.sql', 'utf8'));
 }, 30000);
 afterAll(async () => { await db?.close(); });
 it('preserves the owner records and shares only with invited confirmed accounts, up to three', async () => {
@@ -33,8 +34,10 @@ it('preserves the owner records and shares only with invited confirmed accounts,
   expect((await db.query<{ data: unknown }>('select data from public.conference_states where user_id=$1', [uid(2)])).rows[0]!.data).toEqual(personal);
   await expect(call('invite_conference_member', ['person4@example.com'])).rejects.toThrow('Somente');
   await as(3); expect((await call('get_conference_team', [true])).teamId).toBe(teamId);
+  expect(await call('conference_reader_owner')).toBe('person1@example.com');
   await as(4); expect((await call('get_conference_team')).teamId).not.toBe(teamId);
   expect((await call('get_conference_team')).data.manifests).toEqual([]);
+  expect(await call('conference_reader_owner')).toBe('person4@example.com');
   await as(5); await expect(call('get_conference_team')).rejects.toThrow('Confirme');
 });
 it('merges simultaneous receipt of different CTCs and finalizes exactly once with authenticated audit', async () => {
@@ -92,4 +95,9 @@ it('rejects malformed data without changing records or audit and supports pendin
   await call('cancel_conference_invite', ['new@example.com']);
   expect((await call('get_conference_team')).members).toHaveLength(2);
   await as(5); await expect(call('get_conference_team', [true])).rejects.toThrow('Confirme');
+});
+it('executes the standalone rollback security script without changing existing fixtures', async () => {
+  await as(1, 'postgres');
+  await db.exec(await readFile('supabase/tests/conference-security.sql', 'utf8'));
+  expect((await db.query<{ count: number }>("select count(*)::int count from auth.users where email like '%@example.invalid'")).rows[0]!.count).toBe(0);
 });

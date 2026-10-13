@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { photoReaderStatus, readPhotoWithGemini } from '@/lib/photo-reader.functions';
 
-const mocks = vi.hoisted(() => ({ fetch: vi.fn(), user: vi.fn(), request: vi.fn(), client: vi.fn() }));
+const mocks = vi.hoisted(() => ({ fetch: vi.fn(), user: vi.fn(), request: vi.fn(), client: vi.fn(), membership: vi.fn() }));
 vi.mock('@tanstack/react-start', () => ({ createServerFn: () => {
   const builder = { inputValidator: () => builder, handler: (handle: (context: { data: unknown }) => unknown) => handle };
   return builder;
@@ -20,7 +20,8 @@ beforeEach(() => {
   vi.clearAllMocks(); vi.useFakeTimers();
   vi.stubEnv('GEMINI_API_KEY', 'synthetic-provider-key'); vi.stubEnv('GEMINI_API_KEY_FALLBACK', undefined); vi.stubEnv('GEMINI_OCR_MODEL', undefined); vi.stubEnv('GEMINI_OCR_VERIFY_MODEL', undefined);
   mocks.user.mockResolvedValue({ data: { user: { id: `server-test-${++user}` } }, error: null });
-  mocks.client.mockImplementation(() => ({ auth: { getUser: mocks.user } }));
+  mocks.membership.mockResolvedValue({ data: 'brunoschardosim60@gmail.com', error: null });
+  mocks.client.mockImplementation(() => ({ auth: { getUser: mocks.user }, rpc: mocks.membership }));
   mocks.request.mockReturnValue({ signal: new AbortController().signal });
   vi.stubGlobal('fetch', mocks.fetch);
   vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -37,6 +38,19 @@ beforeEach(() => {
   });
 });
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+
+it('denies OCR quota to an authenticated account outside the authorized team', async () => {
+  mocks.membership.mockResolvedValue({ data: 'outsider@example.com', error: null });
+  expect(await readPhotoWithGemini(input)).toMatchObject({ ok: false, fallback: false, error: expect.stringContaining('equipe autorizada') });
+  expect(mocks.fetch).not.toHaveBeenCalled();
+});
+it('keeps the verified service owner on the fast path and passes the member bearer token to Supabase only', async () => {
+  mocks.user.mockResolvedValue({ data: { user: { id: 'service-owner', email: 'brunoschardosim60@gmail.com' } }, error: null });
+  mocks.fetch.mockResolvedValue(successResponse()); expect(await readPhotoWithGemini(input)).toMatchObject({ ok: true });
+  expect(mocks.membership).not.toHaveBeenCalled();
+  expect(mocks.client.mock.calls[0]![2].global.headers.Authorization).toBe('Bearer synthetic-session-token');
+  expect(mocks.fetch.mock.calls[0]![1].headers.Authorization).toBeUndefined();
+});
 
 it('uses Lite for a complete independent transcription with the full schema, names, date and LOW thinking', async () => {
   vi.stubEnv('GEMINI_OCR_MODEL', 'gemini-3.8-flash');
