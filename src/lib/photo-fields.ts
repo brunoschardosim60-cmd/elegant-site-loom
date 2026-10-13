@@ -39,7 +39,40 @@ function table(page: OcrPage) {
   const anchors = { ctc: header, client: find(/^REMETENTE$/), recipient: find(/^DESTINATARIO$/), nf: find(/^NFSERIE$|^NF$/), volumes: find(/^VOLS/), species: find(/^ESPECIE$/), nature: find(/^NATUREZA$/), order: find(/^PEDIDO$|^NPEDIDO$/), check: find(/^CHK/) };
   const sorted = Object.values(anchors).filter((w): w is OcrWord => !!w).sort((a, b) => cx(a) - cx(b));
   const body = words.filter(w => !/^OBSERVA/i.test(w.text));
-  const rowWords = body.filter(w => w.bbox.y0 > header!.bbox.y1 && /^[A-Z0-9|]{9,11}[.,;:]?$/i.test(w.text) && /\d.*\d/.test(w.text) && w.bbox.x0 < (sender?.bbox.x0 ?? header!.bbox.x1 + height * 6) && Math.abs(cx(w) - cx(header!)) < height * 9).sort((a, b) => cy(a) - cy(b));
+  const rowWords: OcrWord[] = body.filter(w => w.bbox.y0 > header!.bbox.y1 && /^[A-Z0-9|]{9,11}[.,;:]?$/i.test(w.text) && /\d.*\d/.test(w.text) && w.bbox.x0 < (sender?.bbox.x0 ?? header!.bbox.x1 + height * 6) && Math.abs(cx(w) - cx(header!)) < height * 9).sort((a, b) => cy(a) - cy(b));
+
+  // Mobile OCR may split one printed 10-digit CTC into several adjacent tokens.
+  // Rejoin only numeric-looking fragments on the same baseline and inside the CTC
+  // column; never combine values from different rows or pull in NF/volume columns.
+  const fragments = body.filter(w => w.bbox.y0 > header!.bbox.y1
+    && /^[0-9OQIL|SB]+[.,;:]?$/i.test(w.text)
+    && w.text.replace(/[.,;:]/g, '').length <= 10
+    && w.bbox.x0 < (sender?.bbox.x0 ?? header!.bbox.x1 + height * 6)
+    && Math.abs(cx(w) - cx(header!)) < height * 9)
+    .sort((a, b) => cy(a) - cy(b) || a.bbox.x0 - b.bbox.x0);
+  const fragmentRows: OcrWord[][] = [];
+  for (const fragment of fragments) {
+    const last = fragmentRows.at(-1);
+    if (last && Math.abs(cy(last[0]!) - cy(fragment)) < height * .55) last.push(fragment);
+    else fragmentRows.push([fragment]);
+  }
+  for (const group of fragmentRows) {
+    const ordered = [...group].sort((a, b) => a.bbox.x0 - b.bbox.x0);
+    const raw = ordered.map(w => w.text).join('').replace(/[.,;:]/g, '');
+    if (raw.length < 9 || raw.length > 11) continue;
+    if (rowWords.some(w => Math.abs(cy(w) - cy(ordered[0]!)) < height * .55)) continue;
+    rowWords.push({
+      text: raw,
+      confidence: Math.min(...ordered.map(w => w.confidence)),
+      bbox: {
+        x0: Math.min(...ordered.map(w => w.bbox.x0)),
+        y0: Math.min(...ordered.map(w => w.bbox.y0)),
+        x1: Math.max(...ordered.map(w => w.bbox.x1)),
+        y1: Math.max(...ordered.map(w => w.bbox.y1)),
+      },
+    });
+  }
+  rowWords.sort((a, b) => cy(a) - cy(b));
   const ctcWords = rowWords.filter(w => literalCtc(w.text)).map(w => ({ ...w, text: literalCtc(w.text)! }));
   if (!ctcWords.length) return;
   const step = median(rowWords.slice(1).map((w, i) => cy(w) - cy(rowWords[i]!)).filter(gap => gap > height * .7)) || height * 2;
