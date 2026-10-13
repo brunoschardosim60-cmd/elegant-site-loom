@@ -104,7 +104,8 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
       const hasCtcHeading = words.some(word => /^CTCS?$/.test(normalizeHeading(word)));
       const hasOtherHeading = words.some(word => /^(?:REMETENTE|NFSERIE|NF|VOLS?)$/.test(normalizeHeading(word)));
       const hasTableEvidence = hasCtcHeading && hasOtherHeading;
-      const rowCountMismatch = Boolean(candidate.pre.expectedRows && candidate.pre.documents.length !== candidate.pre.expectedRows);
+      const uniqueCtcCount = new Set(candidate.pre.documents.map(row => row.ctc).filter(Boolean)).size;
+      const rowCountMismatch = Boolean(candidate.pre.expectedRows && uniqueCtcCount !== candidate.pre.expectedRows);
       const incompleteRows = candidate.pre.documents.some(row => !row.nf || !row.volumes);
       const volumeSum = candidate.pre.documents.reduce((sum, row) => sum + Number(row.volumes || 0), 0);
       const totalMismatch = Boolean(candidate.pre.totalVolumes && candidate.pre.totalVolumes !== volumeSum);
