@@ -134,7 +134,6 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
       // Try two independent image preparations. Keep a pass only when it improves
       // agreement with the printed header total; a poor second OCR must not replace
       // better values already read from the original photo.
-      const original = best.pre.documents.map(row => ({ volumes: row.volumes, review: [...(row.review ?? [])] }));
       let bestDistance = best.pre.totalVolumes ? Math.abs(best.pre.totalVolumes - sumVolumes()) : Number.POSITIVE_INFINITY;
       for (const separateDigits of [true, false]) {
         try {
@@ -143,7 +142,11 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
           await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_BLOCK, tessedit_char_whitelist: '0123456789', user_defined_dpi: '300' });
           const { data } = await worker.recognize(montage.image, {}, { text: true, blocks: true }); active();
           const readings = montageReadings(data, montage.cells);
-          const candidate = original.map((row, index) => {
+          // Start from the best values accepted so far. A later, weaker montage
+          // must not roll back a value recovered by the earlier preparation.
+          const current = best.pre.documents.map(row => ({ volumes: row.volumes, review: [...(row.review ?? [])] }));
+          const filledBefore = current.filter(row => row.volumes).length;
+          const candidate = current.map((row, index) => {
             const reading = readings[index];
             const value = reading && /^\d{1,4}$/.test(reading.text) && Number(reading.text) > 0
               && reading.confidence >= (row.volumes ? 70 : 60) ? reading.text : row.volumes;
@@ -151,8 +154,8 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
           });
           const candidateSum = candidate.reduce((sum, row) => sum + Number(row.volumes || 0), 0);
           const distance = best.pre.totalVolumes ? Math.abs(best.pre.totalVolumes - candidateSum) : Number.POSITIVE_INFINITY;
-          const fillsMore = candidate.filter(row => row.volumes).length > best.pre.documents.filter(row => row.volumes).length;
-          if (distance < bestDistance || (!best.pre.totalVolumes && fillsMore)) {
+          const fillsMore = candidate.filter(row => row.volumes).length > filledBefore;
+          if (distance < bestDistance || (distance === bestDistance && fillsMore) || (!best.pre.totalVolumes && fillsMore)) {
             bestDistance = distance;
             candidate.forEach((value, index) => {
               const row = best.pre.documents[index]!;
