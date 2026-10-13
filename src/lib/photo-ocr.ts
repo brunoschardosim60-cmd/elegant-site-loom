@@ -83,10 +83,14 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
       const hasOtherHeading = words.some(word => /^(?:REMETENTE|NFSERIE|NF|VOLS?)$/.test(normalizeHeading(word)));
       const hasTableEvidence = hasCtcHeading && hasOtherHeading;
       const rowCountMatches = Boolean(candidate.pre.expectedRows && candidate.pre.documents.length === candidate.pre.expectedRows);
+      const rowCountMismatch = Boolean(candidate.pre.expectedRows && candidate.pre.documents.length !== candidate.pre.expectedRows);
       const rowsAreComplete = candidate.pre.documents.length > 0 && candidate.pre.documents.every(row => Boolean(row.nf && row.volumes));
+      const incompleteRows = candidate.pre.documents.some(row => !row.nf || !row.volumes);
       const volumeSum = candidate.pre.documents.reduce((sum, row) => sum + Number(row.volumes || 0), 0);
       const volumesMatch = !candidate.pre.totalVolumes || candidate.pre.totalVolumes === volumeSum;
-      if (!hasTableEvidence || (rowCountMatches && rowsAreComplete && volumesMatch)) break;
+      const totalMismatch = Boolean(candidate.pre.totalVolumes && !volumesMatch);
+      const needsMoreWork = hasTableEvidence || rowCountMismatch || totalMismatch || incompleteRows;
+      if (!needsMoreWork || (rowCountMatches && rowsAreComplete && volumesMatch)) break;
     } catch { active(); /* Keep a partial result available for manual review. */ }
   }
   if (!successful) throw new Error('Não foi possível processar a foto.');
