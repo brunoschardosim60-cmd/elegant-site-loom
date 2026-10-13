@@ -73,7 +73,20 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
       const candidate = { page: data, pre: parsePhotoFields(data), confidence: data.confidence, angle, source };
       const score = (pre: PhotoFields) => photoScore(pre) + (pre.expectedRows && pre.documents.length === pre.expectedRows ? 100 : 0);
       if (best.source !== source || score(candidate.pre) > score(best.pre) || (score(candidate.pre) === score(best.pre) && candidate.confidence > best.confidence)) best = candidate;
-      if ((candidate.pre.documents.length || candidate.pre.ctcs.length) && (!candidate.pre.expectedRows || candidate.pre.documents.length === candidate.pre.expectedRows)) break;
+      // Do not stop just because we found one valid CTC. On real manifests the
+      // first segmentation can miss lower rows or volume cells, especially on mobile.
+      // If a table is visible, compare both page-segmentation modes unless the printed
+      // row count, required row fields, and volume total already agree.
+      const words = pageWords(data);
+      const normalizeHeading = (word: OcrWord) => word.text.toUpperCase().replace(/[^A-Z]/g, '');
+      const hasCtcHeading = words.some(word => /^CTCS?$/.test(normalizeHeading(word)));
+      const hasOtherHeading = words.some(word => /^(?:REMETENTE|NFSERIE|NF|VOLS?)$/.test(normalizeHeading(word)));
+      const hasTableEvidence = hasCtcHeading && hasOtherHeading;
+      const rowCountMatches = Boolean(candidate.pre.expectedRows && candidate.pre.documents.length === candidate.pre.expectedRows);
+      const rowsAreComplete = candidate.pre.documents.length > 0 && candidate.pre.documents.every(row => Boolean(row.nf && row.volumes));
+      const volumeSum = candidate.pre.documents.reduce((sum, row) => sum + Number(row.volumes || 0), 0);
+      const volumesMatch = !candidate.pre.totalVolumes || candidate.pre.totalVolumes === volumeSum;
+      if (!hasTableEvidence || (rowCountMatches && rowsAreComplete && volumesMatch)) break;
     } catch { active(); /* Keep a partial result available for manual review. */ }
   }
   if (!successful) throw new Error('Não foi possível processar a foto.');
