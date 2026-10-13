@@ -81,6 +81,14 @@ describe('Photo table extraction', () => {
     expect(fields.plate).toBe('ABC1D23');
     expect(fields.driver).toBe('JOSE SILVA');
   });
+  it('flags a low-confidence but well-formed CTC for row-level review', () => {
+    const fields = parsePhotoFields(page([
+      word('CTC', 100, 200), word('NF-Série', 400, 200, 90), word('Vols.', 600, 200),
+      { ...word('5602298260', 100, 240, 100), confidence: 48 },
+      word('12345-1', 400, 240, 80), word('8', 610, 240, 20),
+    ]));
+    expect(fields.documents).toMatchObject([{ ctc: '5602298260', review: expect.arrayContaining(['CTC']) }]);
+  });
   it('retains uncertain readings and marks them for review', () => {
     const fields = parsePhotoFields(page([word('CTC', 100, 200), word('NF-Série', 400, 200, 90), word('Vols.', 600, 200), word('1234567890', 100, 240, 100), { ...word('12345-1', 400, 240, 80), confidence: 30 }, { ...word('8', 610, 240, 20), confidence: 40 }]));
     expect(fields.documents).toMatchObject([{ ctc: '1234567890', nf: '12345-1', volumes: '8', review: expect.arrayContaining(['NF', 'volumes']) }]);
