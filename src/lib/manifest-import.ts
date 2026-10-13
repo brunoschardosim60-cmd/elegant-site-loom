@@ -59,9 +59,13 @@ export function findImportConflicts(existing: Manifest[], drafts: ImportDraft[])
     if (other) push('manifest', owner, other, `Esta foto está repetida no lote no ${ownerLabel(other)}.`);
   }
   for (const [ctc, owners] of ctcs) for (const owner of owners) {
-    for (const reference of savedCtcs.get(ctc) ?? []) push('ctc', owner, reference, `CTC ${ctc} já está cadastrado no ${ownerLabel(reference)}.`);
-    const other = owners.find(candidate => candidate !== owner);
-    if (other) push('ctc', owner, other, `CTC ${ctc} repetido no ${ownerLabel(other)}${other.index === owner.index ? '' : ' do lote'}.`);
+    // Multiple NF rows may legitimately share one CTC inside the same pre.
+    // Only report repeated CTCs when they belong to different manifests/drafts.
+    for (const reference of savedCtcs.get(ctc) ?? []) {
+      if (normalizedId(reference.id) !== owner.id) push('ctc', owner, reference, `CTC ${ctc} já está cadastrado no ${ownerLabel(reference)}.`);
+    }
+    const other = owners.find(candidate => candidate.index !== owner.index);
+    if (other) push('ctc', owner, other, `CTC ${ctc} repetido no ${ownerLabel(other)} do lote.`);
   }
   return [...new Map(conflicts.map(conflict => [JSON.stringify(conflict), conflict])).values()];
 }
@@ -87,17 +91,31 @@ export function applyImports(existing: Manifest[], drafts: ImportDraft[], now: s
     const issueDate = !target ? normalizeIssueDate(draft.issueDate ?? '') : undefined;
     if (!target && draft.issueDate?.trim() && !issueDate) return fail('Confira a data de emissão do pré.');
     if (!draft.rows.length) return fail('Inclua pelo menos um CTC.');
-    const identifiers = new Set(target?.documents.map(d => d.ctc));
-    const registeredCtcs = new Set(manifests.flatMap(manifest => manifest.documents.map(document => document.ctc)));
-    const docs: DocumentItem[] = [];
+    const registeredCtcs = new Set(manifests
+      .filter(manifest => normalizedId(manifest.id) !== normalizedId(id))
+      .flatMap(manifest => manifest.documents.map(document => document.ctc)));
+    const grouped = new Map<string, { rows: ManifestDraftRow[]; firstRow: number }>();
     for (const [row, item] of draft.rows.entries()) {
       const reading = parseReading(item.ctc);
       if (reading.kind !== 'ctc') return fail('Confira o CTC de 10 dígitos.', row);
       if (!Number.isInteger(Number(item.volumes)) || Number(item.volumes) < 1) return fail('Confira a quantidade de volumes (inteiro maior que zero).', row);
-      if (registeredCtcs.has(reading.number) || identifiers.has(reading.number)) return fail(conflicts.find(conflict => conflict.kind === 'ctc' && conflict.row === row)?.message ?? `CTC ${reading.number} repetido no ${ownerLabel({ id, driver: target?.driver ?? draft.driver })}.`, row);
-      identifiers.add(reading.number);
-      docs.push({ id: `${id}-${reading.number}`, ctc: reading.number, nf: item.nf.trim() || '—', client: item.client?.trim() || '', recipient: item.recipient?.trim() || '', volumes: Number(item.volumes), received: false });
+      if (registeredCtcs.has(reading.number)) return fail(conflicts.find(conflict => conflict.kind === 'ctc' && conflict.row === row)?.message ?? `CTC ${reading.number} já está cadastrado em outro pré.`, row);
+      const group = grouped.get(reading.number) ?? { rows: [], firstRow: row };
+      group.rows.push(item);
+      grouped.set(reading.number, group);
     }
+    const docs: DocumentItem[] = [...grouped.entries()].map(([ctc, group]) => {
+      const unique = (field: 'nf' | 'client' | 'recipient') => [...new Set(group.rows.map(item => item[field]?.trim() ?? '').filter(Boolean))];
+      return {
+        id: `${id}-${ctc}`,
+        ctc,
+        nf: unique('nf').join(', ') || '—',
+        client: unique('client').join(' / '),
+        recipient: unique('recipient').join(' / '),
+        volumes: group.rows.reduce((sum, item) => sum + Number(item.volumes), 0),
+        received: false,
+      };
+    });
     if (target) manifests = manifests.map(m => m.id === id ? { ...m, documents: [...m.documents, ...docs], ...(sourcePhotoHash ? { sourcePhotoHashes: [...new Set([...(m.sourcePhotoHashes ?? []).map(hash => hash.toLowerCase()), sourcePhotoHash])] } : {}), finishedAt: undefined } : m);
     else manifests.push({ id, driver: draft.driver.trim(), plate: draft.plate.trim().toUpperCase(), date: now, ...(issueDate ? { issueDate } : {}), ...(sourcePhotoHash ? { sourcePhotoHashes: [sourcePhotoHash] } : {}), documents: docs });
   }
