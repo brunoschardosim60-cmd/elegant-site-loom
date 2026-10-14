@@ -19,7 +19,7 @@ export function preBarcodeRegions(page: OcrPage, width: number, height: number):
     const h = id.bbox.y1 - id.bbox.y0;
     // Code 39's bars can be almost twice as wide as the printed identifier.
     // Cropping to text width truncates the start/stop symbols and quiet zones.
-    const padding = Math.max(h * 2, (id.bbox.x1 - id.bbox.x0) * .65);
+    const padding = Math.max(h * 2, id.bbox.x1 - id.bbox.x0);
     return [{ x0: Math.max(0, id.bbox.x0 - padding), x1: Math.min(width, id.bbox.x1 + padding),
       y0: Math.max(0, id.bbox.y0 - h * 6), y1: Math.min(height, id.bbox.y0 + h * .1) }];
   }

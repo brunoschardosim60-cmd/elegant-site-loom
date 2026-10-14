@@ -43,7 +43,7 @@ export async function readPhotosWithFallback(files: File[], onResult: OnResult, 
   // Keep one local verification at a time on phones; desktop already limits
   // the whole import to two active photos. No workers start for waiting files.
   const mobile = typeof navigator !== 'undefined' && (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || 'deviceMemory' in navigator && Number((navigator as Navigator & { deviceMemory?: number }).deviceMemory) <= 4);
-  const verifier = import('./photo-numeric-reader').then(module => module.createPhotoNumericVerifier(mobile ? 1 : 2));
+  const verifier = import('./photo-numeric-reader').then(module => module.createPhotoNumericVerifier(mobile || files.length === 1 ? 1 : 2));
   void verifier.catch(() => {});
   const numericCheck = async (file: File, angle: PhotoAngle, checkSignal: AbortSignal, pre?: PhotoFields) => {
     const reader = await verifier;

@@ -832,6 +832,14 @@ it('keeps the first AI data if numeric verification fails, and flags the missing
   expect(receive.mock.calls[0]![1].pre.documents[0]!.nf).toBe('101-1');
   expect(receive.mock.calls[0]![1].pre.headerReview).toContain('A conferência local dos números não terminou. Confira CTCs, NFs e volumes na foto.');
 });
+it('keeps unread local cells highlighted without consuming an automatic extra AI request', async () => {
+  const data = responses(1, 0, false); if (!data.full.ok) return; data.full.pre.issueDate = '2026-10-14';
+  const receive = vi.fn();
+  const run = readAiPhotos([photo('local-unread.jpg')], receive, undefined, undefined, { orientations: [0], selective: true, numericCheck: async () => ({ pre: { ...data.full.pre, documents: [] }, confirmed: [], milliseconds: 2000 }) });
+  (await pendingCall('local-unread.jpg', 'full')).pending.resolve(data.full); await run;
+  expect(calls).toHaveLength(1);
+  expect(receive.mock.calls[0]![1].pre.documents[0]!.review.join(' ')).toContain('sem confirmação local');
+});
 
 it('cancels a stalled numeric verifier without late results and releases the photo bitmap', async () => {
   const receive = vi.fn(), started = vi.fn(), controller = new AbortController();

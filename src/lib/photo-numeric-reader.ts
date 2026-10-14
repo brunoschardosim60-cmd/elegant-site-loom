@@ -145,9 +145,7 @@ export function createPhotoNumericVerifier(size: 1 | 2) {
   const released = new Set<Worker>();
   const disposeWorker = async (worker: Worker) => { if (!released.has(worker)) { released.add(worker); await worker.terminate().catch(() => {}); } };
   const start = () => {
-    const pending = createWorker('por', 1, { logger: message => {
-      if (message.progress === 0 || message.progress === 1) console.debug(`numeric_ocr_progress ${message.status} ${message.progress}`);
-    } });
+    const pending = createWorker('por');
     void pending.then(worker => { if (closed) void disposeWorker(worker); }).catch(() => {});
     return pending;
   };

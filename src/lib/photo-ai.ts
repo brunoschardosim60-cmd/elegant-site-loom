@@ -186,7 +186,14 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
         }
         if (!options.singlePass && needsPhotoVerification(pre)) {
           if (!providerBlocks.verify) progress('Conferindo campos sinalizados em uma segunda leitura…');
-          const plan = options.selective ? photoRepairPlan(pre) : null;
+          // An unread local cell is a review notice, not evidence that the AI
+          // is wrong. Reserve automatic extra requests for actual differences;
+          // manual rereading still includes every selected uncertainty.
+          const selection = options.initialRead ? pre : { ...pre,
+            headerReview: (pre.headerReview ?? []).filter(note => !/não confirmou todas as linhas|recuperado do código de barras/.test(note)),
+            documents: pre.documents.map(row => ({ ...row, review: (row.review ?? []).filter(note => !/sem confirmação local|corrigido por duas leituras locais/.test(note)) })),
+          };
+          const plan = options.selective ? photoRepairPlan(selection) : null;
           if (plan === null || plan.headers.length || plan.rows.length) {
             options.onProvisional?.(index, pre);
             if (numbers?.uprightImage) checkImage = await createImageBitmap(numbers.uprightImage);
