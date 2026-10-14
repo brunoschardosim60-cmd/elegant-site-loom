@@ -69,6 +69,8 @@ export class TeamSync {
   private stopped = false;
   private failure = '';
   private collision = false;
+  private refreshRetryAt = 0;
+  private refreshFailures = 0;
   constructor(private team: ConferenceTeam, private rpc: Rpc, private publish: (view: TeamSyncView) => void) { this.base = team.data; this.local = team.data; }
   private emit() {
     if (!this.stopped) this.publish({ team: this.team, state: this.local, status: this.failure ? this.pending() ? 'Alterações ainda não salvas' : 'Sincronização interrompida' : this.busy && this.pending() ? 'Salvando…' : 'Todos os dados salvos', error: this.failure, conflict: this.collision, pending: this.pending() });
@@ -76,10 +78,13 @@ export class TeamSync {
   pending() { return !equal(this.local, this.base); }
   stop() { this.stopped = true; }
   change(state: ConferenceState) { if (this.stopped) return; this.local = conferenceStateSchema.parse(state); this.emit(); void this.flush(); }
-  retry() { this.failure = ''; this.collision = false; this.emit(); if (this.pending()) void this.flush(); else void this.refresh(); }
-  private fail(error: unknown) {
+  retry() { this.failure = ''; this.collision = false; this.refreshRetryAt = 0; this.refreshFailures = 0; this.emit(); if (this.pending()) void this.flush(); else void this.refresh(); }
+  private fail(error: unknown, refreshing = false) {
     const message = String((error as { message?: string })?.message ?? error);
     this.collision = /CONFERENCE_CONFLICT|CONFERENCE_DUPLICATE/.test(message);
+    // Read failures can recover automatically. A failed save or an actual
+    // conflict still requires explicit action, preserving the local edits.
+    this.refreshRetryAt = refreshing && !this.collision ? Date.now() + Math.min(60000, 5000 * 2 ** Math.min(this.refreshFailures++, 4)) : 0;
     this.failure = /CONFERENCE_DUPLICATE/.test(message) ? 'Outra pessoa já cadastrou esse pré, CTC ou foto. Nenhuma duplicata foi salva. Gere o PDF se precisar guardar as alterações locais e recarregue os dados.' : this.collision ? 'O mesmo campo foi alterado por outra pessoa ou o registro foi excluído. Gere o PDF para guardar as alterações locais antes de recarregar.' : 'Não foi possível sincronizar. Mantenha esta página aberta e tente novamente.';
   }
   async flush() {
@@ -100,8 +105,9 @@ export class TeamSync {
     finally { this.busy = false; this.emit(); }
   }
   async refresh(force = false) {
-    if (this.stopped || this.busy || this.failure) return;
+    if (this.stopped || this.busy || (this.failure && (this.collision || !this.refreshRetryAt || (!force && Date.now() < this.refreshRetryAt)))) return;
     this.busy = true;
+    let succeeded = false;
     try {
       if (!force) {
         const version = await this.rpc('get_conference_revision', {});
@@ -109,7 +115,7 @@ export class TeamSync {
         if (version.error) throw version.error;
         const stamp = z.object({ teamId: z.string().uuid(), revision: z.number().int().nonnegative() }).parse(version.data);
         if (stamp.teamId !== this.team.teamId) throw new Error('CONFERENCE_CONFLICT');
-        if (stamp.revision === this.team.revision) return;
+        if (stamp.revision === this.team.revision) { succeeded = true; return; }
       }
       const result = await this.rpc('get_conference_team', { accept_invitation: false });
       if (this.stopped) return;
@@ -118,7 +124,11 @@ export class TeamSync {
       if (fresh.teamId !== this.team.teamId) throw new Error('CONFERENCE_CONFLICT');
       if (fresh.revision !== this.team.revision) { this.local = mergeConference(this.base, this.local, fresh.data); this.base = fresh.data; }
       this.team = fresh;
-    } catch (error) { this.fail(error); }
-    finally { this.busy = false; this.emit(); if (!this.failure) void this.flush(); }
+      succeeded = true;
+    } catch (error) { this.fail(error, true); }
+    finally {
+      if (succeeded) { this.failure = ''; this.collision = false; this.refreshRetryAt = 0; this.refreshFailures = 0; }
+      this.busy = false; this.emit(); if (!this.failure) void this.flush();
+    }
   }
 }

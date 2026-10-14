@@ -58,3 +58,37 @@ it('classifies conflicting new records with the same ID as duplicates while acce
   const added = { ...base.manifests[0]!, id: 'DI00123456999' }; a.manifests.push(added); b.manifests.push({ ...added, driver: 'Outro' });
   expect(() => mergeConference(base, a, b)).toThrow('CONFERENCE_DUPLICATE'); expect(mergeConference(base, a, a).manifests).toEqual(a.manifests);
 });
+
+it('recovers a transient read failure after backoff even when the revision did not change', async () => {
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(100000);
+  try {
+    const rpc = vi.fn().mockResolvedValueOnce({ error: { message: 'network' } }).mockResolvedValue({ data: { teamId: team().teamId, revision: 1 }, error: null });
+    const publish = vi.fn(), sync = new TeamSync(team(), rpc, publish);
+    await sync.refresh(); expect(publish.mock.lastCall![0].status).toBe('Sincronização interrompida');
+    await sync.refresh(); expect(rpc).toHaveBeenCalledTimes(1);
+    clock.mockReturnValue(105000); await sync.refresh();
+    expect(publish.mock.lastCall![0]).toMatchObject({ error: '', pending: false, status: 'Todos os dados salvos' });
+    expect(rpc).toHaveBeenCalledTimes(2);
+  } finally { clock.mockRestore(); }
+});
+it('merges remote receipts before saving an edit made during an interrupted refresh', async () => {
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(100000);
+  try {
+    const base=state(), remote=receive(base,1), publish=vi.fn();
+    const rpc=vi.fn().mockResolvedValueOnce({error:{message:'network'}}).mockResolvedValueOnce({data:{teamId:team().teamId,revision:2},error:null}).mockResolvedValueOnce({data:team(remote,2),error:null}).mockImplementation(async(_name,args)=>({data:{revision:3,data:args.next_data},error:null}));
+    const sync=new TeamSync(team(base),rpc,publish);await sync.refresh();sync.change(receive(base,0));
+    expect(sync.pending()).toBe(true);expect(rpc).toHaveBeenCalledTimes(1);
+    clock.mockReturnValue(105000);await sync.refresh();await sync.flush();
+    expect(publish.mock.lastCall![0].state.manifests[0].documents.every((d:any)=>d.received)).toBe(true);
+    expect(rpc.mock.calls[3]![1].base_data).toEqual(remote);
+    expect(sync.pending()).toBe(false);
+  } finally { clock.mockRestore(); }
+});
+it('never auto-retries a failed save or a conflicting refresh', async () => {
+  const rpc=vi.fn().mockResolvedValue({error:{message:'network'}}),publish=vi.fn(),sync=new TeamSync(team(),rpc,publish);
+  sync.change(receive(state(),0));await vi.waitFor(()=>expect(publish.mock.lastCall![0].error).toBeTruthy());await sync.refresh(true);
+  expect(rpc).toHaveBeenCalledTimes(1);expect(sync.pending()).toBe(true);
+  rpc.mockResolvedValue({data:{...team(),teamId:'00000000-0000-4000-8000-000000000002'},error:null});
+  const other=new TeamSync(team(),rpc,publish);await other.refresh(true);const count=rpc.mock.calls.length;await other.refresh(true);
+  expect(rpc).toHaveBeenCalledTimes(count);expect(publish.mock.lastCall![0].conflict).toBe(true);
+});
