@@ -17,6 +17,16 @@ beforeEach(() => { vi.clearAllMocks(); worker.recognize.mockReset(); worker.reco
 afterEach(() => vi.unstubAllGlobals());
 
 describe('Numeric photo evidence', () => {
+  it('reads an already upright JPEG directly without preparing several resized page images', async () => {
+    worker.recognize.mockReset(); worker.recognize.mockResolvedValue(page());
+    const file = new File(['image'], 'pre.jpg');
+    const first = page().data;
+    const ai = (await import('@/lib/photo-fields')).parsePhotoFields(first);
+    const result = await readPhotoNumbers(file, 270, undefined, undefined, ai);
+    expect(result.uprightImage).toBe(file); expect(result.pre.documents).toHaveLength(2);
+    expect(worker.recognize).toHaveBeenCalledOnce();
+    expect(createImageBitmap).not.toHaveBeenCalled();
+  });
   it('reuses one worker and serializes local reads on a phone, then releases it at batch end', async () => {
     worker.recognize.mockReset(); worker.recognize.mockResolvedValue(page());
     const verifier = createPhotoNumericVerifier(1), signal = new AbortController().signal;

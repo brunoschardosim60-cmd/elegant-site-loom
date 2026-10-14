@@ -148,6 +148,7 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
       const deadline = AbortSignal.timeout(35000);
       const photoSignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
       let image: ImageBitmap | undefined;
+      let checkImage: ImageBitmap | undefined;
       let completedPhoto: PhotoFields | undefined;
       const progress = (message: string) => { if (!photoSignal.aborted) onProgress?.(index, message); };
       try {
@@ -188,7 +189,8 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
           const plan = options.selective ? photoRepairPlan(pre) : null;
           if (plan === null || plan.headers.length || plan.rows.length) {
             options.onProvisional?.(index, pre);
-            const check = providerBlocks.verify ?? await providerAwareRequest({ data: { ...photoPayload(image, numbers?.angle ?? (orientation + full.rotation) % 360, full.pre.kind === 'pre'), accessToken, mode: plan ? 'repair' : 'verify', ...(plan ? { repairPlan: plan } : {}) }, signal: photoSignal });
+            if (numbers?.uprightImage) checkImage = await createImageBitmap(numbers.uprightImage);
+            const check = providerBlocks.verify ?? await providerAwareRequest({ data: { ...photoPayload(checkImage ?? image, checkImage ? 0 : numbers?.angle ?? (orientation + full.rotation) % 360, full.pre.kind === 'pre'), accessToken, mode: plan ? 'repair' : 'verify', ...(plan ? { repairPlan: plan } : {}) }, signal: photoSignal });
             if (photoSignal.aborted) throw new Error('Leitura interrompida.');
             pre = plan ? applyPhotoRepair(pre, plan, check.ok ? check.repair : null) : reconcilePhotoRead(pre, check.ok ? check.check : null);
             // A later model answer cannot undo the independent numeric evidence.
@@ -206,6 +208,7 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
           } else onResult(index, { error: deadline.aborted ? 'Esta foto excedeu o tempo de leitura. Tente novamente só ela ou envie um recorte mais próximo.' : error instanceof Error && ['Não foi possível abrir a imagem.', 'Foto muito grande. Recorte o documento e tente novamente.'].includes(error.message) ? error.message : 'Não foi possível concluir a leitura por IA desta foto. A leitura local pode ser usada.' });
         }
       } finally {
+        checkImage?.close();
         image?.close();
         // Resolve every waiting slot once, with its original index. Already
         // running workers retain their own result and can finish normally.
