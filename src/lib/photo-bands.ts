@@ -50,16 +50,16 @@ export function photoBandPayload(image: ImageBitmap, rotation: PhotoAngle, signa
   return { data, bands, mimeType: 'image/jpeg' as const };
 }
 
-const rejected = (pre: PhotoFields) => ({ ...pre, headerReview: [...new Set([...(pre.headerReview ?? []), 'A leitura por faixas não confirmou a tabela e os totais. Dados anteriores preservados; confira as linhas na foto.'])] });
+const rejected = (pre: PhotoFields, candidate: PhotoFields) => ({ ...pre, headerReview: [...new Set([...(pre.headerReview ?? []), `A leitura por faixas não confirmou a tabela e os totais (${new Set(candidate.documents.map(row => row.ctc).filter(Boolean)).size} CTCs, ${candidate.documents.length} NFs, ${candidate.documents.reduce((sum, row) => sum + Number(row.volumes || 0), 0)} volumes). Dados anteriores preservados; confira as linhas na foto.`])], verification: { status: 'review' as const, checkedFields: 0, conflicts: 1 } });
 
 /** Totals are an admission check, not proof of individual cell accuracy.
  * Never append an extra model row or align tables by their array positions.
  */
 export function applyBandRead(pre: PhotoFields, candidate: PhotoFields): PhotoFields {
-  if (candidate.kind !== 'pre' || !candidate.documents.length || needsBandReading(candidate)) return rejected(pre);
-  if (candidate.documents.some(row => !/^\d{10}$/.test(row.ctc) || !/^\d{1,9}-\d{1,3}$/.test(row.nf) || !/^[1-9]\d{0,5}$/.test(row.volumes))) return rejected(pre);
+  if (candidate.kind !== 'pre' || !candidate.documents.length || needsBandReading(candidate)) return rejected(pre, candidate);
+  if (candidate.documents.some(row => !/^\d{10}$/.test(row.ctc) || !/^\d{1,9}-\d{1,3}$/.test(row.nf) || !/^[1-9]\d{0,5}$/.test(row.volumes))) return rejected(pre, candidate);
   const headers = ['expectedRows', 'expectedNfs', 'totalVolumes'] as const;
-  if (headers.some(field => !candidate[field] || pre[field] && pre[field] !== candidate[field])) return rejected(pre);
+  if (headers.some(field => !candidate[field] || pre[field] && pre[field] !== candidate[field])) return rejected(pre, candidate);
   const result = structuredClone(candidate);
   if (pre.aiReader) result.aiReader = pre.aiReader;
   if (pre.imageRotation !== undefined) result.imageRotation = pre.imageRotation;

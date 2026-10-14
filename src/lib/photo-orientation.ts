@@ -15,6 +15,7 @@ export async function detectPhotoOrientations(
   files: File[],
   onProgress: (index: number, message: string) => void = () => {},
   signal?: AbortSignal,
+  onConfirmed?: (index: number, angle: PhotoAngle) => void,
 ): Promise<PhotoAngle[]> {
   const angles: PhotoAngle[] = files.map(() => 0);
   if (!files.length || signal?.aborted) return angles;
@@ -66,7 +67,7 @@ export async function detectPhotoOrientations(
           if (thumbnail === file) continue; // Decoder/canvas fallback is the full photo, not a thumbnail.
           const reading = await bounded(worker.recognize(thumbnail));
           if (stopped || !reading) break;
-          if (hasUprightPhotoHeading(reading.data.text)) { angles[index] = angle; break; }
+          if (hasUprightPhotoHeading(reading.data.text)) { angles[index] = angle; onConfirmed?.(index, angle); break; }
         } catch { /* Another thumbnail angle can still be readable. */ }
       }
     }

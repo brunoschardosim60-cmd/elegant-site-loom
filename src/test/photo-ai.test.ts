@@ -852,7 +852,8 @@ it('cancels a stalled numeric verifier without late results and releases the pho
 });
 
 it('uses one full-width strip request for a structural gap, without also running whole-page verification', async () => {
-  const data = responses(1, 270, false); if (!data.full.ok) return;
+  const data = responses(1, 90, false); if (!data.full.ok) return;
+  mocks.orient.mockImplementationOnce(async (_files: File[], _progress: unknown, _signal: unknown, confirmed: (index: number, angle: number) => void) => { confirmed(0, 270); return [270]; });
   data.full.pre.expectedNfs = 2; data.full.pre.totalVolumes = 4;
   const fixed = structuredClone(data.full);
   if (!fixed.ok) return;

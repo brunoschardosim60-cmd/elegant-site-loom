@@ -173,6 +173,14 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
         const bandsRequested = !options.singlePass && needsBandReading(pre) && (!options.initialRead || options.initialRead.imageRotation !== undefined);
         if (bandsRequested) {
           options.onProvisional?.(index, pre);
+          progress('Confirmando a posição da tabela antes de separar as faixas…');
+          // Model rotation can be 90/270 reversed. Confirm only the printed
+          // heading on small local thumbnails, without a full local table read.
+          let confirmedAngle: PhotoAngle | undefined;
+          const { detectPhotoOrientations } = await import('./photo-orientation');
+          await detectPhotoOrientations([file], (_index, message) => progress(message), photoSignal, (_index, angle) => { confirmedAngle = angle; });
+          photoSignal.throwIfAborted();
+          if (confirmedAngle !== undefined) pre = { ...pre, imageRotation: confirmedAngle };
           progress('Relendo a tabela em faixas ampliadas, sem misturar as linhas…');
           const bandRead = await providerAwareRequest({ data: { ...photoBandPayload(image, pre.imageRotation ?? 0, photoSignal), accessToken, mode: 'full-lite' }, signal: photoSignal });
           photoSignal.throwIfAborted();
