@@ -1,5 +1,5 @@
 import { createWorker, PSM, type Worker } from 'tesseract.js';
-import { clean, mergeCtcPages, parsePhotoFields, photoScore, pageWords, tableCellRegions, tableCtcRepairRegions, tableSummaryRegions, type OcrPage, type PhotoFields, type OcrWord } from './photo-fields';
+import { clean, mergeCtcPages, reconcileDocuments, parsePhotoFields, photoScore, pageWords, tableCellRegions, tableCtcRepairRegions, tableSummaryRegions, type OcrPage, type PhotoFields, type OcrWord } from './photo-fields';
 import { buildDigitTemplates, matchPrintedNumber, type GrayImage } from './printed-digits';
 import { recoverNfSeparator } from './ocr-numeric';
 import { prepareForOcr, preparePrintedField, prepareNumericMontage, readGrayImage } from './image-prep';
@@ -292,7 +292,7 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
       } else best.pre.headerReview = [...(best.pre.headerReview ?? []), 'Número do pré não confirmado no recorte. Confira na foto.'];
     } catch { active(); /* Keep the full-page ID for review. */ }
   }
-  return { text: best.page.text.trim(), pre: best.pre, milliseconds: Math.round(performance.now() - started), angle: best.angle };
+  return { text: best.page.text.trim(), pre: reconcileDocuments(best.pre), milliseconds: Math.round(performance.now() - started), angle: best.angle };
 }
 
 /** One language download and worker initialization for the entire batch. */
@@ -389,7 +389,7 @@ export async function readPrePhotos(files: File[], onResult: (index: number, res
         );
         if (readSignal.aborted) return;
         if (result.pre.kind === 'pre') preferred = result.angle;
-        emit(index, { ...result, pre: markLocalPhoto(result.pre) });
+        emit(index, { ...result, pre: markLocalPhoto(reconcileDocuments(result.pre)) });
       } catch {
         if (readSignal.aborted) return;
         emit(index, { error: 'Não foi possível ler esta foto. Tente outra foto ou preencha os dados.' });
@@ -412,6 +412,6 @@ export async function readPrePhotos(files: File[], onResult: (index: number, res
 /** Read a single photo with a dedicated worker. */
 export async function readPrePhoto(file: File, progress: (message: string) => void = () => {}, detailed = false) {
   const worker = await createWorker('por');
-  try { const result = await readWithWorker(worker, file, progress, undefined, detailed); return { ...result, pre: markLocalPhoto(result.pre) }; }
+  try { const result = await readWithWorker(worker, file, progress, undefined, detailed); return { ...result, pre: markLocalPhoto(reconcileDocuments(result.pre)) }; }
   finally { await worker.terminate().catch(() => {}); }
 }
