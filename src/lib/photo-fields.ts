@@ -363,3 +363,33 @@ function parseDacte(fields: PhotoFields, words: OcrWord[], text: string): PhotoF
 }
 
 export const photoScore = (pre: PhotoFields) => Number(!!pre.id) * 4 + Number(!!pre.plate) * 2 + Number(!!pre.driver) + Math.min(Math.max(pre.ctcs.length, pre.documents.length), 30) * 3 + pre.documents.reduce((sum, row) => sum + Number(!!row.nf) + Number(!!row.volumes) + Number(!!row.client), 0);
+
+/**
+ * Table-wide consistency pass using only values printed on the same photo:
+ * - NF read without its hyphen gets the series used by every other row
+ *   (e.g. "722251" -> "72225-1") and stays flagged for review.
+ * - When exactly one volume is unreadable, the header total minus the other
+ *   rows gives its value; flagged for review, never applied otherwise.
+ */
+export function reconcileDocuments(pre: PhotoFields): PhotoFields {
+  const docs = pre.documents.map(row => ({ ...row, review: [...(row.review ?? [])] }));
+  const series = docs.map(row => row.nf.match(/^\d{3,9}-(\d{1,3})$/)?.[1]).filter(Boolean) as string[];
+  const common = series.length >= 3 && series.every(s => s === series[0]) ? series[0]! : '';
+  for (const row of docs) {
+    if (common && /^\d{4,12}$/.test(row.nf) && row.nf.endsWith(common) && row.nf.length - common.length >= 3) {
+      row.nf = `${row.nf.slice(0, -common.length)}-${common}`;
+      if (!row.review.includes('NF')) row.review.push('NF');
+    }
+  }
+  const missing = docs.filter(row => !/^\d+$/.test(row.volumes));
+  if (pre.totalVolumes && missing.length === 1) {
+    const rest = docs.reduce((sum, row) => sum + (Number(row.volumes) || 0), 0);
+    const value = pre.totalVolumes - rest;
+    if (value > 0 && value < 10000) {
+      missing[0]!.volumes = String(value);
+      missing[0]!.review = missing[0]!.review.filter(r => !/^Volumes não/.test(r));
+      missing[0]!.review.push(`Volumes calculados pelo total do cabeçalho (${pre.totalVolumes}). Confira na foto.`);
+    }
+  }
+  return { ...pre, documents: docs };
+}
