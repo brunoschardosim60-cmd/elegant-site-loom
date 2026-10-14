@@ -13,6 +13,22 @@ it('keeps legitimate repeated CTCs with different NFs and does not reread a comp
   const duplicate = pre(); duplicate.documents.push(duplicate.documents[0]!); expect(needsBandReading(duplicate)).toBe(true);
 });
 
+it('uses strips when most rows are uncertain even if compensating errors keep all totals equal', () => {
+  const page = pre(); page.documents = Array.from({ length: 6 }, (_, index) => ({ ...row(String(index).padStart(10, '0'), `${100 + index}-1`), review: index < 3 ? ['Confira destinatário'] : [] }));
+  page.expectedRows = 6; page.expectedNfs = 6; page.totalVolumes = 6;
+  expect(needsBandReading(page)).toBe(true);
+  expect(applyBandRead(page, structuredClone(page)).tableRecovery).toBe('bands');
+  page.documents[2]!.review = []; expect(needsBandReading(page)).toBe(false);
+});
+
+it('accepts a single B/8 name glyph from the detailed strip while retaining its explicit review', () => {
+  const first = pre(); first.documents[0]!.client = 'LABORATORIO B';
+  const second = pre(); second.documents[0]!.client = 'LABORATORIO 8';
+  const result = applyBandRead(first, second);
+  expect(result.documents[0]!.client).toBe('LABORATORIO 8');
+  expect(result.documents[0]!.review).toEqual(expect.arrayContaining([expect.stringContaining('Cliente divergente entre leituras')]));
+});
+
 it('recovers a missing physical row without merging by array position or rewriting confirmed names', () => {
   const first = pre(); first.documents.splice(1, 1); first.imageRotation = 270;
   const independent = pre(); independent.documents[0]!.client = 'LABORATORIO INVENTADO';

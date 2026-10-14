@@ -36,6 +36,12 @@ it('sends the whole page and ordered strips in a single authenticated provider r
 
 const deepseekResponse = (photo = parsedPhoto) => new Response(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(photo) } }] }));
 
+it('accepts an orientation-only DeepSeek response without demanding table fields', async () => {
+  vi.stubEnv('DEEPSEEK_API_KEY', `synthetic-deepseek-angle-${user}`); vi.stubEnv('PHOTO_OCR_PROVIDER', 'deepseek');
+  mocks.fetch.mockResolvedValue(new Response(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ kind: 'pre', clockwiseRotation: 270 }) } }] })));
+  expect(await readPhotoWithGemini({ data: { ...input.data, mode: 'survey', orientationOnly: true } })).toMatchObject({ ok: true, rotation: 270, pre: { documents: [], aiReader: 'deepseek' } });
+});
+
 it('uses DeepSeek only after explicit server activation and keeps the session token out of its request', async () => {
   vi.stubEnv('DEEPSEEK_API_KEY', `synthetic-deepseek-${user}`); vi.stubEnv('PHOTO_OCR_PROVIDER', 'deepseek');
   mocks.fetch.mockResolvedValue(deepseekResponse());

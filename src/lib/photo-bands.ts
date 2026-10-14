@@ -1,8 +1,7 @@
 import type { PhotoFields } from './photo-fields';
 import type { PhotoAngle } from './photo-orientation';
 
-/** A structural error needs an independent table reading, not row-index repair. */
-export function needsBandReading(pre: PhotoFields): boolean {
+function tableStructureMismatch(pre: PhotoFields): boolean {
   if (pre.kind !== 'pre' || !pre.documents.length) return false;
   const identities = pre.documents.map(row => JSON.stringify([row.ctc, row.nf]));
   return pre.documents.some(row => !/^\d{10}$/.test(row.ctc))
@@ -10,6 +9,11 @@ export function needsBandReading(pre: PhotoFields): boolean {
     || !!pre.expectedRows && new Set(pre.documents.map(row => row.ctc)).size !== pre.expectedRows
     || !!pre.expectedNfs && pre.documents.length !== pre.expectedNfs
     || !!pre.totalVolumes && pre.documents.reduce((sum, row) => sum + Number(row.volumes || 0), 0) !== pre.totalVolumes;
+}
+
+/** Structural gaps or widespread uncertainty need an independent table reading. */
+export function needsBandReading(pre: PhotoFields): boolean {
+  return tableStructureMismatch(pre) || pre.kind === 'pre' && pre.documents.length >= 5 && pre.documents.filter(row => row.review?.length).length >= Math.max(3, Math.ceil(pre.documents.length / 2));
 }
 
 /** Preserve the entire width, so CTC, NF and volume stay on the same scanline.
@@ -56,7 +60,7 @@ const rejected = (pre: PhotoFields, candidate: PhotoFields) => ({ ...pre, header
  * Never append an extra model row or align tables by their array positions.
  */
 export function applyBandRead(pre: PhotoFields, candidate: PhotoFields): PhotoFields {
-  if (candidate.kind !== 'pre' || !candidate.documents.length || needsBandReading(candidate)) return rejected(pre, candidate);
+  if (candidate.kind !== 'pre' || !candidate.documents.length || tableStructureMismatch(candidate)) return rejected(pre, candidate);
   if (candidate.documents.some(row => !/^\d{10}$/.test(row.ctc) || !/^\d{1,9}-\d{1,3}$/.test(row.nf) || !/^[1-9]\d{0,5}$/.test(row.volumes))) return rejected(pre, candidate);
   const headers = ['expectedRows', 'expectedNfs', 'totalVolumes'] as const;
   if (headers.some(field => !candidate[field] || pre[field] && pre[field] !== candidate[field])) return rejected(pre, candidate);
@@ -71,10 +75,18 @@ export function applyBandRead(pre: PhotoFields, candidate: PhotoFields): PhotoFi
     const literalName = (value: string | undefined) => (value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]/g, '');
     const nameNotes = old ? (['client', 'recipient'] as const).filter(field => old[field] && row[field] && literalName(old[field]) !== literalName(row[field]))
       .map(field => `${field === 'client' ? 'Cliente' : 'Destinatário'} divergente entre leituras: ${old[field]} / ${row[field]}. Confira na foto.`) : [];
+    const nameValue = (field: 'client' | 'recipient') => {
+      const before = old?.[field] ?? '', after = row[field] ?? '';
+      const a = literalName(before), b = literalName(after);
+      // A single glyph may improve in a native-resolution strip (B/8, I/1).
+      // Larger name changes remain suggestions; never expand an abbreviation.
+      const singleGlyph = a.length === b.length && [...a].filter((char, index) => char !== b[index]).length === 1;
+      return !before || singleGlyph ? after : before;
+    };
     if (old && old.volumes === row.volumes) {
       // Keep literal names from the first reading; matching totals cannot
       // authorize an unrelated name rewrite during numeric recovery.
-      return { ...row, client: old.client || row.client || '', recipient: old.recipient || row.recipient || '',
+      return { ...row, client: nameValue('client'), recipient: nameValue('recipient'),
         review: [...new Set([...(row.review ?? []), ...nameNotes, ...(old.review ?? []).filter(note => !/Cabeçalho informa|Confira a soma|segunda leitura|Volumes divergente|NF e série divergente/i.test(note))])] };
     }
     changed++;

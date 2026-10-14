@@ -61,6 +61,7 @@ export function normalizeGeminiPhoto(value: unknown): PhotoFields {
   const headerReview: string[] = [];
   if (data.kind === 'pre' && data.issueDate?.trim() && !issueDate) headerReview.push('Confira a data de emissão do pré.');
   if (data.kind === 'pre' && data.plate.toUpperCase().replace(/[^A-Z0-9]/g, '') !== plate) headerReview.push('Placa ajustada por formato. Confira letras e números.');
+  if (data.kind === 'pre' && /^[A-Z]{3}\d[A-Z0-9]\d{2}$/.test(plate) && /[O0I1LB8]/.test(plate[4]!)) headerReview.push('Placa: confira o quinto caractere na foto; letras e números parecidos são válidos nessa posição.');
   if (data.kind === 'pre' && !/^[A-Z]{3}\d[A-Z0-9]\d{2}$/.test(plate)) warnings.push('Confira placa: possível confusão entre letra e número');
   if (data.kind === 'pre' && !/^DI\d{8,12}$/.test(data.id.trim().toUpperCase())) headerReview.push('Confira o número do pré.');
   if (data.kind === 'pre' && !data.driver.trim()) headerReview.push('Confira o motorista.');
