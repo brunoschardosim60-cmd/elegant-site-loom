@@ -1,10 +1,11 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import type { DocumentItem, Manifest } from './conference';
+import { activityTimestamp, matchesConferenceSearch } from './conference-display';
+import type { Manifest } from './conference';
 import { compareManifestDates, formatManifestDate, manifestAgeDays, manifestAgeLabel, normalizeIssueDate } from './manifest-date';
 import { selectTrackingRows, type TrackingStatus } from './ctc-tracking';
 
-type ReportIssue = { title: string; description: string; time: string };
+type ReportIssue = { title: string; description: string; time: string; at?: string | undefined };
 type ReportView = 'pending' | 'missing' | 'finished' | 'issues' | 'tracking';
 export type ConferencePdfInput = { manifests: Manifest[]; issues: ReportIssue[]; view: ReportView; query?: string; filter?: string; trackingStatus?: TrackingStatus; generatedAt?: Date };
 const labels: Record<ReportView, string> = { pending: 'Pré-manifestos em aberto', missing: 'CTCs pendentes', finished: 'Pré-manifestos finalizados', issues: 'Ocorrências da conferência', tracking: 'Rastreamento de CTCs' };
@@ -20,11 +21,10 @@ const date = (value: string | Date | undefined, withTime = false) => {
   if (Number.isNaN(parsed.getTime())) return '-';
   return new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', ...(withTime ? { hour: '2-digit', minute: '2-digit' } as const : {}) }).format(parsed);
 };
-const searchable = (manifest: Manifest, document?: DocumentItem) => `${manifest.id} ${manifest.driver} ${manifest.plate} ${(document ? [document] : manifest.documents).map(doc => `${doc.ctc} ${doc.nf} ${doc.client ?? ''} ${doc.recipient ?? ''}`).join(' ')}`.toLowerCase();
 
 /** Export the same scope as the active view, including its search and age filter. */
 export function selectConferenceReport(input: ConferencePdfInput) {
-  const query = (input.query ?? '').toLowerCase();
+  const query = input.query ?? '';
   const now = (input.generatedAt ?? new Date()).getTime();
   if (input.view === 'tracking') {
     const groups = new Map<string, Manifest>();
@@ -38,10 +38,10 @@ export function selectConferenceReport(input: ConferencePdfInput) {
     .filter(manifest => input.filter !== 'old' || manifestAgeDays(manifest, now) >= 2)
     .flatMap(manifest => {
       if (input.view === 'missing') {
-        const documents = manifest.documents.filter(doc => !doc.received && searchable(manifest, doc).includes(query));
+        const documents = manifest.documents.filter(doc => !doc.received && matchesConferenceSearch(manifest, query, doc));
         return documents.length ? [{ ...manifest, documents }] : [];
       }
-      return searchable(manifest).includes(query) ? [manifest] : [];
+      return matchesConferenceSearch(manifest, query) ? [manifest] : [];
     }).sort((a, b) => input.filter === 'new' ? compareManifestDates(b, a) : compareManifestDates(a, b));
   return { manifests, issues: input.view === 'issues' ? input.issues : [] };
 }
@@ -93,10 +93,10 @@ export function createConferencePdf(input: ConferencePdfInput) {
   if (input.view === 'issues') {
     if (selected.issues.length) {
       autoTable(pdf, { startY: cursor, margin: { left: margin, right: margin, top: 42, bottom: 22 },
-        head: [['Hora', 'Ocorrência', 'Detalhe']], body: selected.issues.map(issue => [field(issue.time), field(issue.title), field(issue.description)]),
+        head: [['Data / hora', 'Ocorrência', 'Detalhe']], body: selected.issues.map(issue => [field(activityTimestamp(issue)), field(issue.title), field(issue.description)]),
         styles: { font: 'helvetica', fontSize: 9, cellPadding: 3, textColor: ink, overflow: 'linebreak', lineColor: line, lineWidth: .1 },
         headStyles: { fillColor: blue, textColor: [255, 255, 255], fontStyle: 'bold' }, alternateRowStyles: { fillColor: [245, 248, 250] },
-        columnStyles: { 0: { cellWidth: 20 }, 1: { cellWidth: 65 } }, rowPageBreak: 'avoid',
+        columnStyles: { 0: { cellWidth: 40 }, 1: { cellWidth: 65 } }, rowPageBreak: 'avoid',
         willDrawPage: data => { if (data.pageNumber > 1) drawHeader(); },
       });
     } else text('Nenhuma ocorrência registrada.', margin, cursor + 8, 11, false, muted);

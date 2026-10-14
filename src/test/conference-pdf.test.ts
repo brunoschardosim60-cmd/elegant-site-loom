@@ -14,6 +14,19 @@ const manifests: Manifest[] = [
 const base = { manifests, issues: [{ title: 'CTC desconhecido', description: 'CTC 9999999999', time: '10:15' }], generatedAt: now };
 
 describe('PDF report scope', () => {
+  it('matches pasted and unaccented searches consistently across report views', () => {
+    for (const view of ['pending', 'missing', 'tracking'] as const) {
+      const report = selectConferenceReport({ ...base, view, query: '  laboratorio   a  ' });
+      expect(report.manifests.map(manifest => manifest.id)).toEqual(['DI00000000001']);
+    }
+  });
+  it('includes the true activity date and identifies undated legacy occurrences', () => {
+    const pdf = createConferencePdf({ ...base, view: 'issues', issues: [...base.issues, { title: 'CTC conferido', description: 'CTC 0000000001', time: '01:05', at: '2026-10-13T01:05:00Z' }] });
+    const text = pdf.internal.pages.flat().join('\n');
+    expect(text).toContain('12/10/2026, 22:05');
+    expect(text).toContain('data');
+    expect(text).toContain('registrada');
+  });
   it('exports only matching tracking CTCs across open and finalized prés', () => {
     const report = selectConferenceReport({ ...base, view: 'tracking', trackingStatus: 'received' });
     expect(report.manifests.flatMap(manifest => manifest.documents.map(doc => doc.ctc))).toEqual(['0000000002', '0000000004']);

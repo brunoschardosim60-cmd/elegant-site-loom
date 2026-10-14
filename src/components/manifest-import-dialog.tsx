@@ -46,7 +46,22 @@ export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, 
   const generation = useRef(0);
   const cancelCurrent = useRef<(() => void) | null>(null);
   const urls = useRef<string[]>([]);
-  useEffect(() => { let mounted = true; void photoReaderStatus().then(status => { if (mounted) { setAiAvailable(status.configured); setReader(status.configured ? 'ai' : 'local'); } }).catch(() => { if (mounted) setReader('local'); }); return () => { mounted = false; }; }, []);
+  useEffect(() => {
+    let active = true;
+    const abort = new AbortController();
+    const finish = (configured: boolean) => {
+      if (!active) return;
+      active = false;
+      window.clearTimeout(timer);
+      setAiAvailable(configured);
+      setReader(configured ? 'ai' : 'local');
+    };
+    // The availability check must never leave uploads disabled indefinitely.
+    // Ignore a late response so it cannot change the reader during an import.
+    const timer = window.setTimeout(() => { finish(false); abort.abort(); }, 5000);
+    void photoReaderStatus({ signal: abort.signal }).then(status => finish(status.configured)).catch(() => finish(false));
+    return () => { active = false; window.clearTimeout(timer); abort.abort(); };
+  }, []);
   useEffect(() => { if (open && !items.length) setItems([blank()]); }, [open, items.length]);
   useEffect(() => { if (open && initialId) { setItems(list => [...list.filter(item => item.status !== 'manual' || hasManualContent(item)), { ...blank(), id: initialId }]); setActive(items.length && items[0]?.id ? items.length : 0); setSelectedRow(0); } }, [open, initialId]);
   useEffect(() => () => { generation.current++; controller.current?.abort(); cancelCurrent.current = null; urls.current.forEach(url => URL.revokeObjectURL(url)); }, []);

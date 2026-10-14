@@ -141,3 +141,38 @@ it('saves an explicitly edited issue date through the existing snapshot and reta
   expect(screen.getByText('Emissão 27/08/2026')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Marcar CTC 0000000001 como recebido' })).toBeInTheDocument();
 });
+
+it('finds accented names with pasted whitespace in conference, pending and tracking views', () => {
+  const manifest = { ...initialState.manifests[0]!, driver: 'JOÃO  DA SILVA' };
+  render(<ConferenceWorkspace initialState={{ ...initialState, manifests: [manifest] }} />);
+  for (const view of ['Conferência', 'Pendências', 'Rastreamento']) {
+    fireEvent.click(screen.getByRole('button', { name: view }));
+    fireEvent.change(screen.getByRole('textbox', { name: view === 'Rastreamento' ? 'Buscar CTC no rastreamento' : 'Buscar pré-manifesto' }), { target: { value: '  joao   da silva  ' } });
+    expect(screen.getByRole('table')).toHaveTextContent('0000000001');
+  }
+});
+
+it('locates a scanned pré even when the age filter would hide it', () => {
+  const manifest = { ...initialState.manifests[0]!, issueDate: '2099-01-01' };
+  render(<ConferenceWorkspace initialState={{ ...initialState, manifests: [manifest] }} />);
+  fireEvent.change(screen.getByRole('combobox', { name: 'Filtrar pré-manifestos' }), { target: { value: 'old' } });
+  expect(screen.queryByRole('table')).not.toBeInTheDocument();
+  expect(screen.getByText('Nenhum resultado para essa busca ou filtro.')).toBeInTheDocument();
+  submitScan(manifest.id);
+  expect(screen.getByRole('combobox', { name: 'Filtrar pré-manifestos' })).toHaveValue('all');
+  expect(screen.getByRole('table')).toHaveTextContent('0000000001');
+});
+
+it('shows actual activity dates in Brasília and labels legacy timestamps without guessing their day', () => {
+  const activity = [
+    { id: 1, title: 'Documento conferido', description: 'MOTORISTA', time: '01:05', at: '2026-10-13T01:05:00Z' },
+    { id: 2, title: 'Ocorrência antiga', description: 'CTC', time: '10:15' },
+  ];
+  render(<ConferenceWorkspace initialState={{ ...initialState, activity, issues: activity }} />);
+  expect(screen.getByText('12/10/2026, 22:05')).toBeInTheDocument();
+  expect(screen.getByText('10:15 · data não registrada')).toBeInTheDocument();
+  expect(screen.queryByText('Hoje', { exact: true })).not.toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'Resumo dos cadastros' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Ocorrências' }));
+  expect(screen.getAllByText('12/10/2026, 22:05')).toHaveLength(2);
+});
