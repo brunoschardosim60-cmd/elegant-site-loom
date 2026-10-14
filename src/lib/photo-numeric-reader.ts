@@ -40,7 +40,13 @@ export async function readPhotoNumbers(file: File, angle: PhotoAngle, signal?: A
     // The model's rotation is a hint. Confirm it cheaply before spending time
     // reading a sideways full-resolution table (including misleading EXIF).
     const orientationStarted = performance.now();
-    for (const candidate of [...new Set([angle, (angle + 180) % 360, (angle + 90) % 360, (angle + 270) % 360])] as PhotoAngle[]) {
+    const dimensions = await Promise.race([createImageBitmap(file), aborted]);
+    const portrait = dimensions.height > dimensions.width; dimensions.close();
+    // Luft pré tables are wide. A portrait bitmap is often an EXIF-rotated
+    // landscape sheet; try a wide view before expensive sideways text OCR.
+    const candidates = [...new Set(portrait ? [270, 90, angle, 0, 180] : [angle, 0, 180, 270, 90])] as PhotoAngle[];
+    candidates.sort((a, b) => Number(portrait === (a === 0 || a === 180)) - Number(portrait === (b === 0 || b === 180)));
+    for (const candidate of candidates) {
       if (performance.now() - orientationStarted > 3000) break;
       const thumbnail = await Promise.race([prepareForOcr(file, candidate, 1400, signal), aborted]);
       const reading = await Promise.race([worker.recognize(thumbnail), aborted]);
@@ -126,7 +132,7 @@ export function createPhotoNumericVerifier(size: 1 | 2) {
   const disposeWorker = async (worker: Worker) => { if (!released.has(worker)) { released.add(worker); await worker.terminate().catch(() => {}); } };
   const start = () => {
     const pending = createWorker('por', 1, { logger: message => {
-      if (message.progress === 0 || message.progress === 1) console.debug('numeric_ocr_progress', { status: message.status, progress: message.progress });
+      if (message.progress === 0 || message.progress === 1) console.debug(`numeric_ocr_progress ${message.status} ${message.progress}`);
     } });
     void pending.then(worker => { if (closed) void disposeWorker(worker); }).catch(() => {});
     return pending;

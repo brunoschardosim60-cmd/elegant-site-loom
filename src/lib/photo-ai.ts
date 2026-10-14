@@ -177,7 +177,7 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
             numericSignal.throwIfAborted();
             pre = checkPhotoNumbers(pre, numbers);
           } catch (error) {
-            console.warn('numeric_ocr_failed', { type: error instanceof Error ? error.name : 'unknown', timedOut: numericSignal.aborted });
+            console.warn(`numeric_ocr_failed ${error instanceof Error ? error.name : 'unknown'} timeout=${numericSignal.aborted}`);
             photoSignal.throwIfAborted();
             pre = { ...pre, headerReview: [...(pre.headerReview ?? []), 'A conferência local dos números não terminou. Confira CTCs, NFs e volumes na foto.'] };
           }
