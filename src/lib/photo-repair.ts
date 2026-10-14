@@ -62,6 +62,8 @@ export function applyPhotoRepair(pre: PhotoFields, plan: RepairPlan, response: u
       if ((field === 'client' || field === 'recipient') && row[field]?.trim()) {
         const literal = (name: string) => text(name).replace(/[^a-z0-9]/g, '');
         const before = literal(row[field]!), after = literal(value);
+        // An independent reread must not silently reformat SA/S/A or punctuation.
+        if (before === after) { checked++; continue; }
         let prefix = 0; while (before[prefix] && before[prefix] === after[prefix]) prefix++;
         let suffix = 0; while (suffix < Math.min(before.length, after.length) - prefix && before[before.length - suffix - 1] === after[after.length - suffix - 1]) suffix++;
         if (Math.max(before.length, after.length) - prefix - suffix > 2) {

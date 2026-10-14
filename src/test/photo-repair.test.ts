@@ -41,3 +41,8 @@ it('rejects the expanded business name observed in the live rereading test', () 
   response.rows[0]!.recipient = 'DIMED SA DISTRIBUI';
   expect(applyPhotoRepair(pre, plan, response).documents[1]!.recipient).toBe('DIMED SA DISTRIBUI');
 });
+it('keeps literal punctuation when the reread only reformats S/A into SA', () => {
+  const pre = sample(); pre.documents[1]!.recipient = 'DIMED S/A DISTRIBU'; pre.documents[1]!.review = ['Confira destinatário'];
+  const response = patch(); response.rows[0]!.recipient = 'DIMED SA DISTRIBU';
+  expect(applyPhotoRepair(pre, photoRepairPlan(pre)!, response).documents[1]!.recipient).toBe('DIMED S/A DISTRIBU');
+});
