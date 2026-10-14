@@ -577,7 +577,8 @@ it('locks only the draft being reread during delayed fingerprint preparation and
   expect(screen.getByLabelText('NF-série')).toHaveValue('13-1');
   expect(screen.getByLabelText('Motorista')).toHaveValue('MOTORISTA CONFERIDO');
   expect(screen.getByLabelText('NF-série')).not.toBeDisabled();
-  fireEvent.click(screen.getByRole('button', { name: 'Revisar arquivo 1: DI00000000002' }));
+  expect(screen.getByRole('button', { name: 'Revisar arquivo 1: DI00000000001' })).toHaveAttribute('aria-pressed', 'true');
+  fireEvent.click(screen.getByRole('button', { name: 'Revisar arquivo 2: DI00000000002' }));
   expect(screen.getByLabelText('NF-série')).toHaveValue('23-1');
 });
 
