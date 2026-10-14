@@ -44,7 +44,22 @@ function table(page: OcrPage) {
   const height = header.bbox.y1 - header.bbox.y0;
   const headings = words.filter(w => Math.abs(cy(w) - cy(header!)) < height * 1.8).sort((a, b) => cx(a) - cx(b));
   const find = (pattern: RegExp) => headings.find(w => pattern.test(clean(w.text)));
-  const anchors = { ctc: header, client: find(/^REMETENTE$/), recipient: find(/^DESTINATARIO$/), nf: find(/^NFSERIE$|^NF$/), volumes: find(/^VOLS/), species: find(/^ESPECIE$/), nature: find(/^NATUREZA$/), order: find(/^PEDIDO$|^NPEDIDO$/), check: find(/^CHK/) };
+  const anchors = { ctc: header, client: find(/^REMETENTE$/), recipient: find(/^DESTINATARIO$/), nf: find(/^NFSERIE$|^NF$/), volumes: find(/^VOLS?$/), species: find(/^ESPECIE$/), nature: find(/^NATUREZA$/), order: find(/^PEDIDO$|^NPEDIDO$/), check: find(/^CHK/) };
+  const labels = Object.values(anchors).filter((word): word is OcrWord => !!word);
+  const labelHeight = median(labels.map(word => word.bbox.y1 - word.bbox.y0));
+  const normalLabels = labels.filter(word => word.bbox.y1 - word.bbox.y0 >= labelHeight * .6 && word.bbox.y1 - word.bbox.y0 <= labelHeight * 1.6);
+  const slopes = normalLabels.flatMap((a, i) => normalLabels.slice(i + 1).filter(b => Math.abs(cx(a) - cx(b)) > labelHeight * 3).map(b => (cy(b) - cy(a)) / (cx(b) - cx(a))));
+  if (slopes.length) {
+    const slope = median(slopes), intercept = median(normalLabels.map(word => cy(word) - slope * cx(word)));
+    for (const field of Object.keys(anchors) as (keyof typeof anchors)[]) {
+      const word = anchors[field];
+      if (!word || word.bbox.y1 - word.bbox.y0 <= labelHeight * 1.6) continue;
+      // OCR can include a vertical rule in a label's box. Project the heading
+      // from its neighbouring printed labels; never project a body row by index.
+      const y = intercept + slope * cx(word);
+      anchors[field] = { ...word, bbox: { ...word.bbox, y0: y - labelHeight / 2, y1: y + labelHeight / 2 } };
+    }
+  }
   const sorted = Object.values(anchors).filter((w): w is OcrWord => !!w).sort((a, b) => cx(a) - cx(b));
   const body = words.filter(w => !/^OBSERVA/i.test(w.text));
   const rowWords: OcrWord[] = body.filter(w => w.bbox.y0 > header!.bbox.y1 && /^[A-Z0-9|]{9,11}[.,;:]?$/i.test(w.text) && /\d.*\d/.test(w.text) && w.bbox.x0 < (sender?.bbox.x0 ?? header!.bbox.x1 + height * 6) && Math.abs(cx(w) - cx(header!)) < height * 9).sort((a, b) => cy(a) - cy(b));

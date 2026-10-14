@@ -31,6 +31,15 @@ it('reads the original pré date from the labelled header rather than delivery r
   expect(parsePhotoFields({ text: 'DACTE\nDATA DE EMISSÃO 28/08/2026\nID: 1234567890' })).not.toHaveProperty('issueDate');
 });
 describe('Photo table extraction', () => {
+  it('keeps volumes on their physical rows when OCR includes a rule in the Vol header box', () => {
+    const vol = { ...word('Vol:', 600, 140), bbox: { x0: 600, x1: 650, y0: 140, y1: 220 } };
+    const fields = parsePhotoFields(page([
+      word('CTC', 100, 200), word('Remetente', 250, 200), word('NF-Série', 400, 200, 90), vol,
+      word('0000000001', 100, 240, 100), word('12345-1', 400, 238, 80), word('184', 610, 235, 30),
+      word('0000000002', 100, 290, 100), word('23456-1', 400, 288, 80), word('121', 610, 285, 30),
+    ]));
+    expect(fields.documents.map(row => [row.ctc, row.nf, row.volumes])).toEqual([['0000000001', '12345-1', '184'], ['0000000002', '23456-1', '121']]);
+  });
   it('recovers complementary missing CTC rows from two segmentation modes without shifting NFs', () => {
     const headers=[word('CTC',100,200),word('Remetente',250,200),word('NF-Série',400,200,90),word('Vols.',600,200)];
     const first=page([...headers,word('0000000001',100,240,100),word('0000000003',100,340,100),

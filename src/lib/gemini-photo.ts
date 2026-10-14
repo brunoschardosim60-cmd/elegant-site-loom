@@ -74,6 +74,6 @@ export function normalizeGeminiPhoto(value: unknown): PhotoFields {
   if (data.totalVolumes && documents.reduce((sum, d) => sum + Number(d.volumes), 0) !== data.totalVolumes) warnings.push(`Confira a soma: cabeçalho informa ${data.totalVolumes} volumes`);
   if (data.expectedNfs && data.expectedNfs !== documents.length) warnings.push(`Cabeçalho informa ${data.expectedNfs} NFs; foram lidas ${documents.length} linhas`);
   documents.forEach(d => { d.review = [...(d.review ?? []), ...warnings]; });
-  const driver = data.kind === 'pre' ? data.driver.trim().replace(/\s+-\s*\d{1,8}$/, '').trim() : data.driver.trim();
+  const driver = data.kind === 'pre' ? data.driver.trim().replace(/\s+-\s*(?:\d{1,8})?$/, '').trim() : data.driver.trim();
   return { kind: data.kind, readingSource: 'gemini', ...(issueDate ? { issueDate } : {}), id: /^DI\d{8,12}$/.test(data.id.trim().toUpperCase()) ? data.id.trim().toUpperCase() : '', plate, rawPlate: data.plate, driver, expectedRows: data.expectedRows, ...(data.expectedNfs ? { expectedNfs: data.expectedNfs } : {}), totalVolumes: data.totalVolumes, headerReview: [...headerReview, ...warnings], ctcs, documents };
 }

@@ -98,7 +98,7 @@ export async function readPhotoNumbers(file: File, angle: PhotoAngle, signal?: A
         const row = pre.documents[region.row]!;
         const candidates = ai.documents.filter(other => other.ctc === row.ctc && (ai.documents.filter(item => item.ctc === row.ctc).length === 1 && pre.documents.filter(item => item.ctc === row.ctc).length === 1 || other.nf.replace('-', '') === row.nf.replace('-', '')));
         if (region.field === 'ctc') return !ai.documents.some(other => other.ctc === row.ctc);
-        return candidates.length === 1 && !!row[region.field] && row[region.field].replace('-', '') !== candidates[0]![region.field].replace('-', '');
+        return candidates.length === 1 && row[region.field].replace('-', '') !== candidates[0]![region.field].replace('-', '');
       }).slice(0, 180);
       const summary = tableSummaryRegions(data).filter(region => !confirmedHeaders[region.field as keyof typeof confirmedHeaders]).map(region => ({ ...region, row: -1 }));
       const remaining = [...regions, ...summary];
@@ -124,6 +124,7 @@ export async function readPhotoNumbers(file: File, angle: PhotoAngle, signal?: A
           const valid = region.field === 'ctc' ? /^\d{10}$/ : region.field === 'nf' ? /^\d{1,9}-\d{1,3}$/ : /^[1-9]\d{0,5}$/;
           const sameDigits = region.field === 'nf' && /^\d{3,12}$/.test(row?.nf ?? '') && row?.nf === reading?.text.replace('-', '');
           if (row && reading && reading.confidence >= 85 && valid.test(reading.text) && (row[region.field] === reading.text || sameDigits) && !row.review?.some(note => /recuper|calcul|infer|separador|série.*outras/i.test(note))) confirmed[region.row]![region.field] = reading.text;
+          else if (row && !row[region.field] && reading && reading.confidence >= 85 && valid.test(reading.text)) row[region.field] = reading.text;
         });
       }
     }

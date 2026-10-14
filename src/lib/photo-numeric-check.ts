@@ -45,7 +45,7 @@ export function checkPhotoNumbers(ai: PhotoFields, local: NumericPhotoRead): Pho
       if (ai.documents.filter(sameAnchor).length === 1) candidates = localRows.map((source, i) => ({ source, i })).filter(({ source }) => sameAnchor(source));
     }
     if (candidates.length !== 1 || claimed.has(candidates[0]!.i)) {
-      row.review.push('CTC / NF sem confirmação local única. Confira esta linha na foto.');
+      row.review.push('CTC / NF / volumes sem confirmação local única. Confira esta linha na foto.');
       continue;
     }
     const { source, i } = candidates[0]!;
@@ -58,7 +58,10 @@ export function checkPhotoNumbers(ai: PhotoFields, local: NumericPhotoRead): Pho
         row.review.push(`NF-série: dígitos diferentes na conferência local (${before} / ${raw}, separador ilegível). Confira a NF e a série na foto.`);
         conflicts++;
       }
-      if (!valid.test(value)) continue;
+      if (!valid.test(value)) {
+        row.review.push(`${field === 'ctc' ? 'CTC' : field === 'nf' ? 'NF-série' : 'Volumes'} sem confirmação local. Confira este campo na foto.`);
+        continue;
+      }
       checked++;
       if (before === value) continue;
       const label = field === 'ctc' ? 'CTC' : field === 'nf' ? 'NF-série' : 'Volumes';

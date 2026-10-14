@@ -4,6 +4,9 @@ import { normalizeGeminiPhoto } from '@/lib/gemini-photo';
 const example = () => ({ kind: 'pre', id: 'DI00123456789', plate: 'ABC1D23', driver: 'MOTORISTA TESTE', expectedRows: 11, totalVolumes: 66,
   documents: Array.from({ length: 11 }, (_, i) => ({ ctc: String(i + 1).padStart(10, '0'), nf: `${100 + i}-1`, volumes: String(i + 1), client: `LAB ${i}`, recipient: `CLIENTE ${i}`, review: [] })),
 });
+it('removes the driver code separator when the model drops its digits', () => {
+  expect(normalizeGeminiPhoto({ ...example(), driver: 'ANA-MARIA SILVA - ' }).driver).toBe('ANA-MARIA SILVA');
+});
 it('retains all eleven rows, leading zeroes, NF, volumes and laboratories', () => {
   const pre = normalizeGeminiPhoto(example());
   expect(pre.readingSource).toBe('gemini');
