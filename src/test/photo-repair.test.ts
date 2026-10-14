@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest';
 import { photoRepairPlan, applyPhotoRepair } from '@/lib/photo-repair';
 import type { PhotoFields } from '@/lib/photo-fields';
+import { flagPhotoNameVariants } from '@/lib/photo-name-review';
 const sample = (): PhotoFields => ({ kind: 'pre', id: 'DI00601869631', plate: 'TRB7E25', driver: 'DAVID VARGAS FERNANDES', issueDate: '2026-10-13', expectedRows: 1, totalVolumes: 7, ctcs: ['5602298260'], documents: [{ ctc: '5602298260', nf: '762458-1', volumes: '1', client: 'ASTRAZENECA', recipient: 'VICTORIA' }, { ctc: '5602298260', nf: '762461-1', volumes: '6', client: 'ASTRAZENECA', recipient: 'VICTORIA', review: ['Confira volumes'] }] });
 const patch = (nf = '762461-1') => ({ header: {}, rows: [{ index: 1, ctc: '5602298260', nf, volumes: '7', client: 'NOME INVENTADO', recipient: 'OUTRO' }] });
 it('selects only flagged fields, treating multi-NF CTCs as legitimate rows', () => {
@@ -25,4 +26,11 @@ it('checks all volume cells on a sum mismatch and uses full verification for mis
   const pre = sample(); pre.totalVolumes = 98;
   expect(photoRepairPlan(pre)!.rows.every(row => row.fields.includes('volumes'))).toBe(true);
   pre.documents[0]!.ctc = ''; expect(photoRepairPlan(pre)).toBeNull();
+});
+it('uses actual abbreviated-name variations as uncertainty without guessing a missing letter', () => {
+  const rows = ['DIMED SA DISTRIBU', 'DIMED S/A - DISTRI', 'DIMED SA DISTRIB D'].map((recipient, index) => ({ ctc: `000000000${index}`, nf: '123-1', volumes: '1', recipient }));
+  const flagged = flagPhotoNameVariants(rows);
+  expect(flagged.map(row => row.recipient)).toEqual(rows.map(row => row.recipient));
+  expect(flagged.every(row => row.review!.some(note => note.startsWith('Destinatário')))).toBe(true);
+  expect(flagPhotoNameVariants([{ ...rows[0]!, recipient: 'UNIMED' }, { ...rows[1]!, recipient: 'FLEURY' }]).every(row => !row.review!.length)).toBe(true);
 });

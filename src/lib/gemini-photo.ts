@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { PhotoFields } from './photo-fields';
 import { normalizeIssueDate } from './manifest-date';
+import { flagPhotoNameVariants } from './photo-name-review';
 
 const text = z.string().max(200);
 export const documentSchema = z.object({
@@ -37,7 +38,7 @@ export function normalizePlate(raw: string): string {
 
 export function normalizeGeminiPhoto(value: unknown): PhotoFields {
   const data = documentSchema.parse(value);
-  const documents = data.documents.map(row => {
+  const documents = flagPhotoNameVariants(data.documents.map(row => {
     const review = [...row.review];
     const ctc = row.ctc.trim(); const volumes = row.volumes.trim();
     // Some literal transcriptions include the adjacent Pedido in the NF field.
@@ -53,7 +54,7 @@ export function normalizeGeminiPhoto(value: unknown): PhotoFields {
     if (!row.client.trim()) review.push('Confira cliente/laboratório');
     if (!row.recipient.trim()) review.push('Confira destinatário');
     return { ...row, nf, ctc: /^\d{10}$/.test(ctc) ? ctc : '', volumes: validVolumes ? volumes : '', review };
-  });
+  }));
   const warnings: string[] = [];
   const plate = normalizePlate(data.plate);
   const issueDate = data.kind === 'pre' ? normalizeIssueDate(data.issueDate ?? '') : undefined;
