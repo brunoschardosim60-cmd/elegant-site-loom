@@ -14,6 +14,17 @@ const manifests: Manifest[] = [
 const base = { manifests, issues: [{ title: 'CTC desconhecido', description: 'CTC 9999999999', time: '10:15' }], generatedAt: now };
 
 describe('PDF report scope', () => {
+  it('exports only matching tracking CTCs across open and finalized prés', () => {
+    const report = selectConferenceReport({ ...base, view: 'tracking', trackingStatus: 'received' });
+    expect(report.manifests.flatMap(manifest => manifest.documents.map(doc => doc.ctc))).toEqual(['0000000002', '0000000004']);
+    expect(selectConferenceReport({ ...base, view: 'tracking', query: '104-1' }).manifests.flatMap(manifest => manifest.documents.map(doc => doc.ctc))).toEqual(['0000000004']);
+    expect(manifests[0]!.documents).toHaveLength(2);
+    const pdf = createConferencePdf({ ...base, view: 'tracking', trackingStatus: 'received' });
+    expect(pdf.getNumberOfPages()).toBe(1);
+    const text = pdf.internal.pages.flat().join('\n');
+    expect(text).toContain('0000000002'); expect(text).toContain('0000000004');
+    expect(text).not.toContain('(0000000001) Tj'); expect(text).not.toContain('(0000000003) Tj');
+  });
   it('exports open prés in screen order, retaining all rows of a matching pré', () => {
     const report = selectConferenceReport({ ...base, view: 'pending', query: '101-1' });
     expect(report.manifests.map(item => item.id)).toEqual(['DI00000000001']);

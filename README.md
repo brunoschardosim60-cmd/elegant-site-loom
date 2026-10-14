@@ -23,6 +23,8 @@ O botão discreto **Histórico** de cada pré e a aba **Equipe → Histórico de
 
 O diagnóstico do leitor em **Equipe** testa os modelos normal e Lite de cada chave configurada usando uma pequena solicitação de texto, sem fotos nem cadastro. Só o responsável pelo serviço pode executá-lo, com pausa de cinco minutos. Retorna somente disponibilidade/cota/acesso/faturamento, sem credenciais ou respostas brutas. Uma chave reserva técnica não aumenta a cota do mesmo projeto.
 
+**Rastreamento** consulta os CTCs dos prés abertos e finalizados, com busca, filtro de status, data/hora da conferência em Brasília e PDF da seleção. Uma busca de dez dígitos corresponde ao CTC exato, preservando zeros. A tela exibe até 50 registros por página; a busca e o PDF abrangem todos os registros selecionados. Consultar não marca documentos como recebidos. Registros antigos sem `receivedAt` mostram “Horário não registrado”.
+
 ## Leitura e revisão
 
 - O PDF usa A4 na horizontal, agrupa os prés por motorista e mostra placa, CTC, NF, volumes, cliente/laboratório, destinatário e situação. Respeita a tela, a busca e o filtro selecionados; tabelas longas repetem os cabeçalhos, com numeração de páginas e horário de Brasília. A exportação CSV e a análise manual de divergências por IA foram removidas.

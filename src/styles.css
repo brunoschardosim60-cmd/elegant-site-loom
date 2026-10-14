@@ -745,3 +745,39 @@ h1 { font-size: 28px; font-weight: 750; line-height: 1.3; }
 .import-provider-details summary { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 .import-document-totals span[data-mismatch="true"] strong { color: var(--warning); }
 .import-document-totals small { display: block; margin-top: 4px; color: var(--warning); font-size: 9px; }
+
+/* Saved CTC consultation, with a bounded visible page. */
+.content-grid.content-grid-tracking { grid-template-columns: minmax(0, 1fr); }
+.content-grid-tracking > .activity-panel { display: none; }
+.tracking-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.tracking-tools label { display: flex; align-items: center; gap: 10px; font-size: 11px; }
+.tracking-tools p { font-size: 11px; text-align: right; }
+.tracking-tools p span { display: block; color: var(--muted-foreground); font-size: 10px; margin-top: 4px; }
+.tracking-table-wrap { overflow-x: auto; }
+.tracking-table { min-width: 720px; }
+.tracking-table th, .tracking-table td { padding: 13px 16px; vertical-align: top; }
+.tracking-table td:first-child { width: 28%; overflow-wrap: anywhere; }
+.tracking-table td:nth-child(2) { width: 27%; overflow-wrap: anywhere; }
+.tracking-table td:last-child { padding-left: 16px; text-align: left; }
+.tracking-table .ctc-number { font-size: 12px; }
+.tracking-table .received-row .ctc-number { color: var(--foreground); }
+.tracking-detail { display: block; font-family: var(--font-sans); font-size: 10px; font-weight: 400; color: var(--muted-foreground); line-height: 1.6; margin-top: 4px; }
+.tracking-table time { font-size: 11px; font-variant-numeric: tabular-nums; }
+.tracking-pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 16px; font-size: 11px; }
+.tracking-pagination > span:first-child { margin-right: auto; color: var(--muted-foreground); }
+@media (max-width: 760px) {
+  .tracking-tools { align-items: flex-start; }
+  .tracking-tools p { text-align: left; }
+  .tracking-table-wrap { overflow: visible; border: 0; background: transparent; box-shadow: none; }
+  .tracking-table { display: block; min-width: 0; }
+  .tracking-table thead { display: none; }
+  .tracking-table tbody { display: grid; gap: 12px; }
+  .tracking-table tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 16px; border: 1px solid var(--border); border-left: 3px solid var(--warning); border-radius: 10px; background: var(--card); }
+  .tracking-table tr.received-row { border-left-color: var(--success); }
+  .tracking-table td, .tracking-table td:last-child { display: block; padding: 0; border: 0; min-width: 0; width: auto; }
+  .tracking-table td[data-label]::before { content: attr(data-label); display: block; margin-bottom: 5px; font-size: 10px; font-weight: 400; font-family: var(--font-sans); color: var(--muted-foreground); }
+  .tracking-table td:first-child, .tracking-table td:nth-child(2), .tracking-table td:nth-child(5) { grid-column: 1 / -1; width: auto; box-shadow: none !important; }
+  .tracking-table .ctc-number { font-size: 14px; }
+  .tracking-detail, .tracking-table time { font-size: 12px; }
+  .tracking-pagination > span:first-child { flex-basis: 100%; }
+}

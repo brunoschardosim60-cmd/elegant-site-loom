@@ -2,11 +2,12 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { DocumentItem, Manifest } from './conference';
 import { compareManifestDates, formatManifestDate, manifestAgeDays, manifestAgeLabel, normalizeIssueDate } from './manifest-date';
+import { selectTrackingRows, type TrackingStatus } from './ctc-tracking';
 
 type ReportIssue = { title: string; description: string; time: string };
-type ReportView = 'pending' | 'missing' | 'finished' | 'issues';
-export type ConferencePdfInput = { manifests: Manifest[]; issues: ReportIssue[]; view: ReportView; query?: string; filter?: string; generatedAt?: Date };
-const labels: Record<ReportView, string> = { pending: 'Pré-manifestos em aberto', missing: 'CTCs pendentes', finished: 'Pré-manifestos finalizados', issues: 'Ocorrências da conferência' };
+type ReportView = 'pending' | 'missing' | 'finished' | 'issues' | 'tracking';
+export type ConferencePdfInput = { manifests: Manifest[]; issues: ReportIssue[]; view: ReportView; query?: string; filter?: string; trackingStatus?: TrackingStatus; generatedAt?: Date };
+const labels: Record<ReportView, string> = { pending: 'Pré-manifestos em aberto', missing: 'CTCs pendentes', finished: 'Pré-manifestos finalizados', issues: 'Ocorrências da conferência', tracking: 'Rastreamento de CTCs' };
 const ink: [number, number, number] = [23, 43, 64];
 const blue: [number, number, number] = [0, 73, 124];
 const muted: [number, number, number] = [92, 107, 120];
@@ -25,6 +26,14 @@ const searchable = (manifest: Manifest, document?: DocumentItem) => `${manifest.
 export function selectConferenceReport(input: ConferencePdfInput) {
   const query = (input.query ?? '').toLowerCase();
   const now = (input.generatedAt ?? new Date()).getTime();
+  if (input.view === 'tracking') {
+    const groups = new Map<string, Manifest>();
+    for (const { manifest, doc } of selectTrackingRows(input.manifests, { query: input.query ?? '', filter: input.filter ?? 'all', status: input.trackingStatus ?? 'all', now })) {
+      const group = groups.get(manifest.id) ?? { ...manifest, documents: [] };
+      group.documents.push(doc); groups.set(manifest.id, group);
+    }
+    return { manifests: [...groups.values()], issues: [] };
+  }
   const manifests = input.view === 'issues' ? [] : input.manifests.filter(manifest => input.view === 'finished' ? Boolean(manifest.finishedAt) : !manifest.finishedAt)
     .filter(manifest => input.filter !== 'old' || manifestAgeDays(manifest, now) >= 2)
     .flatMap(manifest => {
@@ -74,7 +83,7 @@ export function createConferencePdf(input: ConferencePdfInput) {
     text(label!, x + 4, cursor + 4, 7.5, true, muted); text(value!, x + 4, cursor + 14, 17, true, blue);
   });
   cursor += 25;
-  const filters = [input.view !== 'issues' && clean(input.query) ? `Busca: ${clean(input.query)}` : '', input.view !== 'issues' && input.filter === 'old' ? 'Há 2 dias ou mais pela emissão; sem emissão, pelo cadastro' : ''].filter(Boolean).join(' | ');
+  const filters = [input.view !== 'issues' && clean(input.query) ? `Busca: ${clean(input.query)}` : '', input.view !== 'issues' && input.filter === 'old' ? 'Há 2 dias ou mais pela emissão; sem emissão, pelo cadastro' : '', input.view === 'tracking' && input.trackingStatus && input.trackingStatus !== 'all' ? `Status: ${input.trackingStatus === 'received' ? 'Conferidos' : 'Pendentes'}` : ''].filter(Boolean).join(' | ');
   if (filters) {
     pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8);
     const lines = pdf.splitTextToSize(filters, available);
@@ -152,6 +161,6 @@ export function createConferencePdf(input: ConferencePdfInput) {
 
 export async function exportConferencePdf(input: ConferencePdfInput) {
   const generatedAt = input.generatedAt ?? new Date();
-  const filename = `confere-${input.view === 'pending' ? 'abertos' : input.view === 'missing' ? 'pendencias' : input.view === 'finished' ? 'finalizados' : 'ocorrencias'}-${new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(generatedAt)}.pdf`;
+  const filename = `confere-${input.view === 'pending' ? 'abertos' : input.view === 'missing' ? 'pendencias' : input.view === 'finished' ? 'finalizados' : input.view === 'tracking' ? 'rastreamento' : 'ocorrencias'}-${new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(generatedAt)}.pdf`;
   createConferencePdf({ ...input, generatedAt }).save(filename);
 }
