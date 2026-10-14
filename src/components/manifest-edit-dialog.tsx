@@ -12,7 +12,7 @@ export function ManifestEditDialog({ manifest, onClose, onSave }: { manifest: Ma
   const [error, setError] = useState('');
   const update = (patch: Partial<ImportDraft>) => { setError(''); setDraft(value => ({ ...value, ...patch, totalsReviewed: false })); };
   const totals = reviewManifestTotals(draft.rows, draft);
-  return <Dialog open onOpenChange={open => { if (!open) onClose(); }}><DialogContent className="max-w-3xl max-h-[90dvh] overflow-y-auto">
+  return <Dialog open onOpenChange={open => { if (!open) onClose(); }}><DialogContent className="manifest-edit-dialog max-w-3xl max-h-[90dvh] overflow-y-auto">
     <DialogHeader><DialogTitle>Editar pré-manifesto</DialogTitle><DialogDescription>Corrija os dados. As conferências, horários e o histórico são preservados. Para corrigir um CTC recebido, desfaça a conferência primeiro.</DialogDescription></DialogHeader>
     <form className="space-y-5" onSubmit={event => { event.preventDefault(); const result = onSave(manifest, draft); if (result.ok) onClose(); else { setError(result.error); setSelected(result.row ?? 0); } }}>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{(['id', 'issueDate', 'plate', 'driver'] as const).map((field, index) => <label className="form-field" key={field}>{['Número do pré', 'Data de emissão do pré', 'Placa', 'Motorista'][index]}<input aria-label={['Número do pré', 'Data de emissão do pré', 'Placa', 'Motorista'][index]} type={field === 'issueDate' ? 'date' : 'text'} required={field !== 'issueDate'} value={draft[field] ?? ''} onChange={event => update({ [field]: event.target.value })} /></label>)}</div>

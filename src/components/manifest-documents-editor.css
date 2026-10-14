@@ -9,4 +9,10 @@
 .import-dialog .form-field[data-conflict="true"] > input, .import-dialog .form-field[data-conflict="true"] > select, .import-ctc-editor .form-field[data-conflict="true"] > input { border-color: var(--destructive); background: color-mix(in oklch, var(--destructive) 5%, var(--card)); }
 .import-field-conflict { color: var(--destructive); }
 .import-manifest-fields { align-items: start; }
+.manifest-edit-dialog > *, .manifest-edit-dialog form { min-width: 0; }
+.manifest-edit-dialog .import-ctc-select select { width: 100%; min-width: 0; text-overflow: ellipsis; }
+.manifest-edit-dialog .import-ctc-navigation, .manifest-edit-dialog .import-ctc-arrows { flex-wrap: wrap; }
+.manifest-edit-dialog .import-client-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (min-width: 761px) { .manifest-edit-dialog .import-ctc-fields { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) 86px; } }
+@media (max-width: 760px) { .manifest-edit-dialog { padding: 20px 16px; } .manifest-edit-dialog .import-client-fields { grid-template-columns: minmax(0, 1fr); } .manifest-edit-dialog .import-ctc-select { flex-basis: 100%; } }
 @media (max-width: 760px) { .import-field-warning, .import-inline-review { font-size: 11px; } .import-ctc-fields .import-remove-ctc { margin-top: 25px; } }
