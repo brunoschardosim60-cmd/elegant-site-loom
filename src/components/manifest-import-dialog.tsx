@@ -151,7 +151,9 @@ export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, 
         setItems(list => list.flatMap(item => !keys.has(item.key) ? [item] : retained.has(item.key) ? [{ ...item, status: item.status === 'checking' ? 'read' as const : item.status }] : recoverable ? [preservePrevious(item)] : []));
       };
       const keep = currentItems.current.filter(item => item.key !== replaceKey && (item.status !== 'manual' || hasManualContent(item)));
-      setItems([...keep, ...additions]); setActive(keep.length);
+      const previousIndex = replaceKey ? currentItems.current.findIndex(item => item.key === replaceKey) : -1;
+      const position = previousIndex < 0 ? keep.length : currentItems.current.slice(0, previousIndex).filter(item => item.status !== 'manual' || hasManualContent(item)).length;
+      setItems([...keep.slice(0, position), ...additions, ...keep.slice(position)]); setActive(position);
       const readPrePhotos: typeof import('@/lib/photo-reader').readPhotosWithFallback = reader === 'ai' ? (await import('@/lib/photo-reader')).readPhotosWithFallback : (await import('@/lib/photo-ocr')).readPrePhotos;
       if (!isCurrent()) return;
       await readPrePhotos(files, (index, result: PhotoReadResult) => {
