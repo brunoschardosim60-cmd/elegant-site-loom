@@ -13,6 +13,15 @@ it('changes only a selected cell and keeps the adjustment visible for review', (
   expect(result.documents[0]).toEqual(pre.documents[0]); expect(pre.documents[1]!.volumes).toBe('6');
   expect(result.documents[1]!.review!.join(' ')).toContain('6 → 7');
 });
+it('does not replace a correct literal name with a different spelling from one additional AI answer', () => {
+  const pre = sample(), local = sample();
+  pre.documents[1]!.client = 'COLOPLAST DO BRASI'; local.documents[1]!.client = 'COLOPLAST DO BRAS!';
+  const response = patch(); response.rows[0]!.client = 'COROPLAST DO BRASI';
+  const plan = { headers: [], rows: [{ index: 1, ctc: pre.documents[1]!.ctc, nf: pre.documents[1]!.nf, fields: ['client' as const] }] };
+  const result = applyPhotoRepair(pre, plan, response, local);
+  expect(result.documents[1]!.client).toBe('COLOPLAST DO BRASI');
+  expect(result.documents[1]!.review?.join(' ')).toContain('não foi confirmado');
+});
 it('rejects an NF shifted within the same CTC, wrong CTC, ambiguous and invalid repairs', () => {
   const pre = sample(), plan = photoRepairPlan(pre)!;
   expect(applyPhotoRepair(pre, plan, patch('762458-1')).documents).toEqual(pre.documents);

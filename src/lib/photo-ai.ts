@@ -169,7 +169,7 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
         if (!full.ok) { if (!signal?.aborted) onResult(index, { error: normalFailure ? `${normalFailure} Flash Lite: ${full.error}` : full.error, ...('fallback' in full && full.fallback === false ? { fallback: false } : {}) }); continue; }
         let pre = completedPhoto!;
         let numbers: NumericPhotoRead | undefined;
-        if (options.numericCheck && pre.kind === 'pre' && !options.initialRead) {
+        if (options.numericCheck && pre.kind === 'pre') {
           options.onProvisional?.(index, pre);
           progress('Conferindo CTC, NF e volumes diretamente na tabela…');
           const numericSignal = AbortSignal.any([photoSignal, AbortSignal.timeout(9000)]);
@@ -199,7 +199,7 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
             if (numbers?.uprightImage) checkImage = await createImageBitmap(numbers.uprightImage);
             const check = providerBlocks.verify ?? await providerAwareRequest({ data: { ...photoPayload(checkImage ?? image, checkImage ? 0 : numbers?.angle ?? (orientation + full.rotation) % 360, full.pre.kind === 'pre'), accessToken, mode: plan ? 'repair' : 'verify', ...(plan ? { repairPlan: plan } : {}) }, signal: photoSignal });
             if (photoSignal.aborted) throw new Error('Leitura interrompida.');
-            pre = plan ? applyPhotoRepair(pre, plan, check.ok ? check.repair : null) : reconcilePhotoRead(pre, check.ok ? check.check : null);
+            pre = plan ? applyPhotoRepair(pre, plan, check.ok ? check.repair : null, numbers?.pre) : reconcilePhotoRead(pre, check.ok ? check.check : null);
             // A later model answer cannot undo the independent numeric evidence.
             if (numbers) pre = checkPhotoNumbers(pre, numbers);
             completedPhoto = pre;

@@ -22,7 +22,7 @@ export function checkPhotoNumbers(ai: PhotoFields, local: NumericPhotoRead): Pho
   }
   for (const field of ['expectedRows', 'expectedNfs', 'totalVolumes'] as const) {
     const value = local.pre[field];
-    if (value && ai[field] && value !== ai[field]) {
+    if (value && ai[field] && value !== ai[field] && local.confirmedHeaders?.[field] === value) {
       const label = field === 'expectedRows' ? 'CTCs do cabeçalho' : field === 'expectedNfs' ? 'NFs do cabeçalho' : 'Volumes do cabeçalho';
       warnHeader(`${label} diferente na conferência local: ${ai[field]} / ${value}. Confira o cabeçalho.`);
       const actual = field === 'expectedRows' ? new Set(ai.documents.map(row => row.ctc)).size : field === 'expectedNfs' ? ai.documents.length : ai.documents.reduce((sum, row) => sum + Number(row.volumes || 0), 0);

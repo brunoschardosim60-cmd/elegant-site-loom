@@ -43,11 +43,12 @@ export async function readPhotosWithFallback(files: File[], onResult: OnResult, 
   // Keep one local verification at a time on phones; desktop already limits
   // the whole import to two active photos. No workers start for waiting files.
   const mobile = typeof navigator !== 'undefined' && (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || 'deviceMemory' in navigator && Number((navigator as Navigator & { deviceMemory?: number }).deviceMemory) <= 4);
-  const verifier = import('./photo-numeric-reader').then(module => module.createPhotoNumericVerifier(mobile || files.length === 1 ? 1 : 2));
+  const verifier = detailed ? import('./photo-numeric-reader').then(module => module.createPhotoNumericVerifier(mobile || files.length === 1 ? 1 : 2)) : Promise.resolve(undefined);
   void verifier.catch(() => {});
   const numericCheck = async (file: File, angle: PhotoAngle, checkSignal: AbortSignal, pre?: PhotoFields) => {
     const reader = await verifier;
     checkSignal.throwIfAborted();
+    if (!reader) throw new Error('Conferência local não solicitada.');
     return reader.read(file, angle, checkSignal, pre);
   };
   const read = async (index: number) => {
@@ -87,7 +88,7 @@ export async function readPhotosWithFallback(files: File[], onResult: OnResult, 
                 ai.abort();
               } else deliver(result);
             }, (_position, message) => { if (!ai.signal.aborted) progress(message); }, ai.signal, {
-              singlePass: false, selective: true, quotaFallback: true, preferredModel: 'lite', orientations: [0], numericCheck, ...(initialRead ? { initialRead } : {}),
+              singlePass: false, selective: true, quotaFallback: true, preferredModel: 'lite', orientations: [0], ...(detailed ? { numericCheck } : {}), ...(initialRead ? { initialRead } : {}),
               onProvisional: (_position, pre) => { if (active()) { provisional = { pre, text: JSON.stringify(pre), milliseconds: performance.now() - started }; onResult(index, { ...provisional, pendingVerification: true }); } },
             });
           } catch (error) {
@@ -128,5 +129,5 @@ export async function readPhotosWithFallback(files: File[], onResult: OnResult, 
     while (next < files.length && !signal?.aborted) await read(next++);
   };
   try { await Promise.all(Array.from({ length: Math.min(2, files.length) }, worker)); }
-  finally { void verifier.then(reader => reader.dispose()).catch(() => {}); }
+  finally { void verifier.then(reader => reader?.dispose()).catch(() => {}); }
 }

@@ -27,8 +27,14 @@ describe('AI first, bounded local fallback', () => {
   it('returns one AI result without running local OCR or an orientation worker', async () => {
     mocks.ai.mockImplementation(async(_files:File[],result:OnResult)=>result(0,reading(0)));
     const result=vi.fn();await readPhotosWithFallback([files[0]!],result);
-    expect(mocks.ai.mock.calls[0]![4]).toEqual({singlePass:false,selective:true,quotaFallback:true,preferredModel:'lite',orientations:[0],numericCheck:expect.any(Function),onProvisional:expect.any(Function)});
+    expect(mocks.ai.mock.calls[0]![4]).toEqual({singlePass:false,selective:true,quotaFallback:true,preferredModel:'lite',orientations:[0],onProvisional:expect.any(Function)});
     expect(mocks.local).not.toHaveBeenCalled();expect(result).toHaveBeenCalledExactlyOnceWith(0,expect.objectContaining({pendingVerification:false,pre:expect.objectContaining({readingSource:'gemini'})}));
+  });
+  it('enables independent local checking only for the explicit detailed reread', async () => {
+    mocks.ai.mockImplementation(async (_files: File[], send: OnResult) => send(0, reading(0)));
+    const original = reading(0).pre;
+    await readPhotosWithFallback([files[0]!], vi.fn(), undefined, undefined, true, original);
+    expect(mocks.ai.mock.calls[0]![4]).toMatchObject({ numericCheck: expect.any(Function), initialRead: original });
   });
   it('limits concurrent photos to two and preserves file indices when results arrive out of order', async () => {
     const calls:{file:File,result:OnResult}[]=[],result=vi.fn();

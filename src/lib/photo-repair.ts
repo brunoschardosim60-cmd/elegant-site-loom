@@ -44,7 +44,7 @@ export function repairPrompt(plan: RepairPlan) {
 }
 
 /** Never change an unselected cell or accept a row aligned to another NF. */
-export function applyPhotoRepair(pre: PhotoFields, plan: RepairPlan, response: unknown): PhotoFields {
+export function applyPhotoRepair(pre: PhotoFields, plan: RepairPlan, response: unknown, local?: PhotoFields): PhotoFields {
   const parsed = repairResponseSchema.safeParse(response);
   if (!parsed.success) return { ...pre, headerReview: [...(pre.headerReview ?? []), 'A releitura seletiva não terminou. Confira os campos sinalizados.'] };
   const result = structuredClone(pre);
@@ -64,6 +64,14 @@ export function applyPhotoRepair(pre: PhotoFields, plan: RepairPlan, response: u
         const before = literal(row[field]!), after = literal(value);
         // An independent reread must not silently reformat SA/S/A or punctuation.
         if (before === after) { checked++; continue; }
+        if (local) {
+          const matches = local.documents.filter(item => item.ctc === target.ctc && (sameCtcRows.length === 1 || item.nf === target.nf));
+          const observed = matches.length === 1 ? literal((matches[0]![field] ?? '').replace(/[!|]/g, 'I')) : '';
+          if (!observed || observed !== after) {
+            row.review = [...new Set([...(row.review ?? []), `${field === 'client' ? 'Cliente' : 'Destinatário'}: o nome proposto pela releitura não foi confirmado na foto pelo leitor local. Mantido o nome anterior; confira a grafia.`])];
+            continue;
+          }
+        }
         let prefix = 0; while (before[prefix] && before[prefix] === after[prefix]) prefix++;
         let suffix = 0; while (suffix < Math.min(before.length, after.length) - prefix && before[before.length - suffix - 1] === after[after.length - suffix - 1]) suffix++;
         if (Math.max(before.length, after.length) - prefix - suffix > 2) {
