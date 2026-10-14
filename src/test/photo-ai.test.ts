@@ -797,7 +797,7 @@ it('rechecks just a flagged NF and preserves unselected fields with one optional
  const repair=await pendingCall('selective.jpg','repair');
  expect(provisional).toHaveBeenCalledOnce();
  expect(repair.input.data.repairPlan!.rows).toEqual([{index:0,ctc:'0000000001',nf:'',fields:['nf']}]);
- repair.pending.resolve({...data.full,check:null,repair:{header:{},rows:[{index:0,ctc:'0000000001',nf:'101-1',volumes:'99',client:'INVENTADO',recipient:'OUTRO'}]}});
+ repair.pending.resolve({ok:true,pre:data.full.pre,text:'',rotation:0,check:null,repair:{header:{},rows:[{index:0,ctc:'0000000001',nf:'101-1',volumes:'99',client:'INVENTADO',recipient:'OUTRO'}]}});
  await run;expect(calls).toHaveLength(2);
  expect(receive.mock.calls[0]![1].pre.documents[0]).toMatchObject({nf:'101-1',volumes:'3',client:'LAB TESTE',recipient:'CLIENTE TESTE'});
 });
@@ -806,6 +806,39 @@ it('reuses existing uncertain data for a manual repair rather than rereading the
  data.full.pre.documents[0]!.review=['Confira volumes'];
  const run=readAiPhotos([photo('manual-repair.jpg')],vi.fn(),undefined,undefined,{orientations:[0],preferredModel:'lite',selective:true,initialRead:data.full.pre});
  const repair=await pendingCall('manual-repair.jpg','repair');
- repair.pending.resolve({...data.full,check:null,repair:{header:{},rows:[{index:0,ctc:'0000000001',nf:'101-1',volumes:'3',client:'',recipient:''}]}});
+ repair.pending.resolve({ok:true,pre:data.full.pre,text:'',rotation:0,check:null,repair:{header:{},rows:[{index:0,ctc:'0000000001',nf:'101-1',volumes:'3',client:'',recipient:''}]}});
  await run;expect(calls).toHaveLength(1);expect(calls[0]!.input.data.mode).toBe('repair');
+});
+
+it('checks a complete plausible AI result against independent local numbers and the reported rotation', async () => {
+  const data = responses(1, 270, false); if (!data.full.ok) return;
+  const local = structuredClone(data.full.pre);
+  data.full.pre.documents[0]!.volumes = '4';
+  const numericCheck = vi.fn(async () => ({ pre: local, confirmed: [{ ctc: local.documents[0]!.ctc, nf: local.documents[0]!.nf, volumes: '3' }], milliseconds: 2000 }));
+  const receive = vi.fn();
+  const run = readAiPhotos([photo('numeric.jpg')], receive, undefined, undefined, { orientations: [0], singlePass: true, preferredModel: 'lite', numericCheck });
+  (await pendingCall('numeric.jpg', 'full-lite')).pending.resolve(data.full);
+  await run;
+  expect(numericCheck).toHaveBeenCalledWith(expect.any(File), 270, expect.objectContaining({ aborted: false }));
+  expect(receive.mock.calls[0]![1].pre.documents[0]).toMatchObject({ volumes: '3', review: expect.arrayContaining([expect.stringContaining('duas leituras locais')]) });
+  expect(calls).toHaveLength(1);
+});
+
+it('keeps the first AI data if numeric verification fails, and flags the missing check', async () => {
+  const receive = vi.fn();
+  const run = readAiPhotos([photo('numeric-failed.jpg')], receive, undefined, undefined, { orientations: [0], singlePass: true, numericCheck: async () => { throw new Error('OCR failed'); } });
+  (await pendingCall('numeric-failed.jpg', 'full')).pending.resolve(responses(1, 0, false).full);
+  await run;
+  expect(receive.mock.calls[0]![1].pre.documents[0]!.nf).toBe('101-1');
+  expect(receive.mock.calls[0]![1].pre.headerReview).toContain('A conferência local dos números não terminou. Confira CTCs, NFs e volumes na foto.');
+});
+
+it('cancels a stalled numeric verifier without late results and releases the photo bitmap', async () => {
+  const receive = vi.fn(), started = vi.fn(), controller = new AbortController();
+  const run = readAiPhotos([photo('numeric-stop.jpg')], receive, undefined, controller.signal, { orientations: [0], singlePass: true, numericCheck: async () => { started(); return new Promise(() => {}); } });
+  (await pendingCall('numeric-stop.jpg', 'full')).pending.resolve(responses(1, 0, false).full);
+  await waitFor(() => expect(started).toHaveBeenCalledOnce());
+  controller.abort(); await run;
+  expect(receive).not.toHaveBeenCalled();
+  expect(bitmaps[0]!.close).toHaveBeenCalledOnce();
 });

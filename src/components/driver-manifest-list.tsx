@@ -58,7 +58,7 @@ export function DriverManifestList({ manifests, query, focusedManifest, age, now
         </header>
         <div className="driver-manifests">
           {group.manifests.map(manifest => {
-            const totalsReview = reviewManifestTotals(manifest.documents.map(doc => ({ ...doc, volumes: String(doc.volumes) })), manifest);
+            const totalsReview = reviewManifestTotals(manifest.documents.map(doc => ({ ...doc, client: doc.client ?? '', recipient: doc.recipient ?? '', volumes: String(doc.volumes) })), manifest);
             const count = manifest.documents.filter(doc => doc.received).length;
             const remaining = manifest.documents.length - count;
             const pendingVols = countVolumes([manifest], true);

@@ -40,6 +40,22 @@ async function untilCancelled(task: Promise<unknown>, signal: AbortSignal): Prom
 export async function readPhotosWithFallback(files: File[], onResult: OnResult, onProgress: OnProgress = () => {}, signal?: AbortSignal, detailed = false, initialRead?: PhotoFields) {
   if (signal?.aborted || !files.length) return;
   let next = 0;
+  // Keep one local verification at a time on phones; desktop already limits
+  // the whole import to two active photos. No workers start for waiting files.
+  const mobile = typeof navigator !== 'undefined' && (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || 'deviceMemory' in navigator && Number((navigator as Navigator & { deviceMemory?: number }).deviceMemory) <= 4);
+  let numericQueue: Promise<unknown> = Promise.resolve();
+  const numericCheck = (file: File, angle: PhotoAngle, checkSignal: AbortSignal) => {
+    const run = async () => {
+      checkSignal.throwIfAborted();
+      const { readPhotoNumbers } = await import('./photo-numeric-reader');
+      checkSignal.throwIfAborted();
+      return readPhotoNumbers(file, angle, checkSignal);
+    };
+    if (!mobile) return run();
+    const task = numericQueue.catch(() => {}).then(run);
+    numericQueue = task;
+    return task;
+  };
   const read = async (index: number) => {
     const started = performance.now(), photo = new AbortController();
     const stop = () => photo.abort();
@@ -77,7 +93,7 @@ export async function readPhotosWithFallback(files: File[], onResult: OnResult, 
                 ai.abort();
               } else deliver(result);
             }, (_position, message) => { if (!ai.signal.aborted) progress(message); }, ai.signal, {
-              singlePass: false, selective: true, quotaFallback: true, preferredModel: 'lite', orientations: [0], ...(initialRead ? { initialRead } : {}),
+              singlePass: false, selective: true, quotaFallback: true, preferredModel: 'lite', orientations: [0], numericCheck, ...(initialRead ? { initialRead } : {}),
               onProvisional: (_position, pre) => { if (active()) { provisional = { pre, text: JSON.stringify(pre), milliseconds: performance.now() - started }; onResult(index, { ...provisional, pendingVerification: true }); } },
             });
           } catch (error) {

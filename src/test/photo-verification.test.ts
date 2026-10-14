@@ -53,6 +53,31 @@ describe('pré date verification', () => {
 });
 
 describe('independent photo verification', () => {
+  it('matches several NFs of one CTC by the CTC/NF pair, including reordered rows', () => {
+    const full = primary();
+    full.documents[1]!.ctc = full.documents[0]!.ctc;
+    full.ctcs = [full.documents[0]!.ctc]; full.expectedRows = 1;
+    full.expectedNfs = 2;
+    const check = { ...second(), expectedRows: 1, expectedNfs: 2, documents: [...full.documents].reverse() };
+    expect(needsPhotoVerification(full)).toBe(false);
+    const result = reconcilePhotoRead(full, check);
+    expect(result.documents).toEqual(full.documents);
+    expect(result.ctcs).toEqual(full.ctcs);
+    expect(result.verification?.status).toBe('matched');
+    expect(result.headerReview).toEqual([]);
+  });
+  it('does not shift volumes between NFs of a repeated CTC or accept an omitted NF', () => {
+    const full = primary();
+    full.documents[1]!.ctc = full.documents[0]!.ctc;
+    full.ctcs = [full.documents[0]!.ctc]; full.expectedRows = 1; full.expectedNfs = 2;
+    const check = { ...second(), expectedRows: 1, expectedNfs: 2, documents: full.documents.map(row => ({ ...row, volumes: row.volumes === '2' ? '3' : '2' })) };
+    const result = reconcilePhotoRead(full, check);
+    expect(result.documents.map(row => row.volumes)).toEqual(['2', '3']);
+    expect(result.documents.every(row => row.review?.some(note => note.includes('Volumes divergente')))).toBe(true);
+    const missing = reconcilePhotoRead(full, { ...check, documents: check.documents.slice(0, 1) });
+    expect(missing.headerReview?.join(' ')).toContain('total de NFs');
+    expect(needsPhotoVerification({ ...full, expectedNfs: 3 })).toBe(true);
+  });
   it('compares reordered rows by CTC, preserves zeroes and primary names, and ignores accents/whitespace in driver', () => {
     const result = meta(reconcilePhotoRead(primary(), second()));
     expect(result.verification.status).toBe('matched');

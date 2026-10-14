@@ -5,10 +5,12 @@ import { needsPhotoVerification, reconcilePhotoRead } from './photo-verification
 import { getPhotoProviderBlock, rememberPhotoProviderBlock } from './photo-provider-block';
 import type { PhotoAngle } from './photo-orientation';
 import type { PhotoFields } from './photo-fields';
+import { checkPhotoNumbers } from './photo-numeric-check';
+import type { NumericPhotoRead } from './photo-numeric-reader';
 
 type ProviderFailure = Extract<Awaited<ReturnType<typeof requestAiPhoto>>, { ok: false }>;
 type ProviderStage = 'full' | 'lite' | 'verify';
-export type PhotoAiOptions = { orientations?: readonly PhotoAngle[]; singlePass?: boolean; quotaFallback?: boolean; preferredModel?: 'normal' | 'lite'; selective?: boolean; initialRead?: PhotoFields; onProvisional?: (index: number, pre: PhotoFields) => void };
+export type PhotoAiOptions = { orientations?: readonly PhotoAngle[]; singlePass?: boolean; quotaFallback?: boolean; preferredModel?: 'normal' | 'lite'; selective?: boolean; initialRead?: PhotoFields; numericCheck?: (file: File, angle: PhotoAngle, signal: AbortSignal) => Promise<NumericPhotoRead>; onProvisional?: (index: number, pre: PhotoFields) => void };
 const temporaryBlocks = new Map<string, { until: number; result: ProviderFailure }>();
 const providerCooldown = 2 * 60 * 1000;
 // Full reading and verification use different models and quota buckets.
@@ -20,6 +22,14 @@ const verificationUnavailableMessage = 'A conferência adicional está temporari
 const isQuotaFailure = (failure: ProviderFailure) => 'quota' in failure;
 const canUseLite = (failure: ProviderFailure) => !('fallback' in failure && failure.fallback === false) && (isQuotaFailure(failure) || ('tryLite' in failure && failure.tryLite === true));
 const fullFailureReason = (failure: ProviderFailure) => isQuotaFailure(failure) ? 'O Gemini normal atingiu a cota.' : 'O Gemini normal ficou indisponível.';
+
+async function numericWithinSignal(task: Promise<NumericPhotoRead>, signal: AbortSignal): Promise<NumericPhotoRead> {
+  let stop!: () => void;
+  const aborted = new Promise<never>((_, reject) => { stop = () => reject(signal.reason ?? new Error('Leitura interrompida.')); signal.addEventListener('abort', stop, { once: true }); });
+  if (signal.aborted) stop();
+  try { return await Promise.race([task, aborted]); }
+  finally { signal.removeEventListener('abort', stop); }
+}
 
 function stageFailure(stage: ProviderStage, failure: ProviderFailure): ProviderFailure {
   if (stage !== 'verify') return failure;
@@ -157,7 +167,22 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
         if (photoSignal.aborted) throw new Error('Leitura interrompida.');
         if (!full.ok) { if (!signal?.aborted) onResult(index, { error: normalFailure ? `${normalFailure} Flash Lite: ${full.error}` : full.error, ...('fallback' in full && full.fallback === false ? { fallback: false } : {}) }); continue; }
         let pre = completedPhoto!;
-        if (!options.singlePass && needsPhotoVerification(full.pre)) {
+        let numbers: NumericPhotoRead | undefined;
+        if (options.numericCheck && pre.kind === 'pre' && !options.initialRead) {
+          options.onProvisional?.(index, pre);
+          progress('Conferindo CTC, NF e volumes diretamente na tabela…');
+          const numericSignal = AbortSignal.any([photoSignal, AbortSignal.timeout(9000)]);
+          try {
+            numbers = await numericWithinSignal(options.numericCheck(file, ((orientation + full.rotation) % 360) as PhotoAngle, numericSignal), numericSignal);
+            numericSignal.throwIfAborted();
+            pre = checkPhotoNumbers(pre, numbers);
+          } catch {
+            photoSignal.throwIfAborted();
+            pre = { ...pre, headerReview: [...(pre.headerReview ?? []), 'A conferência local dos números não terminou. Confira CTCs, NFs e volumes na foto.'] };
+          }
+          completedPhoto = pre;
+        }
+        if (!options.singlePass && needsPhotoVerification(pre)) {
           if (!providerBlocks.verify) progress('Conferindo campos sinalizados em uma segunda leitura…');
           const plan = options.selective ? photoRepairPlan(pre) : null;
           if (plan === null || plan.headers.length || plan.rows.length) {
@@ -165,6 +190,8 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
             const check = providerBlocks.verify ?? await providerAwareRequest({ data: { ...photoPayload(image, (orientation + full.rotation) % 360, full.pre.kind === 'pre'), accessToken, mode: plan ? 'repair' : 'verify', ...(plan ? { repairPlan: plan } : {}) }, signal: photoSignal });
             if (photoSignal.aborted) throw new Error('Leitura interrompida.');
             pre = plan ? applyPhotoRepair(pre, plan, check.ok ? check.repair : null) : reconcilePhotoRead(pre, check.ok ? check.check : null);
+            // A later model answer cannot undo the independent numeric evidence.
+            if (numbers) pre = checkPhotoNumbers(pre, numbers);
             completedPhoto = pre;
             if (!check.ok) pre.headerReview = [...(pre.headerReview ?? []), check.error];
           }

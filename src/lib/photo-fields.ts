@@ -287,6 +287,14 @@ export function parsePhotoFields(page: OcrPage): PhotoFields {
 }
 
 /** Tight regions allow inexpensive rereads without processing the whole photo. */
+export function tableCtcRegions(page: OcrPage): CellRegion[] {
+  const t = table(page);
+  return t ? t.ctcWords.map((word, row) => {
+    const h = word.bbox.y1 - word.bbox.y0;
+    return { row, field: 'ctc', box: { x0: word.bbox.x0 - h * .25, x1: word.bbox.x1 + h * .25, y0: word.bbox.y0 - h * .2, y1: word.bbox.y1 + h * .2 } };
+  }) : [];
+}
+
 export function tableCellRegions(page: OcrPage): CellRegion[] {
   const t = table(page);
   if (!t) return [];
