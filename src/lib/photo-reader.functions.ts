@@ -192,9 +192,15 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
       stage = 'transcription-json';
       const parsed = JSON.parse(output);
       stage = 'schema';
-      if (data.mode === 'repair') return { ok: true as const, pre: normalizeGeminiPhoto({ kind: 'unknown', id: '', plate: '', driver: '', expectedRows: 0, totalVolumes: 0, documents: [] }), check: null, repair: repairResponseSchema.parse(parsed), rotation: 0, text: '' };
+      const aiReader = model.toLowerCase().includes('lite') ? 'lite' as const : 'normal' as const;
+      if (data.mode === 'repair') {
+        const pre = normalizeGeminiPhoto({ kind: 'unknown', id: '', plate: '', driver: '', expectedRows: 0, totalVolumes: 0, documents: [] });
+        pre.aiReader = aiReader;
+        return { ok: true as const, pre, check: null, repair: repairResponseSchema.parse(parsed), rotation: 0, text: '' };
+      }
       const check = compact ? verificationSchema.parse(parsed) : null;
       const pre = normalizeGeminiPhoto(data.orientationOnly ? { ...parsed, id: '', plate: '', driver: '', expectedRows: 0, totalVolumes: 0, documents: [] } : check ? { ...check, documents: check.documents.map(row => ({ ...row, client: '', recipient: '', review: [] })) } : parsed);
+      pre.aiReader = aiReader;
       const rotation = [90, 180, 270].includes(parsed.clockwiseRotation) ? parsed.clockwiseRotation as number : 0;
       return { ok: true as const, pre, check, repair: null, rotation, text: JSON.stringify(pre, null, 2) };
     } catch (error) {

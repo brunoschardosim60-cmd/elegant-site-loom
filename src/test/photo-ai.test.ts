@@ -790,15 +790,16 @@ it('returns a transient Lite failure for local review and keeps cancellation ins
 
 it('rechecks just a flagged NF and preserves unselected fields with one optional call', async () => {
  const data=responses(1,0,false); if(!data.full.ok)return;
- data.full.pre.issueDate='2026-10-13'; data.full.pre.documents[0]!.nf=''; data.full.pre.documents[0]!.review=['Confira NF e série'];
+ data.full.pre.aiReader='deepseek'; data.full.pre.issueDate='2026-10-13'; data.full.pre.documents[0]!.nf=''; data.full.pre.documents[0]!.review=['Confira NF e série'];
  const receive=vi.fn(), provisional=vi.fn();
  const run=readAiPhotos([photo('selective.jpg')],receive,undefined,undefined,{orientations:[0],preferredModel:'lite',selective:true,onProvisional:provisional});
  (await pendingCall('selective.jpg','full-lite')).pending.resolve(data.full);
  const repair=await pendingCall('selective.jpg','repair');
  expect(provisional).toHaveBeenCalledOnce();
  expect(repair.input.data.repairPlan!.rows).toEqual([{index:0,ctc:'0000000001',nf:'',fields:['nf']}]);
- repair.pending.resolve({ok:true,pre:data.full.pre,text:'',rotation:0,check:null,repair:{header:{},rows:[{index:0,ctc:'0000000001',nf:'101-1',volumes:'99',client:'INVENTADO',recipient:'OUTRO'}]}});
+ repair.pending.resolve({ok:true,pre:{...data.full.pre,aiReader:'lite'},text:'',rotation:0,check:null,repair:{header:{},rows:[{index:0,ctc:'0000000001',nf:'101-1',volumes:'99',client:'INVENTADO',recipient:'OUTRO'}]}});
  await run;expect(calls).toHaveLength(2);
+ expect(receive.mock.calls[0]![1].pre.aiReader).toBe('lite');
  expect(receive.mock.calls[0]![1].pre.documents[0]).toMatchObject({nf:'101-1',volumes:'3',client:'LAB TESTE',recipient:'CLIENTE TESTE'});
 });
 it('reuses existing uncertain data for a manual repair rather than rereading the full table', async () => {
@@ -854,9 +855,11 @@ it('cancels a stalled numeric verifier without late results and releases the pho
 it('uses one full-width strip request for a structural gap, without also running whole-page verification', async () => {
   const data = responses(1, 90, false); if (!data.full.ok) return;
   mocks.orient.mockImplementationOnce(async (_files: File[], _progress: unknown, _signal: unknown, confirmed: (index: number, angle: number) => void) => { confirmed(0, 270); return [270]; });
+  data.full.pre.aiReader = 'deepseek';
   data.full.pre.expectedNfs = 2; data.full.pre.totalVolumes = 4;
   const fixed = structuredClone(data.full);
   if (!fixed.ok) return;
+  fixed.pre.aiReader = 'lite';
   fixed.pre.documents.push({ ...fixed.pre.documents[0]!, nf: '102-1', volumes: '1' });
   const receive = vi.fn(), numericCheck = vi.fn();
   const run = readAiPhotos([photo('bands.jpg')], receive, undefined, undefined, { orientations: [0], preferredModel: 'lite', selective: true, numericCheck });
@@ -865,7 +868,7 @@ it('uses one full-width strip request for a structural gap, without also running
   expect(bandRequest.input.data.bands).toHaveLength(6);
   bandRequest.pending.resolve(fixed); await run;
   expect(calls).toHaveLength(2); expect(numericCheck).not.toHaveBeenCalled();
-  expect(receive.mock.calls[0]![1].pre).toMatchObject({ tableRecovery: 'bands', imageRotation: 270 });
+  expect(receive.mock.calls[0]![1].pre).toMatchObject({ tableRecovery: 'bands', imageRotation: 270, aiReader: 'lite' });
   expect(receive.mock.calls[0]![1].pre.documents).toHaveLength(2);
 });
 

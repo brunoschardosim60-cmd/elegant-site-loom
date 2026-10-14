@@ -68,7 +68,7 @@ it.each([402, 429, 503])('falls back from DeepSeek HTTP %s to Gemini without exp
   vi.stubEnv('DEEPSEEK_API_KEY', `synthetic-deepseek-fallback-${user}`); vi.stubEnv('PHOTO_OCR_PROVIDER', 'deepseek');
   mocks.fetch.mockResolvedValueOnce(new Response('sensitive provider diagnostic', { status })).mockResolvedValueOnce(successResponse());
   const result = await readPhotoWithGemini({ data: { ...input.data, mode: 'full-lite' } });
-  expect(result).toMatchObject({ ok: true }); expect(mocks.fetch).toHaveBeenCalledTimes(2);
+  expect(result).toMatchObject({ ok: true, pre: { aiReader: 'lite' } }); expect(mocks.fetch).toHaveBeenCalledTimes(2);
   expect(mocks.fetch.mock.calls[1]![0]).toContain('generativelanguage.googleapis.com');
   expect(JSON.stringify(result)).not.toContain('sensitive provider diagnostic');
 });
@@ -557,4 +557,9 @@ it('recovers a retired model with its stable alias, sharing the original key and
   expect(await readPhotoWithGemini(input)).toMatchObject({ ok: true }); expect(mocks.fetch).toHaveBeenCalledTimes(2);
   expect(mocks.fetch.mock.calls[1]![0]).toContain('/gemini-flash-latest:generateContent');
   expect(mocks.fetch.mock.calls[1]![1].signal).toBe(mocks.fetch.mock.calls[0]![1].signal);
+});
+
+it('labels the actual Gemini tier for an independent repair', async () => {
+  mocks.fetch.mockResolvedValue(new Response(JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify({ header: {}, rows: [] }) }] } }] })));
+  expect(await readPhotoWithGemini({ data: { ...input.data, mode: 'repair', repairPlan: { headers: [], rows: [] } } })).toMatchObject({ ok: true, pre: { aiReader: 'lite' } });
 });

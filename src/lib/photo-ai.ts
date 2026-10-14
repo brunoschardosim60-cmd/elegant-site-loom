@@ -219,6 +219,7 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
             const check = providerBlocks.verify ?? await providerAwareRequest({ data: { ...photoPayload(checkImage ?? image, checkImage ? 0 : numbers?.angle ?? (orientation + full.rotation) % 360, full.pre.kind === 'pre'), accessToken, mode: plan ? 'repair' : 'verify', ...(plan ? { repairPlan: plan } : {}) }, signal: photoSignal });
             if (photoSignal.aborted) throw new Error('Leitura interrompida.');
             pre = plan ? applyPhotoRepair(pre, plan, check.ok ? check.repair : null, numbers?.pre) : reconcilePhotoRead(pre, check.ok ? check.check : null);
+            if (check.ok && check.pre.aiReader) pre.aiReader = check.pre.aiReader;
             // A later model answer cannot undo the independent numeric evidence.
             if (numbers) pre = checkPhotoNumbers(pre, numbers);
             completedPhoto = pre;
