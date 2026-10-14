@@ -6,6 +6,7 @@ import { markLocalPhoto } from '@/lib/local-photo';
 const mocks = vi.hoisted(() => ({ ai: vi.fn(), local: vi.fn() }));
 vi.mock('@/lib/photo-ai', () => ({ readAiPhotos: mocks.ai }));
 vi.mock('@/lib/photo-ocr', () => ({ readPrePhotos: mocks.local }));
+vi.mock('@/lib/photo-numeric-reader', () => ({ createPhotoNumericVerifier: () => ({ read: vi.fn(), dispose: vi.fn() }) }));
 type OnResult = Parameters<typeof readPrePhotos>[1];
 type OnProgress = NonNullable<Parameters<typeof readPrePhotos>[2]>;
 type Success = Exclude<PhotoReadResult, { error: string }>;

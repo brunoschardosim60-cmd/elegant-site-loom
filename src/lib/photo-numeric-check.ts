@@ -11,7 +11,8 @@ const name = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/
  */
 export function checkPhotoNumbers(ai: PhotoFields, local: NumericPhotoRead): PhotoFields {
   const result = structuredClone(ai);
-  if (ai.kind !== 'pre' || local.pre.kind !== 'pre') return result;
+  if (ai.kind !== 'pre') return result;
+  if (local.pre.kind !== 'pre') return { ...result, headerReview: unique([...(result.headerReview ?? []), 'A conferência local não conseguiu identificar a tabela do pré. Confira CTCs, NFs e volumes na foto.']), verification: { status: 'unavailable', checkedFields: 0, conflicts: 0 } };
   let checked = 0, conflicts = 0;
   result.headerReview = [...(ai.headerReview ?? [])];
   const warnHeader = (message: string) => { result.headerReview!.push(message); conflicts++; };

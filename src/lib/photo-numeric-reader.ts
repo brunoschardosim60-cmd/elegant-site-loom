@@ -4,8 +4,9 @@ import { parsePhotoFields, pageWords, tableCellRegions, tableCtcRegions, tableSu
 import { montageReadings } from './photo-ocr';
 import { readPreBarcode } from './pre-barcode';
 import type { PhotoAngle } from './photo-orientation';
+import { hasUprightPhotoHeading } from './photo-orientation';
 
-export type NumericPhotoRead = { pre: PhotoFields; confirmed: Partial<Record<'ctc' | 'nf' | 'volumes', string>>[]; confirmedHeaders?: Partial<Record<'expectedRows' | 'expectedNfs' | 'totalVolumes', number>>; barcodeId?: string; milliseconds: number };
+export type NumericPhotoRead = { pre: PhotoFields; confirmed: Partial<Record<'ctc' | 'nf' | 'volumes', string>>[]; confirmedHeaders?: Partial<Record<'expectedRows' | 'expectedNfs' | 'totalVolumes', number>>; barcodeId?: string; angle?: PhotoAngle; milliseconds: number };
 
 function cellConfidence(page: OcrPage, index: number, field: 'ctc' | 'nf' | 'volumes'): number {
   const region = [...tableCtcRegions(page), ...tableCellRegions(page)].find(item => item.row === index && item.field === field);
@@ -35,8 +36,17 @@ export async function readPhotoNumbers(file: File, angle: PhotoAngle, signal?: A
   });
   try {
     worker = await Promise.race([starting, aborted]);
-    const source = await Promise.race([prepareForOcr(file, angle, 3200, signal), aborted]);
     await Promise.race([worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT, tessedit_char_whitelist: '', user_defined_dpi: '300' }), aborted]);
+    // The model's rotation is a hint. Confirm it cheaply before spending time
+    // reading a sideways full-resolution table (including misleading EXIF).
+    const orientationStarted = performance.now();
+    for (const candidate of [...new Set([angle, (angle + 180) % 360, (angle + 90) % 360, (angle + 270) % 360])] as PhotoAngle[]) {
+      if (performance.now() - orientationStarted > 3000) break;
+      const thumbnail = await Promise.race([prepareForOcr(file, candidate, 1400, signal), aborted]);
+      const reading = await Promise.race([worker.recognize(thumbnail), aborted]);
+      if (hasUprightPhotoHeading(reading.data.text)) { angle = candidate; break; }
+    }
+    const source = await Promise.race([prepareForOcr(file, angle, 3200, signal), aborted]);
     const { data } = await Promise.race([worker.recognize(source, {}, { text: true, blocks: true }), aborted]);
     signal?.throwIfAborted();
     const pre = parsePhotoFields(data);
@@ -93,9 +103,47 @@ export async function readPhotoNumbers(file: File, angle: PhotoAngle, signal?: A
       }
     }
     signal?.throwIfAborted();
-    return { pre, confirmed, confirmedHeaders, ...(barcodeId ? { barcodeId } : {}), milliseconds: Math.round(performance.now() - started) };
+    return { pre, confirmed, confirmedHeaders, angle, ...(barcodeId ? { barcodeId } : {}), milliseconds: Math.round(performance.now() - started) };
   } finally {
     signal?.removeEventListener('abort', cancel);
     if (worker) await dispose(worker);
   }
+}
+
+/** Warm a bounded pool while the network read runs, then reuse it for the
+ * entire import. Workers and their last image are released when the batch ends.
+ */
+export function createPhotoNumericVerifier(size: 1 | 2) {
+  let closed = false, next = 0;
+  const released = new Set<Worker>();
+  const disposeWorker = async (worker: Worker) => { if (!released.has(worker)) { released.add(worker); await worker.terminate().catch(() => {}); } };
+  const start = () => {
+    const pending = createWorker('por');
+    void pending.then(worker => { if (closed) void disposeWorker(worker); }).catch(() => {});
+    return pending;
+  };
+  const slots = Array.from({ length: size }, () => ({ worker: start() as Promise<Worker> | undefined, queue: Promise.resolve() as Promise<unknown> }));
+  return {
+    read(file: File, angle: PhotoAngle, signal: AbortSignal) {
+      const slot = slots[next++ % slots.length]!;
+      const task = slot.queue.catch(() => {}).then(async () => {
+        signal.throwIfAborted(); if (closed) throw new Error('Leitura interrompida.');
+        const pending = slot.worker ??= start();
+        let rejectStopped!: (reason: unknown) => void;
+        const stopped = new Promise<never>((_, reject) => { rejectStopped = reject; });
+        const cancel = () => { rejectStopped(signal.reason ?? new Error('Leitura interrompida.')); if (slot.worker === pending) slot.worker = undefined; void pending.then(disposeWorker).catch(() => {}); };
+        signal.addEventListener('abort', cancel, { once: true });
+        if (signal.aborted) cancel();
+        try {
+          const worker = await Promise.race([pending, stopped]);
+          signal.throwIfAborted(); if (closed) throw new Error('Leitura interrompida.');
+          return await readPhotoNumbers(file, angle, signal, worker);
+        } catch (error) { cancel(); throw error; }
+        finally { signal.removeEventListener('abort', cancel); }
+      });
+      slot.queue = task;
+      return task;
+    },
+    dispose() { closed = true; for (const slot of slots) if (slot.worker) { void slot.worker.then(disposeWorker).catch(() => {}); slot.worker = undefined; } },
+  };
 }

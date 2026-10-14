@@ -5,7 +5,7 @@ vi.mock('@/lib/pre-barcode', () => ({ readPreBarcode: vi.fn(() => undefined) }))
 vi.mock('@/lib/image-prep', () => ({ prepareForOcr: vi.fn(async (file: File) => file), readGrayImage: vi.fn(async () => ({ pixels: new Uint8Array(100), width: 10, height: 10 })),
   prepareNumericMontage: vi.fn(async (image: File, boxes: unknown[]) => ({ image, cells: boxes.map((box, i) => ({ box, target: { x0: 10, x1: 100, y0: i * 80, y1: i * 80 + 50 } })) })) }));
 import { createWorker } from 'tesseract.js';
-import { readPhotoNumbers } from '@/lib/photo-numeric-reader';
+import { createPhotoNumericVerifier, readPhotoNumbers } from '@/lib/photo-numeric-reader';
 const page = (rows = [['0000000001', '12345-1', '8'], ['0000000002', '23456-1', '7']]) => {
   const word = (text: string, x: number, y: number, width = 50) => ({ text, confidence: 95, bbox: { x0: x, x1: x + width, y0: y, y1: y + 20 } });
   return { data: { text: 'PRÉ-MANIFESTO', blocks: [{ paragraphs: [{ lines: [{ words: [
@@ -13,15 +13,32 @@ const page = (rows = [['0000000001', '12345-1', '8'], ['0000000002', '23456-1', 
     ...rows.flatMap((row, i) => [word(row[0]!, 100, 240 + i * 50, 100), word(row[1]!, 400, 238 + i * 50, 80), word(row[2]!, 610, 235 + i * 50, 20)]),
   ] }] }] }] } };
 };
-beforeEach(() => { vi.clearAllMocks(); worker.recognize.mockReset(); vi.mocked(createWorker).mockResolvedValue(worker as never); worker.terminate.mockResolvedValue(undefined); worker.setParameters.mockResolvedValue(undefined); vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 1000, height: 800, close: vi.fn() }))); });
+beforeEach(() => { vi.clearAllMocks(); worker.recognize.mockReset(); worker.recognize.mockResolvedValueOnce({data:{text:'PRÉ-MANIFESTO'}}); vi.mocked(createWorker).mockResolvedValue(worker as never); worker.terminate.mockResolvedValue(undefined); worker.setParameters.mockResolvedValue(undefined); vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 1000, height: 800, close: vi.fn() }))); });
 afterEach(() => vi.unstubAllGlobals());
 
 describe('Numeric photo evidence', () => {
+  it('reuses one worker and serializes local reads on a phone, then releases it at batch end', async () => {
+    worker.recognize.mockReset(); worker.recognize.mockResolvedValue(page());
+    const verifier = createPhotoNumericVerifier(1), signal = new AbortController().signal;
+    const [a, b] = await Promise.all([verifier.read(new File(['a'], 'a.jpg'), 0, signal), verifier.read(new File(['b'], 'b.jpg'), 0, signal)]);
+    expect(a.pre.documents).toHaveLength(2); expect(b.pre.documents).toHaveLength(2);
+    expect(createWorker).toHaveBeenCalledOnce(); expect(worker.terminate).not.toHaveBeenCalled();
+    verifier.dispose(); await Promise.resolve(); expect(worker.terminate).toHaveBeenCalledOnce();
+  });
+  it('cancels while a pooled worker is still starting and releases the late worker', async () => {
+    let finish!: (value: never) => void;
+    vi.mocked(createWorker).mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    const verifier = createPhotoNumericVerifier(1), controller = new AbortController();
+    const run = verifier.read(new File(['image'], 'pre.jpg'), 0, controller.signal);
+    await Promise.resolve(); await Promise.resolve(); controller.abort();
+    await expect(run).rejects.toBeDefined(); verifier.dispose(); finish(worker as never); await Promise.resolve();
+    expect(worker.terminate).toHaveBeenCalledOnce();
+  });
   it('confirms literal values across resolutions by identity, keeping NFs and volumes with their CTC', async () => {
     worker.recognize.mockResolvedValueOnce(page()).mockResolvedValueOnce(page([['0000000002', '23456-1', '7'], ['0000000001', '12345-1', '8']]));
     const result = await readPhotoNumbers(new File(['image'], 'pre.jpg'), 0);
     expect(result.confirmed).toEqual([{ ctc: '0000000001', nf: '12345-1', volumes: '8' }, { ctc: '0000000002', nf: '23456-1', volumes: '7' }]);
-    expect(worker.recognize).toHaveBeenCalledTimes(2); expect(worker.terminate).toHaveBeenCalledOnce();
+    expect(worker.recognize).toHaveBeenCalledTimes(3); expect(worker.terminate).toHaveBeenCalledOnce();
   });
   it('never confirms conflicting values or fills unread montage cells by shifting the next row', async () => {
     worker.recognize.mockResolvedValueOnce(page()).mockResolvedValueOnce(page([['0000000001', '12345-1', '9'], ['0000000002', '23456-1', '7']])).mockResolvedValueOnce({ data: { text: '', blocks: [] } });

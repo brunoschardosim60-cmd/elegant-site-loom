@@ -187,7 +187,7 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
           const plan = options.selective ? photoRepairPlan(pre) : null;
           if (plan === null || plan.headers.length || plan.rows.length) {
             options.onProvisional?.(index, pre);
-            const check = providerBlocks.verify ?? await providerAwareRequest({ data: { ...photoPayload(image, (orientation + full.rotation) % 360, full.pre.kind === 'pre'), accessToken, mode: plan ? 'repair' : 'verify', ...(plan ? { repairPlan: plan } : {}) }, signal: photoSignal });
+            const check = providerBlocks.verify ?? await providerAwareRequest({ data: { ...photoPayload(image, numbers?.angle ?? (orientation + full.rotation) % 360, full.pre.kind === 'pre'), accessToken, mode: plan ? 'repair' : 'verify', ...(plan ? { repairPlan: plan } : {}) }, signal: photoSignal });
             if (photoSignal.aborted) throw new Error('Leitura interrompida.');
             pre = plan ? applyPhotoRepair(pre, plan, check.ok ? check.repair : null) : reconcilePhotoRead(pre, check.ok ? check.check : null);
             // A later model answer cannot undo the independent numeric evidence.

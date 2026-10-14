@@ -61,7 +61,7 @@ describe('Independent local numeric check', () => {
     expect(result.documents[0]!.recipient).toBe('DISTRIBUIDORAAB');
     expect(result.documents[0]!.review?.join(' ')).toContain('Destinatário diferente');
     expect(result.id).toBe(ai.id);
-    expect(checkPhotoNumbers(ai, { ...read, pre: { ...read.pre, kind: 'dacte' } })).toEqual(ai);
+    expect(checkPhotoNumbers(ai, { ...read, pre: { ...read.pre, kind: 'dacte' } })).toMatchObject({ documents: ai.documents, verification: { status: 'unavailable' } });
   });
   it('uses a decoded pré barcode for its ID only, with an explicit review notice', () => {
     const read = local(); read.barcodeId = 'DI00012345679';

@@ -43,18 +43,12 @@ export async function readPhotosWithFallback(files: File[], onResult: OnResult, 
   // Keep one local verification at a time on phones; desktop already limits
   // the whole import to two active photos. No workers start for waiting files.
   const mobile = typeof navigator !== 'undefined' && (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || 'deviceMemory' in navigator && Number((navigator as Navigator & { deviceMemory?: number }).deviceMemory) <= 4);
-  let numericQueue: Promise<unknown> = Promise.resolve();
-  const numericCheck = (file: File, angle: PhotoAngle, checkSignal: AbortSignal) => {
-    const run = async () => {
-      checkSignal.throwIfAborted();
-      const { readPhotoNumbers } = await import('./photo-numeric-reader');
-      checkSignal.throwIfAborted();
-      return readPhotoNumbers(file, angle, checkSignal);
-    };
-    if (!mobile) return run();
-    const task = numericQueue.catch(() => {}).then(run);
-    numericQueue = task;
-    return task;
+  const verifier = import('./photo-numeric-reader').then(module => module.createPhotoNumericVerifier(mobile ? 1 : 2));
+  void verifier.catch(() => {});
+  const numericCheck = async (file: File, angle: PhotoAngle, checkSignal: AbortSignal) => {
+    const reader = await verifier;
+    checkSignal.throwIfAborted();
+    return reader.read(file, angle, checkSignal);
   };
   const read = async (index: number) => {
     const started = performance.now(), photo = new AbortController();
@@ -133,5 +127,6 @@ export async function readPhotosWithFallback(files: File[], onResult: OnResult, 
   const worker = async () => {
     while (next < files.length && !signal?.aborted) await read(next++);
   };
-  await Promise.all(Array.from({ length: Math.min(2, files.length) }, worker));
+  try { await Promise.all(Array.from({ length: Math.min(2, files.length) }, worker)); }
+  finally { void verifier.then(reader => reader.dispose()).catch(() => {}); }
 }
