@@ -53,6 +53,10 @@ export function checkPhotoNumbers(ai: PhotoFields, local: NumericPhotoRead): Pho
       const before = row[field], raw = source[field], confirmed = local.confirmed[i]?.[field];
       const valid = field === 'ctc' ? /^\d{10}$/ : field === 'nf' ? /^\d{1,9}-\d{1,3}$/ : /^[1-9]\d{0,5}$/;
       const value = confirmed ?? raw;
+      if (field === 'nf' && !confirmed && /^\d{3,12}$/.test(raw) && digits(before) !== raw) {
+        row.review.push(`NF-série: dígitos diferentes na conferência local (${before} / ${raw}, separador ilegível). Confira a NF e a série na foto.`);
+        conflicts++;
+      }
       if (!valid.test(value)) continue;
       checked++;
       if (before === value) continue;

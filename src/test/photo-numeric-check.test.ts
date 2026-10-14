@@ -33,6 +33,13 @@ describe('Independent local numeric check', () => {
     expect(result.documents[0]!.nf).toBe('1235-1');
     expect(result.documents[0]!.review?.join(' ')).toContain('NF-série diferente');
   });
+  it('flags a different NF even when the local reader could not see its hyphen', () => {
+    const ai = photo(), read = local();
+    read.pre.documents[0]!.nf = '123651'; read.confirmed[0] = {};
+    const result = checkPhotoNumbers(ai, read);
+    expect(result.documents[0]!.nf).toBe('12345-1');
+    expect(result.documents[0]!.review?.join(' ')).toContain('dígitos diferentes');
+  });
   it('keeps NFs of a repeated CTC separate even when the OCR orders them differently', () => {
     const ai = photo(); ai.documents[1]!.ctc = ai.documents[0]!.ctc; ai.expectedRows = 1; ai.ctcs = [ai.documents[0]!.ctc];
     const source = structuredClone(ai); source.documents.reverse();

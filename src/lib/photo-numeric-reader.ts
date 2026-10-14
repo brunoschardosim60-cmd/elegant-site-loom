@@ -67,7 +67,9 @@ export async function readPhotoNumbers(file: File, angle: PhotoAngle, signal?: A
       const regions = [...tableCtcRegions(data), ...tableCellRegions(data)].filter(region => !confirmed[region.row]?.[region.field]).slice(0, 180);
       const summary = tableSummaryRegions(data).filter(region => !confirmedHeaders[region.field as keyof typeof confirmedHeaders]).map(region => ({ ...region, row: -1 }));
       const remaining = [...regions, ...summary];
-      if (remaining.length) {
+      // Keep completed evidence when a slow phone leaves little budget for
+      // optional crops. Missing confirmations remain explicit in the form.
+      if (remaining.length && performance.now() - started < 6500) {
         // Keep small glyphs from the source resolution. This confirmation uses
         // a higher-resolution crop independently of the page recognition.
         const [small, large] = await Promise.all([createImageBitmap(source), createImageBitmap(detail)]);
