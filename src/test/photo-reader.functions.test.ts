@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { photoReaderStatus, readPhotoWithGemini } from '@/lib/photo-reader.functions';
+import { photoReaderStatus, readPhotoWithGemini, photoReaderInputSchema } from '@/lib/photo-reader.functions';
 
 const mocks = vi.hoisted(() => ({ fetch: vi.fn(), user: vi.fn(), request: vi.fn(), client: vi.fn(), membership: vi.fn() }));
 vi.mock('@tanstack/react-start', () => ({ createServerFn: () => {
@@ -16,6 +16,23 @@ const parsedPhoto = { kind: 'pre', id: 'DI000000001', plate: 'ABC1D23', driver: 
 const successResponse = () => new Response(JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify(parsedPhoto) }] } }] }));
 let user = 0;
 const advanceUntil = (startedAt: number, elapsed: number) => vi.advanceTimersByTimeAsync(Math.max(0, startedAt + elapsed - Date.now()));
+
+it('bounds strip uploads by total size and permits them only for independent full transcription', () => {
+  const band = 'a'.repeat(100);
+  expect(photoReaderInputSchema.safeParse({ ...input.data, mode: 'full-lite', bands: [band] }).success).toBe(true);
+  expect(photoReaderInputSchema.safeParse({ ...input.data, mode: 'verify', bands: [band] }).success).toBe(false);
+  expect(photoReaderInputSchema.safeParse({ ...input.data, bands: Array(7).fill(band) }).success).toBe(false);
+  expect(photoReaderInputSchema.safeParse({ ...input.data, bands: Array(4).fill('a'.repeat(1000000)) }).success).toBe(false);
+});
+
+it('sends the whole page and ordered strips in a single authenticated provider request', async () => {
+  mocks.fetch.mockResolvedValue(successResponse());
+  expect(await readPhotoWithGemini({ data: { ...input.data, mode: 'full-lite', bands: ['a'.repeat(100), 'b'.repeat(100)] } })).toMatchObject({ ok: true });
+  expect(mocks.fetch).toHaveBeenCalledOnce();
+  const body = JSON.parse(mocks.fetch.mock.calls[0]![1].body);
+  expect(body.contents[0].parts.filter((part: { inlineData?: unknown }) => part.inlineData)).toHaveLength(3);
+  expect(body.contents[0].parts[0].text).toContain('FAIXAS horizontais');
+});
 beforeEach(() => {
   vi.clearAllMocks(); mocks.fetch.mockReset(); vi.useFakeTimers();
   vi.stubEnv('GEMINI_API_KEY', 'synthetic-provider-key'); vi.stubEnv('GEMINI_API_KEY_FALLBACK', undefined); vi.stubEnv('GEMINI_API_KEY_FALLBACK_2', undefined); vi.stubEnv('GEMINI_OCR_MODEL', undefined); vi.stubEnv('GEMINI_OCR_VERIFY_MODEL', undefined);

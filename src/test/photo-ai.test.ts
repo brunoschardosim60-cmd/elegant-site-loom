@@ -850,3 +850,32 @@ it('cancels a stalled numeric verifier without late results and releases the pho
   expect(receive).not.toHaveBeenCalled();
   expect(bitmaps[0]!.close).toHaveBeenCalledOnce();
 });
+
+it('uses one full-width strip request for a structural gap, without also running whole-page verification', async () => {
+  const data = responses(1, 270, false); if (!data.full.ok) return;
+  data.full.pre.expectedNfs = 2; data.full.pre.totalVolumes = 4;
+  const fixed = structuredClone(data.full);
+  if (!fixed.ok) return;
+  fixed.pre.documents.push({ ...fixed.pre.documents[0]!, nf: '102-1', volumes: '1' });
+  const receive = vi.fn(), numericCheck = vi.fn();
+  const run = readAiPhotos([photo('bands.jpg')], receive, undefined, undefined, { orientations: [0], preferredModel: 'lite', selective: true, numericCheck });
+  (await pendingCall('bands.jpg', 'full-lite')).pending.resolve(data.full);
+  const bandRequest = await pendingCall('bands.jpg', 'full-lite', 1);
+  expect(bandRequest.input.data.bands).toHaveLength(6);
+  bandRequest.pending.resolve(fixed); await run;
+  expect(calls).toHaveLength(2); expect(numericCheck).not.toHaveBeenCalled();
+  expect(receive.mock.calls[0]![1].pre).toMatchObject({ tableRecovery: 'bands', imageRotation: 270 });
+  expect(receive.mock.calls[0]![1].pre.documents).toHaveLength(2);
+});
+
+it('preserves the first draft on strip quota failure without starting another verification', async () => {
+  const data = responses(1, 0, false); if (!data.full.ok) return;
+  data.full.pre.expectedNfs = 2;
+  const receive = vi.fn();
+  const run = readAiPhotos([photo('bands-quota.jpg')], receive, undefined, undefined, { orientations: [0], preferredModel: 'lite', quotaFallback: true, selective: true });
+  (await pendingCall('bands-quota.jpg', 'full-lite')).pending.resolve(data.full);
+  (await pendingCall('bands-quota.jpg', 'full-lite', 1)).pending.resolve(quotaFailure('daily')); await run;
+  expect(calls).toHaveLength(2);
+  expect(receive.mock.calls[0]![1].pre.documents).toEqual(data.full.pre.documents);
+  expect(receive.mock.calls[0]![1].pre.headerReview.join(' ')).toContain('faixas indisponível');
+});

@@ -1,3 +1,4 @@
+import { needsBandReading, photoBandPayload, applyBandRead } from './photo-bands';
 import { requestAiPhoto } from './photo-ai-request';
 import { photoRepairPlan, applyPhotoRepair } from './photo-repair';
 import { getSupabaseClient } from './supabase-client';
@@ -156,7 +157,7 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
         image = await createImageBitmap(file);
         if (photoSignal.aborted) throw new Error('Leitura interrompida.');
         const payload = photoPayload(image, orientation);
-        let full = options.initialRead ? { ok: true as const, pre: options.initialRead, rotation: 0, check: null, repair: null, text: '' } : await providerAwareRequest({ data: { ...payload, accessToken, mode: preferLite ? 'full-lite' : 'full' }, signal: photoSignal });
+        let full = options.initialRead ? { ok: true as const, pre: options.initialRead, rotation: options.initialRead.imageRotation ?? 0, check: null, repair: null, text: '' } : await providerAwareRequest({ data: { ...payload, accessToken, mode: preferLite ? 'full-lite' : 'full' }, signal: photoSignal });
         let usedLite = preferLite;
         let normalFailure = '';
         if (!preferLite && options.quotaFallback && !full.ok && canUseLite(full) && !photoSignal.aborted) {
@@ -164,12 +165,22 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
           progress(isQuotaFailure(full) ? 'Cota do Gemini normal atingida · conferindo pelo Flash Lite…' : 'Gemini normal indisponível · conferindo pelo Flash Lite…');
           full = await providerAwareRequest({ data: { ...payload, accessToken, mode: 'full-lite' }, signal: photoSignal });
         }
-        if (full.ok) completedPhoto = { ...full.pre, aiReader: usedLite ? 'lite' : 'normal', verification: { status: 'single', checkedFields: 0, conflicts: 0 } };
+        if (full.ok) completedPhoto = { ...full.pre, imageRotation: ((orientation + full.rotation) % 360) as PhotoAngle, aiReader: usedLite ? 'lite' : 'normal', verification: { status: 'single', checkedFields: 0, conflicts: 0 } };
         if (photoSignal.aborted) throw new Error('Leitura interrompida.');
         if (!full.ok) { if (!signal?.aborted) onResult(index, { error: normalFailure ? `${normalFailure} Flash Lite: ${full.error}` : full.error, ...('fallback' in full && full.fallback === false ? { fallback: false } : {}) }); continue; }
         let pre = completedPhoto!;
         let numbers: NumericPhotoRead | undefined;
-        if (options.numericCheck && pre.kind === 'pre') {
+        const bandsRequested = !options.singlePass && needsBandReading(pre) && (!options.initialRead || options.initialRead.imageRotation !== undefined);
+        if (bandsRequested) {
+          options.onProvisional?.(index, pre);
+          progress('Relendo a tabela em faixas ampliadas, sem misturar as linhas…');
+          const bandRead = await providerAwareRequest({ data: { ...photoBandPayload(image, pre.imageRotation ?? 0, photoSignal), accessToken, mode: 'full-lite' }, signal: photoSignal });
+          photoSignal.throwIfAborted();
+          if (bandRead.ok) pre = applyBandRead(pre, bandRead.pre);
+          else pre = { ...pre, headerReview: [...(pre.headerReview ?? []), `Leitura por faixas indisponível: ${bandRead.error}`] };
+          completedPhoto = pre;
+        }
+        if (!bandsRequested && options.numericCheck && pre.kind === 'pre') {
           options.onProvisional?.(index, pre);
           progress('Conferindo CTC, NF e volumes diretamente na tabela…');
           const numericSignal = AbortSignal.any([photoSignal, AbortSignal.timeout(9000)]);
@@ -184,7 +195,7 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
           }
           completedPhoto = pre;
         }
-        if (!options.singlePass && needsPhotoVerification(pre)) {
+        if (!bandsRequested && !options.singlePass && needsPhotoVerification(pre)) {
           if (!providerBlocks.verify) progress('Conferindo campos sinalizados em uma segunda leitura…');
           // An unread local cell is a review notice, not evidence that the AI
           // is wrong. Reserve automatic extra requests for actual differences;

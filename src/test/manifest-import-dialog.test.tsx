@@ -604,3 +604,20 @@ it('counts multiple NF lines under one CTC once and flags only an actual total m
  expect(within(totals).queryByText('Confira a contagem')).not.toBeInTheDocument(); expect(within(totals).getByText('Confira a soma')).toBeInTheDocument();
  expect(within(totals).getByText('Confira a soma').parentElement).toHaveAttribute('data-mismatch','true');
 });
+
+it('keeps NF totals and rotation for rereading, and accepts removal of spurious rows only from validated strip recovery', async () => {
+  const original = result('DI00000000001', '0000000001', '100-1');
+  const first = { ...original, pre: { ...original.pre, imageRotation: 270 as const, expectedNfs: 1, documents: [...original.pre.documents, { ...original.pre.documents[0]!, nf: '101-1' }], verification: { status: 'review' as const, checkedFields: 0, conflicts: 1 } } };
+  mocks.read.mockImplementationOnce(async (_files: File[], receive: (index: number, value: PhotoReadResult) => void) => receive(0, first))
+    .mockImplementationOnce(async (_files: File[], receive: (index: number, value: PhotoReadResult) => void) => receive(0, { ...original, pre: { ...original.pre, expectedNfs: 1, imageRotation: 270, tableRecovery: 'bands', verification: { status: 'review', checkedFields: 3, conflicts: 1 } } }));
+  render(<ManifestImportDialog open onOpenChange={vi.fn()} manifests={[]} onCreate={vi.fn()} />);
+  await waitFor(() => expect(screen.getByLabelText('Enviar várias fotos')).toBeEnabled());
+  fireEvent.change(screen.getByLabelText('Enviar várias fotos'), { target: { files: [new File(['a'], 'bands.jpg', { type: 'image/jpeg' })] } });
+  expect(await screen.findByText('Cabeçalho: 1 NFs · cadastro: 2.')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Reler campos sinalizados' }));
+  await waitFor(() => expect(mocks.read).toHaveBeenCalledTimes(2));
+  expect(mocks.read.mock.calls[1]![5]).toMatchObject({ expectedNfs: 1, imageRotation: 270 });
+  await waitFor(() => expect(screen.queryByRole('combobox', { name: 'Selecionar CTC' })).not.toBeInTheDocument());
+  expect(screen.getByLabelText('NF-série')).toHaveValue('100-1');
+  expect(screen.queryByText('Cabeçalho: 1 NFs · cadastro: 2.')).not.toBeInTheDocument();
+});
