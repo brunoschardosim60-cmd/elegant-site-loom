@@ -32,7 +32,7 @@ it('identifies Lite confirmation while keeping field review and requiring explic
   render(<ManifestImportDialog open onOpenChange={vi.fn()} manifests={[]} onCreate={create} />);
   await waitFor(() => expect(screen.getByLabelText('Enviar várias fotos')).toBeEnabled());
   fireEvent.change(screen.getByLabelText('Enviar várias fotos'), { target: { files: [new File(['a'], 'lite.jpg', { type: 'image/jpeg' })] } });
-  expect(await screen.findByText('Conferência por Flash Lite · leitor de reserva')).toBeInTheDocument();
+  expect(await screen.findByText('Conferência por Flash Lite')).toBeInTheDocument();
   expect(screen.getByLabelText('NF-série')).toHaveValue('100-1');
   expect(screen.getByText('NF corrigido pela IA: 10-1 / 100-1. Confira na foto.')).toBeInTheDocument();
   expect(create).not.toHaveBeenCalled();

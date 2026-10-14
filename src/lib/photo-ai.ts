@@ -7,7 +7,7 @@ import type { PhotoFields } from './photo-fields';
 
 type ProviderFailure = Extract<Awaited<ReturnType<typeof requestAiPhoto>>, { ok: false }>;
 type ProviderStage = 'full' | 'lite' | 'verify';
-export type PhotoAiOptions = { orientations?: readonly PhotoAngle[]; singlePass?: boolean; quotaFallback?: boolean };
+export type PhotoAiOptions = { orientations?: readonly PhotoAngle[]; singlePass?: boolean; quotaFallback?: boolean; preferredModel?: 'normal' | 'lite' };
 const temporaryBlocks = new Map<string, { until: number; result: ProviderFailure }>();
 const providerCooldown = 2 * 60 * 1000;
 // Full reading and verification use different models and quota buckets.
@@ -51,6 +51,7 @@ function photoPayload(image: ImageBitmap, rotation = 0, detail = false, maxSize 
 
 export async function readAiPhotos(files: File[], onResult: Parameters<typeof import('./photo-ocr').readPrePhotos>[1], onProgress: Parameters<typeof import('./photo-ocr').readPrePhotos>[2], signal?: AbortSignal, options: PhotoAiOptions = {}) {
   if (signal?.aborted) return;
+  const preferLite = options.preferredModel === 'lite';
   const sessionRequest = getSupabaseClient().then(client => client.auth.getSession());
   let stopSessionWait = () => {};
   const interruptedSession = new Promise<undefined>(resolve => { stopSessionWait = () => resolve(undefined); });
@@ -80,6 +81,7 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
   };
   const providerBlocks: Record<ProviderStage, ProviderFailure | undefined> = { full: stageBlock('full'), lite: stageBlock('lite'), verify: stageBlock('verify') };
   const getBlockedError = () => {
+    if (preferLite) return providerBlocks.lite;
     const full = providerBlocks.full;
     if (!full || !options.quotaFallback || !canUseLite(full)) return full;
     const lite = providerBlocks.lite;
@@ -140,17 +142,17 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
         image = await createImageBitmap(file);
         if (photoSignal.aborted) throw new Error('Leitura interrompida.');
         const payload = photoPayload(image, orientation);
-        let full = await providerAwareRequest({ data: { ...payload, accessToken, mode: 'full' }, signal: photoSignal });
-        let usedLite = false;
+        let full = await providerAwareRequest({ data: { ...payload, accessToken, mode: preferLite ? 'full-lite' : 'full' }, signal: photoSignal });
+        let usedLite = preferLite;
         let normalFailure = '';
-        if (options.quotaFallback && !full.ok && canUseLite(full) && !photoSignal.aborted) {
+        if (!preferLite && options.quotaFallback && !full.ok && canUseLite(full) && !photoSignal.aborted) {
           usedLite = true; normalFailure = fullFailureReason(full);
           progress(isQuotaFailure(full) ? 'Cota do Gemini normal atingida · conferindo pelo Flash Lite…' : 'Gemini normal indisponível · conferindo pelo Flash Lite…');
           full = await providerAwareRequest({ data: { ...payload, accessToken, mode: 'full-lite' }, signal: photoSignal });
         }
         if (full.ok) completedPhoto = { ...full.pre, aiReader: usedLite ? 'lite' : 'normal', verification: { status: 'single', checkedFields: 0, conflicts: 0 } };
         if (photoSignal.aborted) throw new Error('Leitura interrompida.');
-        if (!full.ok) { if (!signal?.aborted) onResult(index, { error: usedLite ? `${normalFailure} Flash Lite: ${full.error}` : full.error, ...('fallback' in full && full.fallback === false ? { fallback: false } : {}) }); continue; }
+        if (!full.ok) { if (!signal?.aborted) onResult(index, { error: normalFailure ? `${normalFailure} Flash Lite: ${full.error}` : full.error, ...('fallback' in full && full.fallback === false ? { fallback: false } : {}) }); continue; }
         let pre = completedPhoto!;
         if (!options.singlePass && needsPhotoVerification(full.pre)) {
           if (!providerBlocks.verify) progress('Conferindo campos sinalizados em uma segunda leitura…');

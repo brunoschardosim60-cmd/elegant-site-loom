@@ -86,6 +86,32 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('AI photo import pipeline', () => {
+  it('uses Lite directly even when normal is blocked and makes one independent full read', async () => {
+    const session=(await mocks.session()).data.session;
+    rememberPhotoProviderBlock(`${session.user.id}:photo-model-stages-v3:full`,quotaFailure('daily'));
+    const receive=vi.fn();
+    const batch=readAiPhotos([photo('lite-primary.jpg')],receive,undefined,undefined,{preferredModel:'lite',singlePass:true,quotaFallback:true,orientations:[270]});
+    (await pendingCall('lite-primary.jpg','full-lite')).pending.resolve(responses(1,0,true).full);await batch;
+    expect(calls.map(c=>c.input.data.mode)).toEqual(['full-lite']);
+    expect(receive.mock.calls[0]![1].pre.aiReader).toBe('lite');
+    expect(mocks.orient).not.toHaveBeenCalled();expect(mocks.decode).toHaveBeenCalledTimes(1);
+  });
+  it('keeps local fallback after direct Lite quota and skips subsequent photos without calling normal', async () => {
+    const options={preferredModel:'lite' as const,singlePass:true,quotaFallback:true,orientations:[0] as const};
+    const receive=vi.fn(),first=readAiPhotos([photo('lite-primary-quota.jpg')],receive,undefined,undefined,options);
+    (await pendingCall('lite-primary-quota.jpg','full-lite')).pending.resolve(quotaFailure('daily'));await first;
+    await readAiPhotos([photo('lite-primary-blocked.jpg')],receive,undefined,undefined,options);
+    expect(calls.map(c=>c.input.data.mode)).toEqual(['full-lite']);expect(mocks.decode).toHaveBeenCalledTimes(1);
+    expect(receive.mock.calls[0]![1].error).toBe(quotaMessages.daily);
+    expect(receive.mock.calls[1]![1].error).toMatch(/Cota diária.*leitor gratuito/i);
+  });
+  it('does not retry direct Lite through normal after a technical failure', async () => {
+    const receive=vi.fn(),options={preferredModel:'lite' as const,singlePass:true,quotaFallback:true,orientations:[0] as const};
+    const first=readAiPhotos([photo('lite-primary-offline.jpg')],receive,undefined,undefined,options);
+    (await pendingCall('lite-primary-offline.jpg','full-lite')).pending.resolve({ok:false,unavailable:true,tryLite:true,retryable:false,error:'Flash Lite indisponível.'});await first;
+    await readAiPhotos([photo('lite-primary-cooldown.jpg')],receive,undefined,undefined,options);
+    expect(calls.map(c=>c.input.data.mode)).toEqual(['full-lite']);expect(receive).toHaveBeenCalledTimes(2);
+  });
   it('keeps one normal full read when its quota is available', async () => {
     const receive = vi.fn();
     const batch = readAiPhotos([photo('normal-available.jpg')], receive, undefined, undefined, { singlePass: true, quotaFallback: true, orientations: [90] });

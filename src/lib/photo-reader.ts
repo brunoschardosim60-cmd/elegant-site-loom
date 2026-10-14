@@ -75,7 +75,7 @@ export async function readPhotosWithFallback(files: File[], onResult: OnResult, 
           const pre = reading && !('error' in reading) ? correctLocalPhoto(reading.pre, result.pre) : result.pre;
           deliver(index, { ...result, pre, text: JSON.stringify(pre, null, 2), milliseconds: elapsed(), pendingVerification: false });
         }
-      }, (_position, message) => progress(index, message), signal, { singlePass: true, quotaFallback: true, ...(angle !== undefined ? { orientations: [angle] } : {}) });
+      }, (_position, message) => progress(index, message), signal, { singlePass: true, quotaFallback: true, preferredModel: 'lite', ...(angle !== undefined ? { orientations: [angle] } : {}) });
       if (!finished.has(index) && !signal?.aborted) fallback(index, 'A conferência por IA terminou sem retornar os dados.');
     } catch (error) {
       if (signal?.aborted) return;

@@ -69,9 +69,9 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
         if (membership.error || membership.data !== serviceOwner) return { ok: false as const, fallback: false, error: 'Sua conta ainda não foi incluída na equipe autorizada a usar a leitura por IA. Confira o convite em Equipe.' };
       }
       const model = data.orientationOnly || data.mode === 'survey' || liteFull ? 'gemini-3.5-flash-lite' : data.mode === 'verify' ? process.env['GEMINI_OCR_VERIFY_MODEL'] || 'gemini-3.5-flash-lite' : process.env['GEMINI_OCR_MODEL'] || 'gemini-3.8-flash';
-      // The additional credential is preferred for normal Gemini; Lite keeps
-      // the original primary. These are model preferences, never quota rotation.
-      const keys = providerKeys(!model.toLowerCase().includes('lite'));
+      // Ana's additional credential is preferred for the photo reader. The
+      // original remains a technical reserve, never quota rotation.
+      const keys = providerKeys(true);
       if (!keys.length) return { ok: false as const, unavailable: true, error: 'Configure a chave Gemini no servidor da Vercel para ativar a leitura por IA.' };
       const now = Date.now();
       for (const [ip, value] of requests) if (value.until < now) requests.delete(ip);

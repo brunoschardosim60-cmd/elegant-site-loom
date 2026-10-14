@@ -41,7 +41,7 @@ describe('local-first photo reading with independent AI correction', () => {
     expect(mocks.local.mock.calls[0]![0]).toEqual(files.slice(0, 2));
     expect(mocks.local.mock.calls[0]![3].aborted).toBe(false); expect(mocks.local.mock.calls[0]![4]).toBe(true);
     expect(mocks.ai.mock.calls[0]![0]).toEqual([files[0]]);
-    expect(mocks.ai.mock.calls[0]![4]).toEqual({ singlePass: true, quotaFallback: true, orientations: [270] });
+    expect(mocks.ai.mock.calls[0]![4]).toEqual({ singlePass: true, quotaFallback: true, preferredModel: 'lite', orientations: [270] });
     expect(progress).toHaveBeenCalledWith(0, 'Leitura local · Lendo');
     sendLocal(1, reading(1, true)); localGate.resolve(); aiGate.resolve(); await run;
     expect(finals(receive).map(([index]) => index)).toEqual([0, 1]);

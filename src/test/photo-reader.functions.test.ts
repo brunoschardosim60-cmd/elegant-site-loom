@@ -422,11 +422,11 @@ it('prefers the additional credential for normal Gemini and keeps one technical 
   expect(mocks.fetch.mock.calls.map(([, init]) => init.headers['x-goog-api-key'])).toEqual(['synthetic-new-reserve', 'synthetic-provider-key', 'synthetic-old-reserve']);
   expect(new Set(mocks.fetch.mock.calls.map(([, init]) => init.signal)).size).toBe(1);
 });
-it.each(['full-lite', 'verify', 'survey'] as const)('keeps the original primary for %s and the additional key as technical reserve', async mode => {
+it.each(['full-lite', 'verify', 'survey'] as const)('prefers the additional key for %s and keeps the original as technical reserve', async mode => {
   vi.stubEnv('GEMINI_API_KEY_FALLBACK_2', 'synthetic-new-reserve');
   mocks.fetch.mockResolvedValueOnce(new Response('unavailable', { status: 503 })).mockResolvedValueOnce(successResponse());
   await readPhotoWithGemini({ data: { ...input.data, mode } });
-  expect(mocks.fetch.mock.calls.map(([, init]) => init.headers['x-goog-api-key'])).toEqual(['synthetic-provider-key', 'synthetic-new-reserve']);
+  expect(mocks.fetch.mock.calls.map(([, init]) => init.headers['x-goog-api-key'])).toEqual(['synthetic-new-reserve', 'synthetic-provider-key']);
 });
 it('moves a normal-model 503 to Lite immediately without retrying the same model on more credentials', async () => {
   vi.stubEnv('GEMINI_API_KEY_FALLBACK_2', 'synthetic-additional'); vi.stubEnv('GEMINI_API_KEY_FALLBACK', 'synthetic-older');
