@@ -19,6 +19,7 @@ it('recovers a missing physical row without merging by array position or rewriti
   const result = applyBandRead(first, independent);
   expect(result.documents).toHaveLength(3);
   expect(result.documents[0]!.client).toBe('LAB S/A');
+  expect(result.documents[0]!.review).toEqual(expect.arrayContaining([expect.stringContaining('Cliente divergente entre leituras')]));
   expect(result.documents[1]).toMatchObject({ ctc: '0000000001', nf: '101-1', volumes: '3', review: [expect.stringContaining('recuperada')] });
   expect(result).toMatchObject({ tableRecovery: 'bands', imageRotation: 270, verification: { status: 'review' } });
 });

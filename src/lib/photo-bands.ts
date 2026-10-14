@@ -68,14 +68,17 @@ export function applyBandRead(pre: PhotoFields, candidate: PhotoFields): PhotoFi
   result.documents = result.documents.map(row => {
     const matches = pre.documents.filter(old => old.ctc === row.ctc && old.nf === row.nf);
     const old = matches.length === 1 ? matches[0] : undefined;
+    const literalName = (value: string | undefined) => (value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const nameNotes = old ? (['client', 'recipient'] as const).filter(field => old[field] && row[field] && literalName(old[field]) !== literalName(row[field]))
+      .map(field => `${field === 'client' ? 'Cliente' : 'Destinatário'} divergente entre leituras: ${old[field]} / ${row[field]}. Confira na foto.`) : [];
     if (old && old.volumes === row.volumes) {
       // Keep literal names from the first reading; matching totals cannot
       // authorize an unrelated name rewrite during numeric recovery.
       return { ...row, client: old.client || row.client || '', recipient: old.recipient || row.recipient || '',
-        review: [...new Set([...(row.review ?? []), ...(old.review ?? []).filter(note => !/Cabeçalho informa|Confira a soma|segunda leitura|Volumes divergente|NF e série divergente/i.test(note))])] };
+        review: [...new Set([...(row.review ?? []), ...nameNotes, ...(old.review ?? []).filter(note => !/Cabeçalho informa|Confira a soma|segunda leitura|Volumes divergente|NF e série divergente/i.test(note))])] };
     }
     changed++;
-    return { ...row, review: [...new Set([...(row.review ?? []), 'Linha recuperada na leitura por faixas. Confira CTC, NF-série e volumes na foto.'])] };
+    return { ...row, review: [...new Set([...(row.review ?? []), ...nameNotes, 'Linha recuperada na leitura por faixas. Confira CTC, NF-série e volumes na foto.'])] };
   });
   result.headerReview = [...new Set([...(result.headerReview ?? []), 'Tabela relida em faixas ampliadas; contagens de CTCs, NFs e volumes coincidem com o cabeçalho. Isso não substitui a revisão dos campos sinalizados.',
     ...(['id', 'plate', 'driver', 'issueDate'] as const).filter(field => pre[field] !== result[field]).map(field => `${({ id: 'Número do pré', plate: 'Placa', driver: 'Motorista', issueDate: 'Data de emissão' })[field]} mudou na leitura por faixas. Confira no cabeçalho da foto.`)])];
