@@ -45,10 +45,10 @@ export async function readPhotosWithFallback(files: File[], onResult: OnResult, 
   const mobile = typeof navigator !== 'undefined' && (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || 'deviceMemory' in navigator && Number((navigator as Navigator & { deviceMemory?: number }).deviceMemory) <= 4);
   const verifier = import('./photo-numeric-reader').then(module => module.createPhotoNumericVerifier(mobile ? 1 : 2));
   void verifier.catch(() => {});
-  const numericCheck = async (file: File, angle: PhotoAngle, checkSignal: AbortSignal) => {
+  const numericCheck = async (file: File, angle: PhotoAngle, checkSignal: AbortSignal, pre?: PhotoFields) => {
     const reader = await verifier;
     checkSignal.throwIfAborted();
-    return reader.read(file, angle, checkSignal);
+    return reader.read(file, angle, checkSignal, pre);
   };
   const read = async (index: number) => {
     const started = performance.now(), photo = new AbortController();

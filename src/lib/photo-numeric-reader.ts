@@ -21,7 +21,7 @@ function cellConfidence(page: OcrPage, index: number, field: 'ctc' | 'nf' | 'vol
 /** Two independent OCR preparations must agree before a numeric cell can
  * replace an AI value. The AI supplies orientation, never numbers or boxes.
  */
-export async function readPhotoNumbers(file: File, angle: PhotoAngle, signal?: AbortSignal, existingWorker?: Worker): Promise<NumericPhotoRead> {
+export async function readPhotoNumbers(file: File, angle: PhotoAngle, signal?: AbortSignal, existingWorker?: Worker, ai?: PhotoFields): Promise<NumericPhotoRead> {
   const started = performance.now();
   signal?.throwIfAborted();
   const starting = existingWorker ? Promise.resolve(existingWorker) : createWorker('por');
@@ -56,7 +56,7 @@ export async function readPhotoNumbers(file: File, angle: PhotoAngle, signal?: A
     if (pre.kind === 'pre') {
       try { barcodeId = readPreBarcode(await readGrayImage(source), data, signal); } catch { signal?.throwIfAborted(); }
       const detail = await Promise.race([prepareForOcr(file, angle, 3840, signal), aborted]);
-      const { data: secondPage } = await Promise.race([worker.recognize(detail, {}, { text: true, blocks: true }), aborted]);
+      const secondPage = ai ? { text: '' } : (await Promise.race([worker.recognize(detail, {}, { text: true, blocks: true }), aborted])).data;
       const second = parsePhotoFields(secondPage);
       if (second.kind === 'pre') {
         for (const [index, row] of pre.documents.entries()) {
@@ -74,7 +74,14 @@ export async function readPhotoNumbers(file: File, angle: PhotoAngle, signal?: A
         for (const field of ['expectedRows', 'expectedNfs', 'totalVolumes'] as const) if (pre[field] && pre[field] === second[field]) confirmedHeaders[field] = pre[field]!;
         if (!barcodeId) try { barcodeId = readPreBarcode(await readGrayImage(detail), secondPage, signal); } catch { signal?.throwIfAborted(); }
       }
-      const regions = [...tableCtcRegions(data), ...tableCellRegions(data)].filter(region => !confirmed[region.row]?.[region.field]).slice(0, 180);
+      const regions = [...tableCtcRegions(data), ...tableCellRegions(data)].filter(region => {
+        if (confirmed[region.row]?.[region.field]) return false;
+        if (!ai) return true;
+        const row = pre.documents[region.row]!;
+        const candidates = ai.documents.filter(other => other.ctc === row.ctc && (ai.documents.filter(item => item.ctc === row.ctc).length === 1 && pre.documents.filter(item => item.ctc === row.ctc).length === 1 || other.nf.replace('-', '') === row.nf.replace('-', '')));
+        if (region.field === 'ctc') return !ai.documents.some(other => other.ctc === row.ctc);
+        return candidates.length === 1 && !!row[region.field] && row[region.field].replace('-', '') !== candidates[0]![region.field].replace('-', '');
+      }).slice(0, 180);
       const summary = tableSummaryRegions(data).filter(region => !confirmedHeaders[region.field as keyof typeof confirmedHeaders]).map(region => ({ ...region, row: -1 }));
       const remaining = [...regions, ...summary];
       // Keep completed evidence when a slow phone leaves little budget for
@@ -118,13 +125,15 @@ export function createPhotoNumericVerifier(size: 1 | 2) {
   const released = new Set<Worker>();
   const disposeWorker = async (worker: Worker) => { if (!released.has(worker)) { released.add(worker); await worker.terminate().catch(() => {}); } };
   const start = () => {
-    const pending = createWorker('por');
+    const pending = createWorker('por', 1, { logger: message => {
+      if (message.progress === 0 || message.progress === 1) console.debug('numeric_ocr_progress', { status: message.status, progress: message.progress });
+    } });
     void pending.then(worker => { if (closed) void disposeWorker(worker); }).catch(() => {});
     return pending;
   };
   const slots = Array.from({ length: size }, () => ({ worker: start() as Promise<Worker> | undefined, queue: Promise.resolve() as Promise<unknown> }));
   return {
-    read(file: File, angle: PhotoAngle, signal: AbortSignal) {
+    read(file: File, angle: PhotoAngle, signal: AbortSignal, ai?: PhotoFields) {
       const slot = slots[next++ % slots.length]!;
       const task = slot.queue.catch(() => {}).then(async () => {
         signal.throwIfAborted(); if (closed) throw new Error('Leitura interrompida.');
@@ -137,7 +146,7 @@ export function createPhotoNumericVerifier(size: 1 | 2) {
         try {
           const worker = await Promise.race([pending, stopped]);
           signal.throwIfAborted(); if (closed) throw new Error('Leitura interrompida.');
-          return await readPhotoNumbers(file, angle, signal, worker);
+          return await readPhotoNumbers(file, angle, signal, worker, ai);
         } catch (error) { cancel(); throw error; }
         finally { signal.removeEventListener('abort', cancel); }
       });

@@ -819,7 +819,7 @@ it('checks a complete plausible AI result against independent local numbers and 
   const run = readAiPhotos([photo('numeric.jpg')], receive, undefined, undefined, { orientations: [0], singlePass: true, preferredModel: 'lite', numericCheck });
   (await pendingCall('numeric.jpg', 'full-lite')).pending.resolve(data.full);
   await run;
-  expect(numericCheck).toHaveBeenCalledWith(expect.any(File), 270, expect.objectContaining({ aborted: false }));
+  expect(numericCheck).toHaveBeenCalledWith(expect.any(File), 270, expect.objectContaining({ aborted: false }), expect.objectContaining({ kind: 'pre' }));
   expect(receive.mock.calls[0]![1].pre.documents[0]).toMatchObject({ volumes: '3', review: expect.arrayContaining([expect.stringContaining('duas leituras locais')]) });
   expect(calls).toHaveLength(1);
 });

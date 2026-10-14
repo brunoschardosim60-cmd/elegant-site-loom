@@ -10,7 +10,7 @@ import type { NumericPhotoRead } from './photo-numeric-reader';
 
 type ProviderFailure = Extract<Awaited<ReturnType<typeof requestAiPhoto>>, { ok: false }>;
 type ProviderStage = 'full' | 'lite' | 'verify';
-export type PhotoAiOptions = { orientations?: readonly PhotoAngle[]; singlePass?: boolean; quotaFallback?: boolean; preferredModel?: 'normal' | 'lite'; selective?: boolean; initialRead?: PhotoFields; numericCheck?: (file: File, angle: PhotoAngle, signal: AbortSignal) => Promise<NumericPhotoRead>; onProvisional?: (index: number, pre: PhotoFields) => void };
+export type PhotoAiOptions = { orientations?: readonly PhotoAngle[]; singlePass?: boolean; quotaFallback?: boolean; preferredModel?: 'normal' | 'lite'; selective?: boolean; initialRead?: PhotoFields; numericCheck?: (file: File, angle: PhotoAngle, signal: AbortSignal, pre?: PhotoFields) => Promise<NumericPhotoRead>; onProvisional?: (index: number, pre: PhotoFields) => void };
 const temporaryBlocks = new Map<string, { until: number; result: ProviderFailure }>();
 const providerCooldown = 2 * 60 * 1000;
 // Full reading and verification use different models and quota buckets.
@@ -173,10 +173,11 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
           progress('Conferindo CTC, NF e volumes diretamente na tabela…');
           const numericSignal = AbortSignal.any([photoSignal, AbortSignal.timeout(9000)]);
           try {
-            numbers = await numericWithinSignal(options.numericCheck(file, ((orientation + full.rotation) % 360) as PhotoAngle, numericSignal), numericSignal);
+            numbers = await numericWithinSignal(options.numericCheck(file, ((orientation + full.rotation) % 360) as PhotoAngle, numericSignal, pre), numericSignal);
             numericSignal.throwIfAborted();
             pre = checkPhotoNumbers(pre, numbers);
-          } catch {
+          } catch (error) {
+            console.warn('numeric_ocr_failed', { type: error instanceof Error ? error.name : 'unknown', timedOut: numericSignal.aborted });
             photoSignal.throwIfAborted();
             pre = { ...pre, headerReview: [...(pre.headerReview ?? []), 'A conferência local dos números não terminou. Confira CTCs, NFs e volumes na foto.'] };
           }
