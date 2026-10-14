@@ -389,7 +389,7 @@ export async function readPrePhotos(files: File[], onResult: (index: number, res
         );
         if (readSignal.aborted) return;
         if (result.pre.kind === 'pre') preferred = result.angle;
-        emit(index, { ...result, pre: markLocalPhoto(result.pre) });
+        emit(index, { ...result, pre: markLocalPhoto(reconcileDocuments(result.pre)) });
       } catch {
         if (readSignal.aborted) return;
         emit(index, { error: 'Não foi possível ler esta foto. Tente outra foto ou preencha os dados.' });
@@ -412,6 +412,6 @@ export async function readPrePhotos(files: File[], onResult: (index: number, res
 /** Read a single photo with a dedicated worker. */
 export async function readPrePhoto(file: File, progress: (message: string) => void = () => {}, detailed = false) {
   const worker = await createWorker('por');
-  try { const result = await readWithWorker(worker, file, progress, undefined, detailed); return { ...result, pre: markLocalPhoto(result.pre) }; }
+  try { const result = await readWithWorker(worker, file, progress, undefined, detailed); return { ...result, pre: markLocalPhoto(reconcileDocuments(result.pre)) }; }
   finally { await worker.terminate().catch(() => {}); }
 }
