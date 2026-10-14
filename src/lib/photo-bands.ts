@@ -84,14 +84,15 @@ export function applyBandRead(pre: PhotoFields, candidate: PhotoFields): PhotoFi
     const nameValue = (field: 'client' | 'recipient') => {
       const before = oldName?.[field] ?? '', after = row[field] ?? '';
       const a = literalName(before), b = literalName(after);
-      // A single glyph may improve in a native-resolution strip (B/8, I/1).
-      // Larger name changes remain suggestions; never expand an abbreviation.
-      const singleGlyph = a.length === b.length && [...a].filter((char, index) => char !== b[index]).length === 1;
-      return !before || singleGlyph ? after : before;
+      // Native-resolution strips correct shifted names as well as B/8 glyphs.
+      // Keep formatting when both readings agree, reject large expansions,
+      // and make every differing name an explicit review item.
+      if (!after) return before;
+      if (a === b) return before || after;
+      return !before || b.length <= a.length + 2 ? after : before;
     };
     if (old && old.volumes === row.volumes) {
-      // Keep literal names from the first reading; matching totals cannot
-      // authorize an unrelated name rewrite during numeric recovery.
+      // Numeric agreement does not clear conflicting name review notices.
       return { ...row, client: nameValue('client'), recipient: nameValue('recipient'),
         review: [...new Set([...(row.review ?? []), ...nameNotes, ...(old.review ?? []).filter(note => !/Cabeçalho informa|Confira a soma|segunda leitura|Volumes divergente|NF e série divergente/i.test(note))])] };
     }

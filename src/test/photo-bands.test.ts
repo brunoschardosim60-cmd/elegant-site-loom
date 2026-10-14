@@ -29,11 +29,11 @@ it('independently checks dense multi-NF tables even when plausible substituted r
   expect(applyBandRead(page, structuredClone(page)).documents).toHaveLength(5);
 });
 
-it('preserves names anchored to a unique CTC while repairing its NF and volumes', () => {
+it('uses detailed names anchored to a unique CTC while repairing its NF and keeps the conflict visible', () => {
   const first = pre(); first.documents[2]!.nf = '199-1'; first.documents[2]!.recipient = 'CLIENTE COMPLETO';
   const second = pre(); second.documents[2]!.recipient = 'OUTRO NOME';
   const result = applyBandRead(first, second);
-  expect(result.documents[2]).toMatchObject({ nf: '102-1', recipient: 'CLIENTE COMPLETO' });
+  expect(result.documents[2]).toMatchObject({ nf: '102-1', recipient: 'OUTRO NOME' });
   expect(result.documents[2]!.review).toEqual(expect.arrayContaining([expect.stringContaining('Destinatário divergente')]));
 });
 
