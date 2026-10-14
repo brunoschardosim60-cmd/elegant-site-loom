@@ -1,5 +1,5 @@
 import { createWorker, PSM, type Worker } from 'tesseract.js';
-import { clean, mergeCtcPages, parsePhotoFields, photoScore, pageWords, tableCellRegions, tableCtcRepairRegions, tableSummaryRegions, type OcrPage, type PhotoFields, type OcrWord } from './photo-fields';
+import { clean, mergeCtcPages, reconcileDocuments, parsePhotoFields, photoScore, pageWords, tableCellRegions, tableCtcRepairRegions, tableSummaryRegions, type OcrPage, type PhotoFields, type OcrWord } from './photo-fields';
 import { buildDigitTemplates, matchPrintedNumber, type GrayImage } from './printed-digits';
 import { recoverNfSeparator } from './ocr-numeric';
 import { prepareForOcr, preparePrintedField, prepareNumericMontage, readGrayImage } from './image-prep';
@@ -292,7 +292,7 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
       } else best.pre.headerReview = [...(best.pre.headerReview ?? []), 'Número do pré não confirmado no recorte. Confira na foto.'];
     } catch { active(); /* Keep the full-page ID for review. */ }
   }
-  return { text: best.page.text.trim(), pre: best.pre, milliseconds: Math.round(performance.now() - started), angle: best.angle };
+  return { text: best.page.text.trim(), pre: reconcileDocuments(best.pre), milliseconds: Math.round(performance.now() - started), angle: best.angle };
 }
 
 /** One language download and worker initialization for the entire batch. */
