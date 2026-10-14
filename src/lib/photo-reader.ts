@@ -8,8 +8,9 @@ type Success = Exclude<LocalResult, { error: string }>;
 export type PhotoReadResult = (Success & { pendingVerification?: boolean; angle?: PhotoAngle }) | Extract<LocalResult, { error: string }>;
 type OnResult = (index: number, result: PhotoReadResult) => void;
 type OnProgress = NonNullable<Parameters<LocalReader>[2]>;
-export const PHOTO_READING_BUDGET_MS = 15000;
-const aiBudgetMs = 10000;
+export const PHOTO_READING_TARGET_MS = 15000;
+export const PHOTO_READING_BUDGET_MS = 45000;
+const aiBudgetMs = 27000;
 
 function safeCause(message: string): string {
   return message
@@ -31,9 +32,9 @@ async function untilCancelled(task: Promise<unknown>, signal: AbortSignal): Prom
   finally { signal.removeEventListener('abort', cancel); }
 }
 
-/** Flash Lite first without a Tesseract orientation worker. Only failures use
- * local OCR within the same 15-second budget. Two photos run concurrently;
- * time waiting in the queue is separate from processing time.
+/** Flash Lite first. Fifteen seconds is a progress target, not cancellation.
+ * Separate technical deadlines protect against stalled requests/workers.
+ * Two photos run concurrently; queue waiting is separate from processing.
  */
 export async function readPhotosWithFallback(files: File[], onResult: OnResult, onProgress: OnProgress = () => {}, signal?: AbortSignal, detailed = false) {
   if (signal?.aborted || !files.length) return;
@@ -46,6 +47,7 @@ export async function readPhotosWithFallback(files: File[], onResult: OnResult, 
     let delivered = false;
     const active = () => !delivered && !photo.signal.aborted && !signal?.aborted;
     const progress = (message: string) => { if (active()) onProgress(index, message); };
+    const targetTimer = setTimeout(() => progress('Esta foto está levando mais tempo. Continuamos lendo; você pode usar Parar.'), PHOTO_READING_TARGET_MS);
     const deliver = (result: PhotoReadResult) => {
       if (delivered || signal?.aborted) return;
       delivered = true;
@@ -81,7 +83,7 @@ export async function readPhotosWithFallback(files: File[], onResult: OnResult, 
             if (/Entre .*conta|sess[aã]o|autentica/i.test(cause)) deliver({ error: cause, fallback: false });
           }
         })(), ai.signal);
-        if (ai.signal.aborted && active() && cause === 'O Flash Lite não concluiu a leitura.') cause = 'O Flash Lite excedeu 10 segundos. Leitura local de reserva acionada.';
+        if (ai.signal.aborted && active() && cause === 'O Flash Lite não concluiu a leitura.') cause = 'O Flash Lite não respondeu dentro do prazo de segurança. Leitura local de reserva acionada.';
       } finally {
         clearTimeout(aiTimer); photo.signal.removeEventListener('abort', stopAi); ai.abort();
       }
@@ -103,8 +105,8 @@ export async function readPhotosWithFallback(files: File[], onResult: OnResult, 
       })(), photo.signal);
       if (active()) deliver({ error: `IA: ${safeCause(cause)} O leitor local terminou sem retornar dados. Tente novamente esta foto.`, fallback: false });
     } finally {
-      clearTimeout(timer); signal?.removeEventListener('abort', stop);
-      if (!delivered && !signal?.aborted) deliver({ error: 'Não foi possível concluir esta foto em 15 segundos. A foto permanece na lista: tente novamente ou selecione Leitura no navegador. Nenhum cadastro foi feito.', fallback: false });
+      clearTimeout(timer); clearTimeout(targetTimer); signal?.removeEventListener('abort', stop);
+      if (!delivered && !signal?.aborted) deliver({ error: 'Esta foto excedeu o tempo de segurança. Ela permanece na lista: tente novamente ou selecione Leitura no navegador. Nenhum cadastro foi feito.', fallback: false });
       photo.abort();
     }
   };

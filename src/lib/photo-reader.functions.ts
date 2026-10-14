@@ -41,7 +41,7 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     const startedAt = performance.now();
     const liteFull = data.mode === 'full-lite';
-    const timeoutMs = data.orientationOnly || data.mode === 'survey' ? 8000 : data.mode === 'verify' || liteFull ? 10000 : 20000;
+    const timeoutMs = data.orientationOnly || data.mode === 'survey' ? 8000 : liteFull ? 25000 : data.mode === 'verify' ? 10000 : 20000;
     const deadline = AbortSignal.timeout(timeoutMs);
     let requestSignal: AbortSignal | undefined;
     let stage = 'authentication';

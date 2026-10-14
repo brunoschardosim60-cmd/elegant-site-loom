@@ -30,7 +30,7 @@ it('does not send a cancelled photo', async () => {
   await expect(requestAiPhoto({ ...input, signal: controller.signal })).rejects.toHaveProperty('name', 'AbortError');
   expect(read).not.toHaveBeenCalled();
 });
-it.each([['full', 22000], ['full-lite', 12000], ['verify', 12000]] as const)('limits a stalled %s request to %sms and aborts the underlying call', async (mode, budget) => {
+it.each([['full', 22000], ['full-lite', 27000], ['verify', 12000]] as const)('limits a stalled %s request to %sms and aborts the underlying call', async (mode, budget) => {
   read.mockImplementation(() => new Promise(() => {}));
   let finished = false;
   const run = requestAiPhoto({ data: { ...input.data, mode } }).then(result => { finished = true; return result; });

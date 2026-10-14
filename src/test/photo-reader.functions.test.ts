@@ -126,7 +126,7 @@ it('aborts authentication HTTP work immediately on close and never starts Gemini
   expect(console.warn).not.toHaveBeenCalled();
 });
 
-it.each([['full', 20000], ['full-lite', 10000], ['verify', 10000]] as const)('includes stalled authentication in the same %s %sms deadline', async (mode, budget) => {
+it.each([['full', 20000], ['full-lite', 25000], ['verify', 10000]] as const)('includes stalled authentication in the same %s %sms deadline', async (mode, budget) => {
   mocks.user.mockReturnValue(new Promise(() => {}));
   let finished = false;
   const startedAt = Date.now();
@@ -223,7 +223,7 @@ it.each([
   expect(JSON.parse(mocks.fetch.mock.calls[0]![1].body).generationConfig.thinkingConfig.thinkingLevel).toBe(level);
 });
 
-it.each([['full', 20000], ['full-lite', 10000], ['verify', 10000]] as const)('aborts a stalled provider %s request at %sms and emits a safe fallback cause', async (mode, budget) => {
+it.each([['full', 20000], ['full-lite', 25000], ['verify', 10000]] as const)('aborts a stalled provider %s request at %sms and emits a safe fallback cause', async (mode, budget) => {
   mocks.fetch.mockImplementation((_url: string, init: RequestInit) => new Promise((_, reject) => init.signal!.addEventListener('abort', () => reject(init.signal!.reason), { once: true })));
   let finished = false;
   const startedAt = Date.now();

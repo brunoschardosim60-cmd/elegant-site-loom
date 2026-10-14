@@ -1,6 +1,6 @@
 import { waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { readPhotosWithFallback, PHOTO_READING_BUDGET_MS, type PhotoReadResult } from '@/lib/photo-reader';
+import { readPhotosWithFallback, PHOTO_READING_TARGET_MS, PHOTO_READING_BUDGET_MS, type PhotoReadResult } from '@/lib/photo-reader';
 import type { readPrePhotos } from '@/lib/photo-ocr';
 import { markLocalPhoto } from '@/lib/local-photo';
 const mocks = vi.hoisted(() => ({ ai: vi.fn(), local: vi.fn() }));
@@ -55,20 +55,38 @@ describe('AI first, bounded local fallback', () => {
     mocks.ai.mockImplementation(async(_files:File[],send:OnResult)=>send(0,unknown));mocks.local.mockImplementation(async(_files:File[],send:OnResult)=>send(0,reading(0,true)));
     const result=vi.fn();await readPhotosWithFallback([files[0]!],result);expect(result.mock.calls[0]![1].pre.readingFallback).toBe(true);
   });
-  it('starts fallback after 10 seconds and ignores a late AI response', async()=>{
+  it('starts fallback only after the technical AI deadline and ignores a late response', async()=>{
     vi.useFakeTimers();let late!:OnResult;mocks.ai.mockImplementation((_files:File[],send:OnResult)=>{late=send;return new Promise(()=>{});});
     mocks.local.mockImplementation(async(_files:File[],send:OnResult)=>send(0,reading(0,true)));
     const result=vi.fn(),run=readPhotosWithFallback([files[0]!],result);
-    await vi.advanceTimersByTimeAsync(9999);expect(mocks.local).not.toHaveBeenCalled();await vi.advanceTimersByTimeAsync(1);await run;
-    expect(result.mock.calls[0]![1].milliseconds).toBe(10000);late(0,reading(0));expect(result).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(26999);expect(mocks.local).not.toHaveBeenCalled();await vi.advanceTimersByTimeAsync(1);await run;
+    expect(result.mock.calls[0]![1].milliseconds).toBe(27000);late(0,reading(0));expect(result).toHaveBeenCalledOnce();
   });
-  it('settles at 15 seconds even when both readers ignore cancellation, without accepting late callbacks', async()=>{
+  it('settles at the technical deadline even when both readers ignore cancellation, without accepting late callbacks', async()=>{
     vi.useFakeTimers();let late!:OnResult;let progress!:OnProgress;
     mocks.ai.mockImplementation(()=>new Promise(()=>{}));mocks.local.mockImplementation((_files:File[],send:OnResult,update:OnProgress)=>{late=send;progress=update;return new Promise(()=>{});});
     const result=vi.fn(),update=vi.fn(),run=readPhotosWithFallback([files[0]!],result,update);
     await vi.advanceTimersByTimeAsync(PHOTO_READING_BUDGET_MS);await run;
-    expect(result).toHaveBeenCalledExactlyOnceWith(0,expect.objectContaining({error:expect.stringContaining('15 segundos')}));
+    expect(result).toHaveBeenCalledExactlyOnceWith(0,expect.objectContaining({error:expect.stringContaining('tempo de segurança')}));
     const before=update.mock.calls.length;late(0,reading(0,true));progress(0,'tarde');expect(result).toHaveBeenCalledOnce();expect(update).toHaveBeenCalledTimes(before);
+  });
+  it('warns at fifteen seconds but accepts a difficult photo that the AI finishes later without running local OCR', async()=>{
+    vi.useFakeTimers();let finish!:OnResult;let aiSignal!:AbortSignal;
+    mocks.ai.mockImplementation((_files:File[],send:OnResult,_progress:OnProgress,signal:AbortSignal)=>{finish=send;aiSignal=signal;return new Promise(()=>{});});
+    const result=vi.fn(),progress=vi.fn(),run=readPhotosWithFallback([files[0]!],result,progress);
+    await vi.advanceTimersByTimeAsync(PHOTO_READING_TARGET_MS);
+    expect(aiSignal.aborted).toBe(false);expect(result).not.toHaveBeenCalled();expect(mocks.local).not.toHaveBeenCalled();
+    expect(progress).toHaveBeenCalledWith(0,expect.stringContaining('Continuamos lendo'));
+    await vi.advanceTimersByTimeAsync(1000);finish(0,reading(0));await run;
+    expect(result.mock.calls[0]![1].milliseconds).toBe(16000);expect(mocks.local).not.toHaveBeenCalled();
+    const count=progress.mock.calls.length;await vi.advanceTimersByTimeAsync(PHOTO_READING_BUDGET_MS);expect(progress).toHaveBeenCalledTimes(count);expect(result).toHaveBeenCalledOnce();
+  });
+  it('allows local recovery beyond the progress target when AI quota fails immediately', async()=>{
+    vi.useFakeTimers();let finish!:OnResult;mocks.ai.mockImplementation(async(_files:File[],send:OnResult)=>send(0,{error:'Sem cota'}));
+    mocks.local.mockImplementation((_files:File[],send:OnResult)=>{finish=send;return new Promise(()=>{});});
+    const result=vi.fn(),run=readPhotosWithFallback([files[0]!],result);
+    await vi.advanceTimersByTimeAsync(20000);expect(result).not.toHaveBeenCalled();finish(0,reading(0,true));await run;
+    expect(result.mock.calls[0]![1]).toMatchObject({milliseconds:20000,pre:{readingSource:'local',readingFallback:true}});
   });
   it.each(['ai','local'])('stops promptly during %s and does not start queued photos', async phase=>{
     let late!:OnResult;const stop=new AbortController();
