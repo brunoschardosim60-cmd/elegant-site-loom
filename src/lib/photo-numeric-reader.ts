@@ -1,5 +1,5 @@
 import { createWorker, PSM, type Worker } from 'tesseract.js';
-import { prepareForOcr, prepareNumericMontage, readGrayImage } from './image-prep';
+import { prepareBitmapForOcr as prepareForOcr, prepareNumericMontage, readGrayImage } from './image-prep';
 import { parsePhotoFields, pageWords, tableCellRegions, tableCtcRegions, tableSummaryRegions, type OcrPage, type PhotoFields } from './photo-fields';
 import { montageReadings } from './photo-ocr';
 import { readPreBarcode } from './pre-barcode';
@@ -26,6 +26,7 @@ export async function readPhotoNumbers(file: File, angle: PhotoAngle, signal?: A
   signal?.throwIfAborted();
   const starting = existingWorker ? Promise.resolve(existingWorker) : createWorker('por');
   let worker: Worker | undefined;
+  let original: ImageBitmap | undefined;
   let terminated = false;
   const dispose = async (value: Worker) => { if (terminated || existingWorker) return; terminated = true; await value.terminate().catch(() => {}); };
   let cancel!: () => void;
@@ -40,19 +41,19 @@ export async function readPhotoNumbers(file: File, angle: PhotoAngle, signal?: A
     // The model's rotation is a hint. Confirm it cheaply before spending time
     // reading a sideways full-resolution table (including misleading EXIF).
     const orientationStarted = performance.now();
-    const dimensions = await Promise.race([createImageBitmap(file), aborted]);
-    const portrait = dimensions.height > dimensions.width; dimensions.close();
+    original = await Promise.race([createImageBitmap(file), aborted]);
+    const portrait = original.height > original.width;
     // Luft pré tables are wide. A portrait bitmap is often an EXIF-rotated
     // landscape sheet; try a wide view before expensive sideways text OCR.
     const candidates = [...new Set(portrait ? [270, 90, angle, 0, 180] : [angle, 0, 180, 270, 90])] as PhotoAngle[];
     candidates.sort((a, b) => Number(portrait === (a === 0 || a === 180)) - Number(portrait === (b === 0 || b === 180)));
     for (const candidate of candidates) {
       if (performance.now() - orientationStarted > 3000) break;
-      const thumbnail = await Promise.race([prepareForOcr(file, candidate, 1400, signal), aborted]);
+      const thumbnail = await Promise.race([prepareForOcr(original, candidate, 1400, signal), aborted]);
       const reading = await Promise.race([worker.recognize(thumbnail), aborted]);
       if (hasUprightPhotoHeading(reading.data.text)) { angle = candidate; break; }
     }
-    const source = await Promise.race([prepareForOcr(file, angle, 3200, signal), aborted]);
+    const source = await Promise.race([prepareForOcr(original, angle, 3200, signal), aborted]);
     const { data } = await Promise.race([worker.recognize(source, {}, { text: true, blocks: true }), aborted]);
     signal?.throwIfAborted();
     const pre = parsePhotoFields(data);
@@ -61,7 +62,7 @@ export async function readPhotoNumbers(file: File, angle: PhotoAngle, signal?: A
     const confirmedHeaders: NonNullable<NumericPhotoRead['confirmedHeaders']> = {};
     if (pre.kind === 'pre') {
       try { barcodeId = readPreBarcode(await readGrayImage(source), data, signal); } catch { signal?.throwIfAborted(); }
-      const detail = await Promise.race([prepareForOcr(file, angle, 3840, signal), aborted]);
+      const detail = await Promise.race([prepareForOcr(original, angle, 3840, signal), aborted]);
       const secondPage = ai ? { text: '' } : (await Promise.race([worker.recognize(detail, {}, { text: true, blocks: true }), aborted])).data;
       const second = parsePhotoFields(secondPage);
       if (second.kind === 'pre') {
@@ -95,9 +96,9 @@ export async function readPhotoNumbers(file: File, angle: PhotoAngle, signal?: A
       if (remaining.length && performance.now() - started < 6500) {
         // Keep small glyphs from the source resolution. This confirmation uses
         // a higher-resolution crop independently of the page recognition.
-        const [small, large] = await Promise.all([createImageBitmap(source), createImageBitmap(detail)]);
-        const sx = large.width / small.width, sy = large.height / small.height;
-        small.close(); large.close();
+        const longest = Math.max(original.width, original.height), swap = angle === 90 || angle === 270;
+        const size = (limit: number) => [Math.round((swap ? original!.height : original!.width) * Math.min(3, limit / longest)), Math.round((swap ? original!.width : original!.height) * Math.min(3, limit / longest))];
+        const small = size(3200), large = size(3840), sx = large[0]! / small[0]!, sy = large[1]! / small[1]!;
         const boxes = remaining.map(({ box }) => ({ x0: box.x0 * sx, x1: box.x1 * sx, y0: box.y0 * sy, y1: box.y1 * sy }));
         const montage = await Promise.race([prepareNumericMontage(detail, boxes, { separateDigits: false, signal }), aborted]);
         await Promise.race([worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_BLOCK, tessedit_char_whitelist: '0123456789-', user_defined_dpi: '300' }), aborted]);
@@ -119,6 +120,7 @@ export async function readPhotoNumbers(file: File, angle: PhotoAngle, signal?: A
     return { pre, confirmed, confirmedHeaders, angle, ...(barcodeId ? { barcodeId } : {}), milliseconds: Math.round(performance.now() - started) };
   } finally {
     signal?.removeEventListener('abort', cancel);
+    original?.close();
     if (worker) await dispose(worker);
   }
 }

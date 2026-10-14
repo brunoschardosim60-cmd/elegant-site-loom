@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const worker = vi.hoisted(() => ({ recognize: vi.fn(), setParameters: vi.fn(), terminate: vi.fn() }));
 vi.mock('tesseract.js', () => ({ createWorker: vi.fn(async () => worker), PSM: { SPARSE_TEXT: '11', SINGLE_BLOCK: '6' } }));
 vi.mock('@/lib/pre-barcode', () => ({ readPreBarcode: vi.fn(() => undefined) }));
-vi.mock('@/lib/image-prep', () => ({ prepareForOcr: vi.fn(async (file: File) => file), readGrayImage: vi.fn(async () => ({ pixels: new Uint8Array(100), width: 10, height: 10 })),
+vi.mock('@/lib/image-prep', () => ({ prepareForOcr: vi.fn(async (file: File) => file), prepareBitmapForOcr: vi.fn(async () => new Blob(['image'])), readGrayImage: vi.fn(async () => ({ pixels: new Uint8Array(100), width: 10, height: 10 })),
   prepareNumericMontage: vi.fn(async (image: File, boxes: unknown[]) => ({ image, cells: boxes.map((box, i) => ({ box, target: { x0: 10, x1: 100, y0: i * 80, y1: i * 80 + 50 } })) })) }));
 import { createWorker } from 'tesseract.js';
 import { createPhotoNumericVerifier, readPhotoNumbers } from '@/lib/photo-numeric-reader';

@@ -1,9 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanNumericPixels, prepareForOcr, separateNumericGlyphs } from '@/lib/image-prep';
+import { cleanNumericPixels, prepareForOcr, prepareBitmapForOcr, separateNumericGlyphs } from '@/lib/image-prep';
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('Photo preparation', () => {
+  it('reuses a caller-owned bitmap for different resolutions without decoding or closing it', async () => {
+    const decode = vi.fn(), close = vi.fn(), draw = vi.fn();
+    vi.stubGlobal('createImageBitmap', decode);
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ fillRect: vi.fn(), translate: vi.fn(), rotate: vi.fn(), drawImage: draw } as unknown as CanvasRenderingContext2D);
+    vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation(callback => callback(new Blob(['prepared'])));
+    const bitmap = { width: 4032, height: 3024, close } as unknown as ImageBitmap;
+    await prepareBitmapForOcr(bitmap, 0, 1400); await prepareBitmapForOcr(bitmap, 0, 3200);
+    expect(draw).toHaveBeenCalledTimes(2); expect(decode).not.toHaveBeenCalled(); expect(close).not.toHaveBeenCalled();
+  });
   it('separates touching numeric glyphs without letting a nearby rule join them', () => {
     const width = 40, height = 40, pixels = new Uint8ClampedArray(width * height * 4).fill(255);
     const dark = (x: number, y: number) => { for (let c = 0; c < 3; c++) pixels[(y * width + x) * 4 + c] = 0; };

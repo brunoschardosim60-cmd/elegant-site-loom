@@ -1,9 +1,19 @@
 /** Preserve small printed digits while resizing and rotating the photo. */
-export async function prepareForOcr(file: File, rotation: 0 | 90 | 180 | 270 = 0, maxSize = 3840, signal?: AbortSignal): Promise<Blob> {
+export function prepareForOcr(file: File, rotation: 0 | 90 | 180 | 270 = 0, maxSize = 3840, signal?: AbortSignal): Promise<Blob> {
+  return prepareOcrSource(file, rotation, maxSize, signal);
+}
+
+/** Reuse a decoded image across orientation, table and crop preparations. */
+export function prepareBitmapForOcr(bitmap: ImageBitmap, rotation: 0 | 90 | 180 | 270 = 0, maxSize = 3840, signal?: AbortSignal): Promise<Blob> {
+  return prepareOcrSource(bitmap, rotation, maxSize, signal);
+}
+
+async function prepareOcrSource(file: File | ImageBitmap, rotation: 0 | 90 | 180 | 270, maxSize: number, signal?: AbortSignal): Promise<Blob> {
   let bitmap: ImageBitmap | undefined;
+  const borrowed = 'width' in file;
   try {
     signal?.throwIfAborted();
-    bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    bitmap = borrowed ? file : await createImageBitmap(file, { imageOrientation: 'from-image' });
     signal?.throwIfAborted();
     const longest = Math.max(bitmap.width, bitmap.height);
     const scale = Math.min(3, maxSize / longest);
@@ -14,7 +24,7 @@ export async function prepareForOcr(file: File, rotation: 0 | 90 | 180 | 270 = 0
     canvas.width = sideways ? height : width;
     canvas.height = sideways ? width : height;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    if (!ctx) return file;
+    if (!ctx) { if (borrowed) throw new Error('Canvas unavailable'); return file; }
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
     ctx.fillStyle = '#fff';
@@ -25,15 +35,16 @@ export async function prepareForOcr(file: File, rotation: 0 | 90 | 180 | 270 = 0
     signal?.throwIfAborted();
     // JPEG keeps the full-resolution OCR image much smaller in mobile memory than PNG,
     // while high quality preserves the fine strokes of printed table digits.
-    const prepared = await new Promise<Blob>(resolve => canvas.toBlob(b => resolve(b ?? file), 'image/jpeg', 0.96));
+    const prepared = await new Promise<Blob>((resolve, reject) => canvas.toBlob(b => b ? resolve(b) : borrowed ? reject(new Error('Image unavailable')) : resolve(file), 'image/jpeg', 0.96));
     signal?.throwIfAborted();
     return prepared;
   } catch {
     // Cancellation must remain cancellation; returning the original file here
     // would let the caller start a costly full-resolution OCR anyway.
     if (signal?.aborted) throw signal.reason ?? new DOMException('Leitura interrompida.', 'AbortError');
+    if (borrowed) throw new Error('Não foi possível preparar a imagem.');
     return file;
-  } finally { bitmap?.close(); }
+  } finally { if (!borrowed) bitmap?.close(); }
 }
 
 /** Enhance small table cells; process one decoded bitmap for all regions. */
