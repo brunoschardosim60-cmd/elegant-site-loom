@@ -2,7 +2,7 @@ import { requestAiPhoto } from './photo-ai-request';
 import { getSupabaseClient } from './supabase-client';
 import { needsPhotoVerification, reconcilePhotoRead } from './photo-verification';
 import { getPhotoProviderBlock, rememberPhotoProviderBlock } from './photo-provider-block';
-import { detectPhotoOrientations, type PhotoAngle } from './photo-orientation';
+import type { PhotoAngle } from './photo-orientation';
 import type { PhotoFields } from './photo-fields';
 
 type ProviderFailure = Extract<Awaited<ReturnType<typeof requestAiPhoto>>, { ok: false }>;
@@ -100,6 +100,8 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
   let orientations: readonly PhotoAngle[] = options.orientations ?? [];
   if (!options.orientations) {
     try {
+      const { detectPhotoOrientations } = await import('./photo-orientation');
+      if (signal?.aborted) return;
       orientations = await detectPhotoOrientations(files, (index, message) => { if (!signal?.aborted) onProgress?.(index, message); }, signal);
     } catch { /* An unavailable orientation worker must not prevent AI reading. */ }
   }

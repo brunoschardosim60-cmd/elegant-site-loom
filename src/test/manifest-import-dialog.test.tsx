@@ -38,6 +38,16 @@ it('identifies Lite confirmation while keeping field review and requiring explic
   expect(create).not.toHaveBeenCalled();
 });
 
+it('keeps a single AI reading with missing NF visibly pending review rather than verified', async () => {
+  const reading=result('DI00000000001','0000000001','');
+  mocks.read.mockImplementation(async(_files:File[],receive:(index:number,value:PhotoReadResult)=>void)=>receive(0,{...reading,pre:{...reading.pre,verification:{status:'single',checkedFields:0,conflicts:0},documents:[{...reading.pre.documents[0]!,review:['Confira NF e série']}]}}));
+  render(<ManifestImportDialog open onOpenChange={vi.fn()} manifests={[]} onCreate={()=>({ok:true,manifests:[]})} />);
+  await waitFor(()=>expect(screen.getByLabelText('Enviar várias fotos')).toBeEnabled());
+  fireEvent.change(screen.getByLabelText('Enviar várias fotos'),{target:{files:[new File(['a'],'partial.jpg',{type:'image/jpeg'})]}});
+  expect((await screen.findByText('Leitura por IA concluída')).closest('.import-alert')).toHaveClass('warning');
+  expect(screen.getByLabelText('NF-série')).toHaveValue('');
+});
+
 it('stops immediately, keeps completed photos, removes unread photos and ignores the old run during a new import', async () => {
   vi.mocked(URL.createObjectURL).mockImplementation(source => `blob:${(source as File).name}`);
   const runs: { args: Parameters<typeof readAiPhotos>; finish: () => void }[] = [];
@@ -278,7 +288,7 @@ it('identifies a local fallback and never shows automatic double-read agreement 
 });
 
 it.each([
-  ['single', 'Leitura concluída com validação local', 'verified'],
+  ['single', 'Leitura por IA concluída', 'verified'],
   ['unavailable', 'Leitura sem conferência independente', 'warning'],
 ] as const)('describes %s without claiming that two independent readings agreed', async (status, title, tone) => {
   mocks.read.mockImplementation(async (_files: File[], onResult: Parameters<typeof readAiPhotos>[1]) => {

@@ -1,6 +1,5 @@
 import { readAiPhotos } from './photo-ai';
 import { markLocalPhoto } from './local-photo';
-import { correctLocalPhoto } from './photo-local-correction';
 import type { PhotoAngle } from './photo-orientation';
 
 type LocalReader = typeof import('./photo-ocr').readPrePhotos;
@@ -9,6 +8,8 @@ type Success = Exclude<LocalResult, { error: string }>;
 export type PhotoReadResult = (Success & { pendingVerification?: boolean; angle?: PhotoAngle }) | Extract<LocalResult, { error: string }>;
 type OnResult = (index: number, result: PhotoReadResult) => void;
 type OnProgress = NonNullable<Parameters<LocalReader>[2]>;
+export const PHOTO_READING_BUDGET_MS = 15000;
+const aiBudgetMs = 10000;
 
 function safeCause(message: string): string {
   return message
@@ -20,102 +21,95 @@ function safeCause(message: string): string {
     .trim().slice(0, 500) || 'Falha na leitura.';
 }
 
-/** Return promptly even when a decoder/worker does not settle after abort. */
-async function untilCancelled(task: Promise<unknown>, signal?: AbortSignal): Promise<void> {
-  if (!signal) { await task; return; }
+/** Settle promptly even when a decoder, worker or network request ignores abort. */
+async function untilCancelled(task: Promise<unknown>, signal: AbortSignal): Promise<void> {
+  const observed = task.catch(() => {});
   if (signal.aborted) return;
   let cancel!: () => void;
   const stopped = new Promise<void>(resolve => { cancel = resolve; signal.addEventListener('abort', cancel, { once: true }); });
-  try { await Promise.race([task, stopped]); }
+  try { await Promise.race([observed, stopped]); }
   finally { signal.removeEventListener('abort', cancel); }
 }
 
-/** Local OCR fills the draft first. One independent AI read corrects it by CTC.
- * AI checks overlap the next local photo, with at most two requests in flight.
- * No photo/draft is stored or registered here; stopping retains only UI drafts.
+/** Flash Lite first without a Tesseract orientation worker. Only failures use
+ * local OCR within the same 15-second budget. Two photos run concurrently;
+ * time waiting in the queue is separate from processing time.
  */
 export async function readPhotosWithFallback(files: File[], onResult: OnResult, onProgress: OnProgress = () => {}, signal?: AbortSignal, detailed = false) {
   if (signal?.aborted || !files.length) return;
-  const started = performance.now();
-  const local = new Map<number, PhotoReadResult>();
-  const finished = new Set<number>();
-  const queued = new Set<number>();
-  const queue: number[] = [];
-  const tasks = new Set<Promise<void>>();
-  const progress = (index: number, message: string) => { if (!signal?.aborted && !finished.has(index)) onProgress(index, message); };
-  const deliver = (index: number, result: PhotoReadResult) => {
-    if (signal?.aborted || finished.has(index)) return;
-    finished.add(index); onResult(index, result);
-  };
-  const elapsed = () => Math.max(0, Math.round(performance.now() - started));
-  const fallback = (index: number, cause: string) => {
-    const reading = local.get(index);
-    if (!reading || 'error' in reading) {
-      deliver(index, { error: `IA: ${safeCause(cause)} Leitura gratuita: ${safeCause(reading && 'error' in reading ? reading.error : 'Não foi possível concluir a leitura local.')}`, fallback: false });
-      return;
-    }
-    const pre = markLocalPhoto(reading.pre);
-    deliver(index, { ...reading, milliseconds: elapsed(), pendingVerification: false, pre: {
-      ...pre, readingFallback: true,
-      headerReview: [...new Set([...(pre.headerReview ?? []), `Gemini: ${safeCause(cause)}`])],
-    } });
-  };
-  const check = async (index: number) => {
-    if (signal?.aborted) return;
-    const reading = local.get(index);
-    const angle = reading && !('error' in reading) ? reading.angle : undefined;
-    progress(index, 'Conferindo e corrigindo os dados pela IA…');
+  let next = 0;
+  const read = async (index: number) => {
+    const started = performance.now(), photo = new AbortController();
+    const stop = () => photo.abort();
+    signal?.addEventListener('abort', stop, { once: true });
+    const timer = setTimeout(stop, PHOTO_READING_BUDGET_MS);
+    let delivered = false;
+    const active = () => !delivered && !photo.signal.aborted && !signal?.aborted;
+    const progress = (message: string) => { if (active()) onProgress(index, message); };
+    const deliver = (result: PhotoReadResult) => {
+      if (delivered || signal?.aborted) return;
+      delivered = true;
+      onResult(index, 'error' in result ? result : { ...result, milliseconds: Math.round(performance.now() - started), pendingVerification: false });
+      photo.abort();
+    };
+    let cause = 'O Flash Lite não concluiu a leitura.';
     try {
-      await readAiPhotos([files[index]!], (_position, result) => {
-        if (signal?.aborted || finished.has(index)) return;
-        if ('error' in result) {
-          if ('fallback' in result && result.fallback === false && /Entre .*conta|sess[aã]o|autentica/i.test(result.error)) deliver(index, { error: safeCause(result.error), fallback: false });
-          else fallback(index, result.error);
-        } else {
-          const pre = reading && !('error' in reading) ? correctLocalPhoto(reading.pre, result.pre) : result.pre;
-          deliver(index, { ...result, pre, text: JSON.stringify(pre, null, 2), milliseconds: elapsed(), pendingVerification: false });
-        }
-      }, (_position, message) => progress(index, message), signal, { singlePass: true, quotaFallback: true, preferredModel: 'lite', ...(angle !== undefined ? { orientations: [angle] } : {}) });
-      if (!finished.has(index) && !signal?.aborted) fallback(index, 'A conferência por IA terminou sem retornar os dados.');
-    } catch (error) {
-      if (signal?.aborted) return;
-      if (error instanceof Error && /Entre .*conta|sess[aã]o|autentica/i.test(error.message)) deliver(index, { error: safeCause(error.message), fallback: false });
-      else fallback(index, 'Não foi possível concluir a conferência por IA.');
+      const ai = new AbortController();
+      const stopAi = () => ai.abort();
+      photo.signal.addEventListener('abort', stopAi, { once: true });
+      const aiTimer = setTimeout(stopAi, aiBudgetMs);
+      try {
+        progress('Lendo a foto pelo Flash Lite…');
+        await untilCancelled((async () => {
+          try {
+            await readAiPhotos([files[index]!], (_position, result) => {
+              if (!active() || ai.signal.aborted) return;
+              if ('error' in result) {
+                cause = safeCause(result.error);
+                if ('fallback' in result && result.fallback === false) deliver({ error: cause, fallback: false });
+                else ai.abort();
+              } else if (result.pre.kind === 'unknown' || !result.pre.documents.some(row => /^\d{10}$/.test(row.ctc))) {
+                cause = 'A IA não identificou o documento e seus CTCs. Pontos ilegíveis precisam de revisão.';
+                ai.abort();
+              } else deliver(result);
+            }, (_position, message) => { if (!ai.signal.aborted) progress(message); }, ai.signal, {
+              singlePass: true, quotaFallback: true, preferredModel: 'lite', orientations: [0],
+            });
+          } catch (error) {
+            if (!active() || ai.signal.aborted) return;
+            cause = safeCause(error instanceof Error ? error.message : 'Não foi possível conectar ao Flash Lite.');
+            if (/Entre .*conta|sess[aã]o|autentica/i.test(cause)) deliver({ error: cause, fallback: false });
+          }
+        })(), ai.signal);
+        if (ai.signal.aborted && active() && cause === 'O Flash Lite não concluiu a leitura.') cause = 'O Flash Lite excedeu 10 segundos. Leitura local de reserva acionada.';
+      } finally {
+        clearTimeout(aiTimer); photo.signal.removeEventListener('abort', stopAi); ai.abort();
+      }
+      if (!active()) return;
+      progress('IA indisponível · lendo no navegador…');
+      await untilCancelled((async () => {
+        try {
+          const { readPrePhotos } = await import('./photo-ocr');
+          if (!active()) return;
+          await readPrePhotos([files[index]!], (_position, result) => {
+            if (!active()) return;
+            if ('error' in result) deliver({ error: `IA: ${safeCause(cause)} Leitura gratuita: ${safeCause(result.error)}`, fallback: false });
+            else {
+              const pre = markLocalPhoto(result.pre);
+              deliver({ ...result, pre: { ...pre, readingFallback: true, headerReview: [...new Set([...(pre.headerReview ?? []), `Gemini: ${safeCause(cause)}`])] } });
+            }
+          }, (_position, message) => progress(`Leitura local de reserva · ${message}`), photo.signal, detailed);
+        } catch { if (active()) deliver({ error: `IA: ${safeCause(cause)} Não foi possível iniciar o leitor local. Tente novamente esta foto.`, fallback: false }); }
+      })(), photo.signal);
+      if (active()) deliver({ error: `IA: ${safeCause(cause)} O leitor local terminou sem retornar dados. Tente novamente esta foto.`, fallback: false });
+    } finally {
+      clearTimeout(timer); signal?.removeEventListener('abort', stop);
+      if (!delivered && !signal?.aborted) deliver({ error: 'Não foi possível concluir esta foto em 15 segundos. A foto permanece na lista: tente novamente ou selecione Leitura no navegador. Nenhum cadastro foi feito.', fallback: false });
+      photo.abort();
     }
   };
-  const pump = () => {
-    while (!signal?.aborted && queue.length && tasks.size < 2) {
-      const index = queue.shift()!;
-      const task = check(index).finally(() => { tasks.delete(task); pump(); });
-      tasks.add(task);
-    }
+  const worker = async () => {
+    while (next < files.length && !signal?.aborted) await read(next++);
   };
-  const enqueue = (index: number) => {
-    if (queued.has(index) || signal?.aborted) return;
-    queued.add(index); queue.push(index); pump();
-  };
-  const localAbort = new AbortController();
-  const stopLocal = () => localAbort.abort();
-  signal?.addEventListener('abort', stopLocal, { once: true });
-  // Mobile browsers can take longer during a single Tesseract pass; only stop after 60 s without progress.
-  let stall: ReturnType<typeof setTimeout> | undefined;
-  const alive = () => { clearTimeout(stall); stall = setTimeout(stopLocal, 60000); };
-  alive();
-  try {
-    const { readPrePhotos } = await import('./photo-ocr');
-    if (signal?.aborted) return;
-    await untilCancelled(readPrePhotos(files, (index, result) => {
-      if (signal?.aborted || localAbort.signal.aborted || local.has(index) || !files[index]) return;
-      local.set(index, result); alive();
-      if (!('error' in result)) onResult(index, { ...result, pre: markLocalPhoto(result.pre), milliseconds: elapsed(), pendingVerification: true });
-      enqueue(index);
-    }, (index, message) => { if (!localAbort.signal.aborted) alive(); if (!localAbort.signal.aborted) progress(index, `Leitura local · ${message}`); }, localAbort.signal, detailed), localAbort.signal);
-  } catch { /* AI may recover photos that the local worker could not decode. */ }
-  finally { clearTimeout(stall); signal?.removeEventListener('abort', stopLocal); }
-  if (signal?.aborted) return;
-  for (const index of files.keys()) {
-    if (!local.has(index)) local.set(index, { error: 'Não foi possível iniciar ou concluir o leitor no navegador. Tente novamente; a foto será mantida na lista.' });
-    enqueue(index);
-  }
-  while (tasks.size && !signal?.aborted) await untilCancelled(Promise.race(tasks), signal);
+  await Promise.all(Array.from({ length: Math.min(2, files.length) }, worker));
 }
