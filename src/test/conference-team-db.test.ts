@@ -21,6 +21,7 @@ beforeAll(async () => {
   await db.exec(await readFile('supabase/migrations/20261013050000_reader_team_access.sql', 'utf8'));
   await db.exec(await readFile('supabase/migrations/20261013060000_team_members_and_merge.sql', 'utf8'));
   await db.exec(await readFile('supabase/migrations/20261014010000_manifest_corrections.sql', 'utf8'));
+  await db.exec(await readFile('supabase/migrations/20261014020000_ctc_identity_conflicts.sql', 'utf8'));
 }, 30000);
 afterAll(async () => { await db?.close(); });
 it('preserves the owner records and shares only with invited confirmed accounts, without a fixed member cap', async () => {
@@ -142,4 +143,19 @@ it('rejects a totals mismatch on the server unless explicitly reviewed', async (
   await expect(save(base, next)).rejects.toThrow('CONFERENCE_TOTALS_REVIEW');
   next.manifests[0]!.totalsReviewed = true;
   expect((await save(base, next)).data.manifests[0]!.totalVolumes).toBe(999);
+});
+
+it('rejects a simultaneous CTC identity correction and a scan of the old identity in either order', async () => {
+ await as(1);const initial=(await call('get_conference_team')).data as ConferenceState;
+ const setup=structuredClone(initial); setup.manifests.push(make('DI00999999001','0099999901'));
+ const base=(await save(initial,setup)).data;
+ const correction=structuredClone(base), scan=structuredClone(base);
+ correction.manifests.at(-1)!.documents[0]!.ctc='0099999902'; scan.manifests.at(-1)!.documents[0]!.received=true;
+ await as(2);const corrected=(await save(base,correction)).data;
+ await as(3);await expect(save(base,scan)).rejects.toThrow('CONFERENCE_CONFLICT');
+ // Restore pending identity and retry with receipt winning first.
+ await as(1);const restore=structuredClone(corrected);restore.manifests.at(-1)!.documents[0]!.ctc='0099999901';
+ const restored=(await save(corrected,restore)).data;
+ const a=structuredClone(restored),b=structuredClone(restored);a.manifests.at(-1)!.documents[0]!.received=true;b.manifests.at(-1)!.documents[0]!.ctc='0099999902';
+ await as(2);await save(restored,a);await as(3);await expect(save(restored,b)).rejects.toThrow('CONFERENCE_CONFLICT');
 });

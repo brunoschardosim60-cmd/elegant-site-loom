@@ -59,6 +59,16 @@ export function applyPhotoRepair(pre: PhotoFields, plan: RepairPlan, response: u
     for (const field of target.fields) {
       const value = candidate[field].trim();
       if (!valid(field, value)) continue;
+      if ((field === 'client' || field === 'recipient') && row[field]?.trim()) {
+        const literal = (name: string) => text(name).replace(/[^a-z0-9]/g, '');
+        const before = literal(row[field]!), after = literal(value);
+        let prefix = 0; while (before[prefix] && before[prefix] === after[prefix]) prefix++;
+        let suffix = 0; while (suffix < Math.min(before.length, after.length) - prefix && before[before.length - suffix - 1] === after[after.length - suffix - 1]) suffix++;
+        if (Math.max(before.length, after.length) - prefix - suffix > 2) {
+          row.review = [...new Set([...(row.review ?? []), `${field === 'client' ? 'Cliente' : 'Destinatário'}: a releitura propôs um nome diferente ou expandido. Mantida a abreviação original; confira na foto.`])];
+          continue;
+        }
+      }
       checked++;
       if (value !== (row[field] ?? '').trim()) {
         row.review = [...new Set([...(row.review ?? []), `${field === 'nf' ? 'NF-série' : field === 'volumes' ? 'Volumes' : field === 'client' ? 'Cliente' : 'Destinatário'} ajustado na releitura: ${row[field] || 'ilegível'} → ${value}. Confira na foto.`])];

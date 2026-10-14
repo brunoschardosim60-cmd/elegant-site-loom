@@ -34,3 +34,10 @@ it('uses actual abbreviated-name variations as uncertainty without guessing a mi
   expect(flagged.every(row => row.review!.some(note => note.startsWith('Destinatário')))).toBe(true);
   expect(flagPhotoNameVariants([{ ...rows[0]!, recipient: 'UNIMED' }, { ...rows[1]!, recipient: 'FLEURY' }]).every(row => !row.review!.length)).toBe(true);
 });
+it('rejects the expanded business name observed in the live rereading test', () => {
+  const pre = sample(); pre.documents[1]!.recipient = 'DIMED SA DISTRIBU'; pre.documents[1]!.review = ['Confira destinatário'];
+  const plan = photoRepairPlan(pre)!; const response = patch(); response.rows[0]!.recipient = 'DIMED SA DISTRIBUIDORA DE MEDICAMENTOS';
+  expect(applyPhotoRepair(pre, plan, response).documents[1]!.recipient).toBe('DIMED SA DISTRIBU');
+  response.rows[0]!.recipient = 'DIMED SA DISTRIBUI';
+  expect(applyPhotoRepair(pre, plan, response).documents[1]!.recipient).toBe('DIMED SA DISTRIBUI');
+});
