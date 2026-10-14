@@ -5,6 +5,14 @@ const draft = (id = 'DI00123456789', ctc = '0012345678'): ImportDraft => ({ id, 
 const hash = 'a'.repeat(64);
 const saved = (id = 'DI00123456789', ctc = '0012345678', driver = 'Ana Silva'): Manifest => ({ id, driver, plate: 'ABC1D23', date: '2026-10-11', documents: [{ id: `${id}-${ctc}`, ctc, nf: '12345-1', volumes: 3, received: false }] });
 describe('Reviewed batch import', () => {
+  it('rejects OCR text from another column as an NF while allowing blank, numeric and combined legacy NFs', () => {
+    const bad = draft(); bad.rows[0]!.nf = 'MAT.LAB';
+    expect(applyImports([], [bad], 'now')).toMatchObject({ ok: false, row: 0, error: expect.stringContaining('Texto de outra coluna') });
+    for (const nf of ['', '—', '000123', '000123-1, 456-2']) {
+      const incoming = draft(); incoming.rows[0]!.nf = nf;
+      expect(applyImports([], [incoming], 'now').ok).toBe(true);
+    }
+  });
   it('imports independent manifests and keeps client fields', () => {
     const result = applyImports([], [draft(), draft('DI00123456790', '1234567890')], 'now');
     expect(result.ok).toBe(true);

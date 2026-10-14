@@ -105,6 +105,8 @@ export function applyImports(existing: Manifest[], drafts: ImportDraft[], now: s
     for (const [row, item] of draft.rows.entries()) {
       const reading = parseReading(item.ctc);
       if (reading.kind !== 'ctc') return fail('Confira o CTC de 10 dígitos.', row);
+      const nf = item.nf.trim();
+      if (nf && nf !== '—' && !nf.split(/[,;]/).every(value => /^\d{1,9}(?:-\d{1,3})?$/.test(value.trim()))) return fail('Confira a NF desta linha: informe o número e, quando houver, a série. Texto de outra coluna não pode ser cadastrado como NF.', row);
       if (!Number.isSafeInteger(Number(item.volumes)) || Number(item.volumes) < 1) return fail('Confira a quantidade de volumes (inteiro maior que zero).', row);
       if (registeredCtcs.has(reading.number)) {
         const registeredOwner = manifests.find(manifest => manifest.documents.some(document => document.ctc === reading.number));
