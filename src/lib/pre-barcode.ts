@@ -5,7 +5,7 @@ import DecodeHintType from '@zxing/library/esm/core/DecodeHintType';
 import HybridBinarizer from '@zxing/library/esm/core/common/HybridBinarizer';
 import RGBLuminanceSource from '@zxing/library/esm/core/RGBLuminanceSource';
 import type { OcrPage, OcrWord } from './photo-fields';
-import { clean, pageWords } from './photo-fields';
+import { clean, isPreIdWord, pageWords } from './photo-fields';
 import type { GrayImage } from './printed-digits';
 
 /** Scan only the barcode associated with this page's printed pré heading/ID.
@@ -13,7 +13,7 @@ import type { GrayImage } from './printed-digits';
  */
 export function preBarcodeRegions(page: OcrPage, width: number, height: number): OcrWord['bbox'][] {
   const words = pageWords(page);
-  const id = words.find(word => /^D[I1L|][A-Z0-9|]{4,14}$/i.test(word.text));
+  const id = words.find(isPreIdWord);
   if (id) {
     const h = id.bbox.y1 - id.bbox.y0;
     return [{ x0: Math.max(0, id.bbox.x0 - h * 2), x1: Math.min(width, id.bbox.x1 + h * 2),

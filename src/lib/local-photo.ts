@@ -6,10 +6,11 @@ export const LOCAL_HEADER_NOTICE = 'Leitura feita no navegador. Confira todas as
 /** Browser OCR is a reviewable draft, never an independent AI agreement. */
 export function markLocalPhoto(pre: PhotoFields): PhotoFields {
   const documents: PhotoDocument[] = pre.documents.length ? pre.documents : pre.ctcs.map(ctc => ({ ctc, nf: '', volumes: '' }));
-  const warnings = (pre.headerReview ?? []).filter(message => !/Cabeçalho informa .* volumes; a leitura local somou|Totais do cabeçalho não foram confirmados na leitura local/i.test(message));
+  const warnings = (pre.headerReview ?? []).filter(message => !/Cabeçalho informa .* volumes; a leitura local somou|Cabeçalho informa \d+ NFs;|Totais do cabeçalho não foram confirmados na leitura local/i.test(message));
   if (pre.kind === 'pre') {
     const uniqueCtcCount = new Set(documents.map(row => row.ctc).filter(Boolean)).size;
     if (pre.expectedRows && pre.expectedRows !== uniqueCtcCount) warnings.push(`Cabeçalho informa ${pre.expectedRows} CTCs; a leitura local encontrou ${uniqueCtcCount}. Confira todas as linhas.`);
+    if (pre.expectedNfs && pre.expectedNfs !== documents.length) warnings.push(`Cabeçalho informa ${pre.expectedNfs} NFs; a leitura encontrou ${documents.length} linhas. Confira se falta alguma NF do mesmo CTC.`);
     if (!pre.expectedRows) warnings.push('Quantidade de CTCs do cabeçalho não pôde ser lida.');
     if (!pre.totalVolumes) warnings.push('Total de volumes do cabeçalho não pôde ser lido.');
   }

@@ -85,6 +85,10 @@ export function correctLocalPhoto(local: PhotoFields, ai: PhotoFields): PhotoFie
   result.ctcs = [...new Set(result.documents.map(row => row.ctc).filter(ctcValid))];
   if (!result.expectedRows && local.expectedRows) result.expectedRows = local.expectedRows;
   if (!result.totalVolumes && local.totalVolumes) result.totalVolumes = local.totalVolumes;
+  if (local.expectedNfs) {
+    result.expectedNfs = local.expectedNfs;
+    if (local.expectedNfs !== result.documents.length) result.headerReview!.push(`Cabeçalho informa ${local.expectedNfs} NFs; foram mantidas ${result.documents.length} linhas. Confira as NFs de cada CTC.`);
+  }
   if (ai.kind === 'pre' && (!ai.expectedRows || !ai.totalVolumes)) result.headerReview!.push('A IA não confirmou os totais do cabeçalho. Confira a quantidade de CTCs e volumes.');
   if (local.expectedRows && ai.expectedRows && local.expectedRows !== ai.expectedRows) result.headerReview!.push(`Quantidade de CTCs diferente entre as leituras: ${local.expectedRows} / ${ai.expectedRows}. Confira o cabeçalho.`);
   if (local.totalVolumes && ai.totalVolumes && local.totalVolumes !== ai.totalVolumes) result.headerReview!.push(`Total de volumes diferente entre as leituras: ${local.totalVolumes} / ${ai.totalVolumes}. Confira o cabeçalho.`);

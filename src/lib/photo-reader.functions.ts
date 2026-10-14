@@ -6,8 +6,10 @@ import { supabaseConfig } from './supabase-config';
 import { photoQuotaFailure } from './photo-quota';
 const requests = new Map<string, { count: number; until: number }>();
 
-function providerKeys() {
-  return [...new Set([process.env['GEMINI_API_KEY'], process.env['GEMINI_API_KEY_FALLBACK_2'], process.env['GEMINI_API_KEY_FALLBACK']].map(key => key?.trim()).filter((key): key is string => Boolean(key)))];
+function providerKeys(preferAdditional = false) {
+  const primary = process.env['GEMINI_API_KEY'];
+  const additional = process.env['GEMINI_API_KEY_FALLBACK_2'];
+  return [...new Set([...(preferAdditional ? [additional, primary] : [primary, additional]), process.env['GEMINI_API_KEY_FALLBACK']].map(key => key?.trim()).filter((key): key is string => Boolean(key)))];
 }
 function accessCategory(message: string) {
   if (/leaked|compromised|revoked|reported.{0,30}key/i.test(message)) return 'blocked-key';
@@ -66,7 +68,10 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
         signal.throwIfAborted();
         if (membership.error || membership.data !== serviceOwner) return { ok: false as const, fallback: false, error: 'Sua conta ainda não foi incluída na equipe autorizada a usar a leitura por IA. Confira o convite em Equipe.' };
       }
-      const keys = providerKeys();
+      const model = data.orientationOnly || data.mode === 'survey' || liteFull ? 'gemini-3.5-flash-lite' : data.mode === 'verify' ? process.env['GEMINI_OCR_VERIFY_MODEL'] || 'gemini-3.5-flash-lite' : process.env['GEMINI_OCR_MODEL'] || 'gemini-3.8-flash';
+      // The additional credential is preferred for normal Gemini; Lite keeps
+      // the original primary. These are model preferences, never quota rotation.
+      const keys = providerKeys(!model.toLowerCase().includes('lite'));
       if (!keys.length) return { ok: false as const, unavailable: true, error: 'Configure a chave Gemini no servidor da Vercel para ativar a leitura por IA.' };
       const now = Date.now();
       for (const [ip, value] of requests) if (value.until < now) requests.delete(ip);
@@ -75,7 +80,6 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
       if (bucket.count >= 80) return { ok: false as const, unavailable: true, error: 'Muitas fotos seguidas. Aguarde alguns minutos.' };
       bucket.count++; requests.set(userId, bucket);
       const compact = data.mode === 'survey' || data.mode === 'verify';
-      const model = data.orientationOnly || data.mode === 'survey' || liteFull ? 'gemini-3.5-flash-lite' : data.mode === 'verify' ? process.env['GEMINI_OCR_VERIFY_MODEL'] || 'gemini-3.5-flash-lite' : process.env['GEMINI_OCR_MODEL'] || 'gemini-3.8-flash';
       stage = 'connection';
       // A retired model returns 404; retry once with Google's stable alias of the same tier.
       const fallbackModel = model.includes('lite') ? 'gemini-flash-lite-latest' : 'gemini-flash-latest';
@@ -123,7 +127,10 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
         }
         // A reserve handles access/technical failures only. Quota and billing
         // failures must retain the local reading rather than rotate credentials.
-        const canUseReserve = ((response.status === 401 || response.status === 403) && failures.at(-1)?.category !== 'billing') || (response.status >= 500 && response.status <= 599) || (response.status === 400 && invalidRequestCategory === 'credentials');
+        // A normal-model 503 already means this tier is unavailable. Move to
+        // Lite promptly rather than spend the deadline on the same tier again.
+        const normalUnavailable = response.status === 503 && !model.toLowerCase().includes('lite');
+        const canUseReserve = !normalUnavailable && (((response.status === 401 || response.status === 403) && failures.at(-1)?.category !== 'billing') || (response.status >= 500 && response.status <= 599) || (response.status === 400 && invalidRequestCategory === 'credentials'));
         if (canUseReserve && index + 1 < keys.length) {
           void response.body?.cancel().catch(() => {});
           continue;

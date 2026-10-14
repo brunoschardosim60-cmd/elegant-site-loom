@@ -40,13 +40,19 @@ export function normalizeGeminiPhoto(value: unknown): PhotoFields {
   const documents = data.documents.map(row => {
     const review = [...row.review];
     const ctc = row.ctc.trim(); const volumes = row.volumes.trim();
+    // Some literal transcriptions include the adjacent Pedido in the NF field.
+    // Recover only a complete NF/série token followed by one distinct long
+    // number; never split joined digits, multiple NFs or fiscal access keys.
+    const joinedOrder = row.nf.trim().match(/^(\d{1,9}-\d{1,3})\s+\d{6,15}$/);
+    const nf = joinedOrder?.[1] ?? row.nf.trim();
+    if (joinedOrder) review.push('NF separada do número adjacente na mesma linha. Confira a NF-série na foto.');
     if (!/^\d{10}$/.test(ctc)) review.push('CTC ilegível: informe 10 dígitos');
     const validVolumes = /^\d+$/.test(volumes) && Number.isSafeInteger(Number(volumes)) && Number(volumes) > 0;
     if (!validVolumes) review.push('Confira volumes');
-    if (!/^\d{1,9}-\d{1,3}$/.test(row.nf.trim())) review.push('Confira NF e série');
+    if (!/^\d{1,9}-\d{1,3}$/.test(nf)) review.push('Confira NF e série');
     if (!row.client.trim()) review.push('Confira cliente/laboratório');
     if (!row.recipient.trim()) review.push('Confira destinatário');
-    return { ...row, ctc: /^\d{10}$/.test(ctc) ? ctc : '', volumes: validVolumes ? volumes : '', review };
+    return { ...row, nf, ctc: /^\d{10}$/.test(ctc) ? ctc : '', volumes: validVolumes ? volumes : '', review };
   });
   const warnings: string[] = [];
   const plate = normalizePlate(data.plate);

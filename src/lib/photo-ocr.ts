@@ -1,5 +1,5 @@
 import { createWorker, PSM, type Worker } from 'tesseract.js';
-import { clean, mergeCtcPages, reconcileDocuments, parsePhotoFields, photoScore, pageWords, tableCellRegions, tableCtcRepairRegions, tableSummaryRegions, type OcrPage, type PhotoFields, type OcrWord } from './photo-fields';
+import { clean, isPreIdWord, preIdDigitsBox, mergeCtcPages, reconcileDocuments, parsePhotoFields, photoScore, pageWords, tableCellRegions, tableCtcRepairRegions, tableSummaryRegions, type OcrPage, type PhotoFields, type OcrWord } from './photo-fields';
 import { buildDigitTemplates, matchPrintedNumber, type GrayImage } from './printed-digits';
 import { recoverNfSeparator } from './ocr-numeric';
 import { prepareForOcr, preparePrintedField, prepareNumericMontage, readGrayImage } from './image-prep';
@@ -127,7 +127,7 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
   }
   if (!successful) throw new Error('Não foi possível processar a foto.');
   if (best.pre.kind === 'pre' && best.pre.documents.length) {
-    const repairs = [...tableCtcRepairRegions(best.page), ...tableSummaryRegions(best.page).filter(region => !best.pre[region.field as 'expectedRows' | 'totalVolumes'])].slice(0, 64);
+    const repairs = [...tableCtcRepairRegions(best.page), ...tableSummaryRegions(best.page).filter(region => !best.pre[region.field as 'expectedRows' | 'expectedNfs' | 'totalVolumes'])].slice(0, 64);
     if (repairs.length) {
       progress('Conferindo CTCs e totais do cabeçalho…');
       try {
@@ -262,7 +262,7 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
       if (recovered) { row.nf = recovered; row.review = [...new Set([...(row.review ?? []), 'NF', 'Separador da NF recuperado da foto. Confira os números e a série.'])]; }
     }
   }
-  const idWord = pageWords(best.page).find(w => /^D[I1L|][A-Z0-9|]{4,14}$/i.test(w.text));
+  const idWord = pageWords(best.page).find(isPreIdWord);
   let barcodeId: string | undefined;
   if (best.pre.kind === 'pre' && (idWord || pageWords(best.page).some(w => clean(w.text) === 'PREMANIFESTO'))) {
     try {
@@ -278,6 +278,20 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
     progress('Conferindo número do pré…');
     try {
       active();
+      const digitBox = preIdDigitsBox(idWord);
+      let numericId: string | undefined;
+      if (digitBox) {
+        const numeric = await prepareNumericMontage(best.source, [digitBox], { separateDigits: false, signal });
+        await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_LINE, tessedit_char_whitelist: '0123456789' });
+        const { data } = await worker.recognize(numeric.image); active();
+        const value = data.text.trim();
+        const literalSource = /^DI\d{8,12}$/.test(idWord.text);
+        if (/^\d{8,12}$/.test(value) && (data.confidence >= 70 || !literalSource || value.length > idWord.text.length - 2)) numericId = `DI${value}`;
+      }
+      if (numericId) {
+        if (best.pre.id !== numericId) best.pre.headerReview = [...(best.pre.headerReview ?? []), 'Número do pré recuperado em recorte dos dígitos. Confira os zeros na foto.'];
+        best.pre.id = numericId;
+      } else {
       const field = await preparePrintedField(best.source, idWord.bbox);
       await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_LINE, tessedit_char_whitelist: 'DI0123456789' });
       const { data } = await worker.recognize(field);
@@ -290,6 +304,7 @@ async function readWithWorker(worker: Worker, file: File, progress: (message: st
           best.pre.headerReview = [...(best.pre.headerReview ?? []), 'As leituras do número do pré diferem. Foi preservado o número impresso da leitura da página.'];
         } else best.pre.id = id;
       } else best.pre.headerReview = [...(best.pre.headerReview ?? []), 'Número do pré não confirmado no recorte. Confira na foto.'];
+      }
     } catch { active(); /* Keep the full-page ID for review. */ }
   }
   return { text: best.page.text.trim(), pre: reconcileDocuments(best.pre), milliseconds: Math.round(performance.now() - started), angle: best.angle };
@@ -389,7 +404,7 @@ export async function readPrePhotos(files: File[], onResult: (index: number, res
         );
         if (readSignal.aborted) return;
         if (result.pre.kind === 'pre') preferred = result.angle;
-        emit(index, { ...result, pre: markLocalPhoto(reconcileDocuments(result.pre)) });
+        emit(index, { ...result, pre: markLocalPhoto(result.pre) });
       } catch {
         if (readSignal.aborted) return;
         emit(index, { error: 'Não foi possível ler esta foto. Tente outra foto ou preencha os dados.' });
@@ -412,6 +427,6 @@ export async function readPrePhotos(files: File[], onResult: (index: number, res
 /** Read a single photo with a dedicated worker. */
 export async function readPrePhoto(file: File, progress: (message: string) => void = () => {}, detailed = false) {
   const worker = await createWorker('por');
-  try { const result = await readWithWorker(worker, file, progress, undefined, detailed); return { ...result, pre: markLocalPhoto(reconcileDocuments(result.pre)) }; }
+  try { const result = await readWithWorker(worker, file, progress, undefined, detailed); return { ...result, pre: markLocalPhoto(result.pre) }; }
   finally { await worker.terminate().catch(() => {}); }
 }

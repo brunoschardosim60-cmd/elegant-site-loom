@@ -1,7 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import { mergeCtcPages, parsePhotoFields, tableCellRegions, tableCtcRepairRegions, type OcrWord } from '@/lib/photo-fields';
+import { isPreIdWord, preIdDigitsBox, mergeCtcPages, parsePhotoFields, tableCellRegions, tableCtcRepairRegions, type OcrWord } from '@/lib/photo-fields';
 const word = (text: string, x: number, y: number, width = 50): OcrWord => ({ text, confidence: 80, bbox: { x0: x, y0: y, x1: x + width, y1: y + 20 } });
 const page = (words: OcrWord[]) => ({ text: words.map(w => w.text).join('\n'), blocks: [{ paragraphs: [{ lines: [{ words }] }] }] });
+
+it('does not crop DISTRIBUIÇÃO or a fiscal key as a pré ID and requires observed prefix glyphs', () => {
+  expect(isPreIdWord(word('DISTRIBUICAO',100,100))).toBe(false);
+  expect(isPreIdWord(word('DISTRIBUIDOR',100,100))).toBe(false);
+  expect(isPreIdWord(word('DI00601869631',100,100))).toBe(true);
+  expect(preIdDigitsBox(word('DI00601869631',100,100))).toBeUndefined();
+  expect(preIdDigitsBox(word('35261052134798001563570010006812351767323304',100,100))).toBeUndefined();
+});
+it.each([false,true])('reads the NF header despite an inflated label box and splitDigits=%s', split => {
+  const fields=parsePhotoFields(page([
+    word('CTCs',100,120),{...word('NFs',250,100),bbox:{x0:250,x1:290,y0:100,y1:145}},word('VOLS',400,120),word('PESO',550,120),
+    word('11',130,150,20),...(split?[word('1',350,150,8),word('5',360,150,8)]:[word('15',350,150,20)]),word('98',430,150,30),
+    word('CTC',100,240),word('Remetente',250,240),word('NF-Série',400,240),word('Vols.',600,240),
+    word('0000000001',100,280,100),word('12345-1',400,280,80),word('8',610,280,20),
+  ]));
+  expect(fields).toMatchObject({expectedRows:11,expectedNfs:15,totalVolumes:98});
+});
 
 it('reads the original pré date from the labelled header rather than delivery rows or DACTE dates', () => {
   const fields = parsePhotoFields(page([

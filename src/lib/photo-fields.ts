@@ -1,11 +1,11 @@
 import { parsePreText } from './conference';
 import { normalizeIssueDate, parsePreIssueDate } from './manifest-date';
 
-export type OcrWord = { text: string; confidence: number; bbox: { x0: number; y0: number; x1: number; y1: number } };
+export type OcrWord = { text: string; confidence: number; bbox: { x0: number; y0: number; x1: number; y1: number }; symbols?: { text: string; bbox: { x0: number; y0: number; x1: number; y1: number } }[] };
 export type PhotoDocument = { ctc: string; nf: string; volumes: string; client?: string; recipient?: string; review?: string[] };
 export type PhotoFields = ReturnType<typeof parsePreText> & {
   kind: 'pre' | 'dacte' | 'unknown'; driver: string; documents: PhotoDocument[];
-  rawPlate?: string; expectedRows?: number; totalVolumes?: number; headerReview?: string[];
+  rawPlate?: string; expectedRows?: number; expectedNfs?: number; totalVolumes?: number; headerReview?: string[];
   issueDate?: string;
   readingSource?: 'gemini' | 'local';
   aiReader?: 'normal' | 'lite';
@@ -14,8 +14,16 @@ export type PhotoFields = ReturnType<typeof parsePreText> & {
 };
 export type OcrPage = { text: string; blocks?: { paragraphs: { lines: { words: OcrWord[] }[] }[] }[] | null };
 export type CellRegion = { row: number; field: 'ctc' | 'nf' | 'volumes'; box: OcrWord['bbox'] };
-export type NumericTableRegion = { field: 'ctc' | 'nf' | 'volumes' | 'expectedRows' | 'totalVolumes'; box: OcrWord['bbox'] };
+export type NumericTableRegion = { field: 'ctc' | 'nf' | 'volumes' | 'expectedRows' | 'expectedNfs' | 'totalVolumes'; box: OcrWord['bbox'] };
 export const pageWords = (page: OcrPage): OcrWord[] => page.blocks?.flatMap(b => b.paragraphs.flatMap(p => p.lines.flatMap(l => l.words))) ?? [];
+export const isPreIdWord = (word: OcrWord) => /^D[I1L|][A-Z0-9|]{4,14}$/i.test(word.text) && /\d{4}/.test(word.text);
+/** Exclude only the two observed DI glyphs, so numeric OCR can read the zeros. */
+export function preIdDigitsBox(word: OcrWord): OcrWord['bbox'] | undefined {
+  const symbols = word.symbols;
+  if (!isPreIdWord(word) || !symbols || !/^D$/i.test(symbols[0]?.text ?? '') || !/^[I1L|]$/i.test(symbols[1]?.text ?? '')) return undefined;
+  const x0 = symbols[2]?.bbox.x0;
+  return x0 !== undefined && x0 > word.bbox.x0 && x0 < word.bbox.x1 ? { ...word.bbox, x0 } : undefined;
+}
 const cx = (w: OcrWord) => (w.bbox.x0 + w.bbox.x1) / 2;
 const cy = (w: OcrWord) => (w.bbox.y0 + w.bbox.y1) / 2;
 export const clean = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -165,26 +173,28 @@ export function tableSummaryRegions(page: OcrPage): NumericTableRegion[] {
   const words = pageWords(page);
   const tableHeading = words.find(w => clean(w.text) === 'REMETENTE') ?? words.find(w => clean(w.text) === 'CTC');
   if (!tableHeading) return [];
-  return (['expectedRows', 'totalVolumes'] as const).flatMap(field => {
-    const pattern = field === 'expectedRows' ? /^C?CTCS$/ : /^VOLSS?$/;
+  return (['expectedRows', 'expectedNfs', 'totalVolumes'] as const).flatMap(field => {
+    const pattern = field === 'expectedRows' ? /^C?CTCS$/ : field === 'expectedNfs' ? /^NFS?$/ : /^VOLSS?$/;
     const label = words.filter(w => pattern.test(clean(w.text)) && w.bbox.y1 < tableHeading.bbox.y0).sort((a, b) => b.bbox.y0 - a.bbox.y0)[0];
     if (!label) return [];
     const h = label.bbox.y1 - label.bbox.y0;
-    const next = words.filter(w => w.bbox.x0 > label.bbox.x1 && Math.abs(cy(w) - cy(label)) < h).sort((a, b) => a.bbox.x0 - b.bbox.x0)[0];
-    const right = next ? next.bbox.x0 - h * .25 : label.bbox.x1 + h * 8;
-    const values = words.filter(w => w.bbox.y0 >= label.bbox.y1 && w.bbox.y1 < tableHeading.bbox.y0 && w.bbox.x0 >= label.bbox.x0 - h * .25 && w.bbox.x1 <= right);
-    if (values.length !== 1) return [];
-    const box = values[0]!.bbox;
+    // A table rule can inflate a label's height. Do not mistake the numeric
+    // value below it for the next column heading and cut that same value out.
+    const next = words.filter(w => w.bbox.x0 > label.bbox.x1 && (field !== 'expectedNfs' || /\p{L}/u.test(w.text)) && Math.abs(cy(w) - cy(label)) < h).sort((a, b) => a.bbox.x0 - b.bbox.x0)[0];
+    const right = next ? next.bbox.x0 - (field === 'expectedNfs' ? 0 : h * .25) : label.bbox.x1 + h * 8;
+    const values = words.filter(w => w.bbox.y0 >= label.bbox.y1 && w.bbox.y1 < tableHeading.bbox.y0 && w.bbox.x0 >= label.bbox.x0 - h * .25 && w.bbox.x1 <= right).sort((a, b) => a.bbox.x0 - b.bbox.x0);
+    if (!values.length || (values.length > 1 && (!values.every(w => /^\d+$/.test(w.text)) || Math.max(...values.map(cy)) - Math.min(...values.map(cy)) > h * .75 || values.some((w,i) => i > 0 && w.bbox.x0 - values[i-1]!.bbox.x1 > h * .75)))) return [];
+    const box = { x0: values[0]!.bbox.x0, x1: values.at(-1)!.bbox.x1, y0: Math.min(...values.map(w=>w.bbox.y0)), y1: Math.max(...values.map(w=>w.bbox.y1)) };
     return [{ field, box: { x0: box.x0 - h * .3, y0: box.y0 - h * .2, x1: box.x1 + h * .3, y1: box.y1 + h * .2 } }];
   });
 }
 
-function summaryValues(page: OcrPage): Partial<Pick<PhotoFields, 'expectedRows' | 'totalVolumes'>> {
-  const values: Partial<Pick<PhotoFields, 'expectedRows' | 'totalVolumes'>> = {};
+function summaryValues(page: OcrPage): Partial<Pick<PhotoFields, 'expectedRows' | 'expectedNfs' | 'totalVolumes'>> {
+  const values: Partial<Pick<PhotoFields, 'expectedRows' | 'expectedNfs' | 'totalVolumes'>> = {};
   for (const region of tableSummaryRegions(page)) {
     const words = pageWords(page).filter(w => cx(w) > region.box.x0 && cx(w) < region.box.x1 && cy(w) > region.box.y0 && cy(w) < region.box.y1);
     const value = words.map(w => w.text).join('').trim();
-    if (/^\d+$/.test(value) && Number(value) > 0 && Number.isSafeInteger(Number(value))) values[region.field as 'expectedRows' | 'totalVolumes'] = Number(value);
+    if (/^\d+$/.test(value) && Number(value) > 0 && Number.isSafeInteger(Number(value))) values[region.field as 'expectedRows' | 'expectedNfs' | 'totalVolumes'] = Number(value);
   }
   return values;
 }
@@ -372,6 +382,7 @@ export const photoScore = (pre: PhotoFields) => Number(!!pre.id) * 4 + Number(!!
  *   rows gives its value; flagged for review, never applied otherwise.
  */
 export function reconcileDocuments(pre: PhotoFields): PhotoFields {
+  if (pre.kind !== 'pre') return pre;
   const docs = pre.documents.map(row => ({ ...row, review: [...(row.review ?? [])] }));
   const series = docs.map(row => row.nf.match(/^\d{3,9}-(\d{1,3})$/)?.[1]).filter(Boolean) as string[];
   const common = series.length >= 3 && series.every(s => s === series[0]) ? series[0]! : '';
@@ -379,12 +390,18 @@ export function reconcileDocuments(pre: PhotoFields): PhotoFields {
     if (common && /^\d{4,12}$/.test(row.nf) && row.nf.endsWith(common) && row.nf.length - common.length >= 3) {
       row.nf = `${row.nf.slice(0, -common.length)}-${common}`;
       if (!row.review.includes('NF')) row.review.push('NF');
+      row.review.push('Separador da NF sugerido pela série predominante na foto. Confira o número e a série.');
     }
   }
-  const missing = docs.filter(row => !/^\d+$/.test(row.volumes));
-  if (pre.totalVolumes && missing.length === 1) {
-    const rest = docs.reduce((sum, row) => sum + (Number(row.volumes) || 0), 0);
-    const value = pre.totalVolumes - rest;
+  const missing = docs.filter(row => !row.volumes.trim());
+  const validVolume = (value: string) => /^\d{1,4}$/.test(value) && Number(value) > 0;
+  const complete = !!pre.expectedNfs && pre.expectedNfs === docs.length && !!pre.expectedRows
+    && pre.expectedRows === new Set(docs.map(row => row.ctc)).size
+    && docs.every(row => /^\d{10}$/.test(row.ctc))
+    && new Set(docs.map(row => JSON.stringify([row.ctc, row.nf]))).size === docs.length;
+  if (Number.isSafeInteger(pre.totalVolumes) && pre.totalVolumes! > 0 && complete && missing.length === 1 && docs.every(row => !row.volumes.trim() || validVolume(row.volumes))) {
+    const rest = docs.reduce((sum, row) => sum + Number(row.volumes || 0), 0);
+    const value = pre.totalVolumes! - rest;
     if (value > 0 && value < 10000) {
       missing[0]!.volumes = String(value);
       missing[0]!.review = missing[0]!.review.filter(r => !/^Volumes não/.test(r));

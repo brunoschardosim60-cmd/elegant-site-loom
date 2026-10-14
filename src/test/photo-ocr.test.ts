@@ -59,6 +59,7 @@ describe('Photo OCR batches', () => {
     mocks.recognize.mockResolvedValueOnce(result('PRÉ-MANIFESTO')).mockResolvedValueOnce(source);
     const reading = await readPrePhoto(new File(['image'], 'repeated-ctc.jpg'));
     expect(reading.pre.expectedRows).toBe(1);
+    expect(reading.pre.expectedNfs).toBe(2);
     expect(reading.pre.documents).toHaveLength(2);
     expect(reading.pre.documents.map(row => row.ctc)).toEqual(['0000000001', '0000000001']);
     expect(mocks.recognize).toHaveBeenCalledTimes(2);
@@ -133,6 +134,17 @@ describe('Photo OCR batches', () => {
     mocks.recognize.mockResolvedValueOnce(result('PRÉ-MANIFESTO')).mockResolvedValueOnce(source).mockResolvedValueOnce(cropped);
     const reading=await readPrePhoto(new File(['image'],'nf-crop.jpg'));
     expect(reading.pre.documents[0]).toMatchObject({nf:'11117021',review:expect.arrayContaining(['NF'])});
+  });
+  it('recovers a literal leading zero from digit pixels rather than adding one to the full-page ID', async () => {
+    const id={text:'DI0601869631',confidence:30,bbox:{x0:100,y0:100,x1:360,y1:130},symbols:[
+      {text:'D',bbox:{x0:100,y0:100,x1:120,y1:130}}, {text:'I',bbox:{x0:121,y0:100,x1:130,y1:130}}, {text:'0',bbox:{x0:132,y0:100,x1:155,y1:130}},
+    ]};
+    const page={data:{text:'PRÉ-MANIFESTO DI0601869631 CTC: 1234567890',confidence:90,blocks:[{paragraphs:[{lines:[{words:[id]}]}]}]}};
+    mocks.recognize.mockResolvedValueOnce(result('PRÉ-MANIFESTO')).mockResolvedValueOnce(page).mockResolvedValueOnce(result('00601869631',85));
+    const reading=await readPrePhoto(new File(['image'],'pre-id.jpg'));
+    expect(reading.pre.id).toBe('DI00601869631');
+    expect(reading.pre.headerReview).toContain('Número do pré recuperado em recorte dos dígitos. Confira os zeros na foto.');
+    expect(mocks.setParameters).toHaveBeenLastCalledWith({tessedit_pageseg_mode:'7',tessedit_char_whitelist:'0123456789'});
   });
   it('tries one alternate full-page mode when the printed count exceeds recovered CTCs', async () => {
     const word = (text: string, x: number, y: number, width = 50) => ({ text, confidence: 90, bbox: { x0: x, x1: x + width, y0: y, y1: y + 20 } });
