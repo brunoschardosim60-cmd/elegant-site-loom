@@ -13,7 +13,11 @@ function tableStructureMismatch(pre: PhotoFields): boolean {
 
 /** Structural gaps or widespread uncertainty need an independent table reading. */
 export function needsBandReading(pre: PhotoFields): boolean {
-  return tableStructureMismatch(pre) || pre.kind === 'pre' && pre.documents.length >= 5 && pre.documents.filter(row => row.review?.length).length >= Math.max(3, Math.ceil(pre.documents.length / 2));
+  return tableStructureMismatch(pre) || pre.kind === 'pre' && pre.documents.length >= 5 && (
+    // Multi-NF CTCs can hide a replaced row while all three totals stay equal.
+    new Set(pre.documents.map(row => row.ctc)).size < pre.documents.length
+    || pre.documents.filter(row => row.review?.length).length >= Math.max(3, Math.ceil(pre.documents.length / 2))
+  );
 }
 
 /** Preserve the entire width, so CTC, NF and volume stay on the same scanline.
@@ -72,11 +76,13 @@ export function applyBandRead(pre: PhotoFields, candidate: PhotoFields): PhotoFi
   result.documents = result.documents.map(row => {
     const matches = pre.documents.filter(old => old.ctc === row.ctc && old.nf === row.nf);
     const old = matches.length === 1 ? matches[0] : undefined;
+    const ctcMatches = pre.documents.filter(previous => previous.ctc === row.ctc);
+    const oldName = old ?? (ctcMatches.length === 1 ? ctcMatches[0] : undefined);
     const literalName = (value: string | undefined) => (value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-    const nameNotes = old ? (['client', 'recipient'] as const).filter(field => old[field] && row[field] && literalName(old[field]) !== literalName(row[field]))
-      .map(field => `${field === 'client' ? 'Cliente' : 'Destinatário'} divergente entre leituras: ${old[field]} / ${row[field]}. Confira na foto.`) : [];
+    const nameNotes = oldName ? (['client', 'recipient'] as const).filter(field => oldName[field] && row[field] && literalName(oldName[field]) !== literalName(row[field]))
+      .map(field => `${field === 'client' ? 'Cliente' : 'Destinatário'} divergente entre leituras: ${oldName[field]} / ${row[field]}. Confira na foto.`) : [];
     const nameValue = (field: 'client' | 'recipient') => {
-      const before = old?.[field] ?? '', after = row[field] ?? '';
+      const before = oldName?.[field] ?? '', after = row[field] ?? '';
       const a = literalName(before), b = literalName(after);
       // A single glyph may improve in a native-resolution strip (B/8, I/1).
       // Larger name changes remain suggestions; never expand an abbreviation.
@@ -90,7 +96,7 @@ export function applyBandRead(pre: PhotoFields, candidate: PhotoFields): PhotoFi
         review: [...new Set([...(row.review ?? []), ...nameNotes, ...(old.review ?? []).filter(note => !/Cabeçalho informa|Confira a soma|segunda leitura|Volumes divergente|NF e série divergente/i.test(note))])] };
     }
     changed++;
-    return { ...row, review: [...new Set([...(row.review ?? []), ...nameNotes, 'Linha recuperada na leitura por faixas. Confira CTC, NF-série e volumes na foto.'])] };
+    return { ...row, client: nameValue('client'), recipient: nameValue('recipient'), review: [...new Set([...(row.review ?? []), ...nameNotes, 'Linha recuperada na leitura por faixas. Confira CTC, NF-série e volumes na foto.'])] };
   });
   result.headerReview = [...new Set([...(result.headerReview ?? []), 'Tabela relida em faixas ampliadas; contagens de CTCs, NFs e volumes coincidem com o cabeçalho. Isso não substitui a revisão dos campos sinalizados.',
     ...(['id', 'plate', 'driver', 'issueDate'] as const).filter(field => pre[field] !== result[field]).map(field => `${({ id: 'Número do pré', plate: 'Placa', driver: 'Motorista', issueDate: 'Data de emissão' })[field]} mudou na leitura por faixas. Confira no cabeçalho da foto.`)])];

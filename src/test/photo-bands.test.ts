@@ -21,6 +21,22 @@ it('uses strips when most rows are uncertain even if compensating errors keep al
   page.documents[2]!.review = []; expect(needsBandReading(page)).toBe(false);
 });
 
+it('independently checks dense multi-NF tables even when plausible substituted rows keep the totals equal', () => {
+  const page = pre();
+  page.documents.push(row('0000000001', '103-1'), row('0000000001', '104-1'));
+  page.expectedNfs = 5; page.totalVolumes = 7;
+  expect(needsBandReading(page)).toBe(true);
+  expect(applyBandRead(page, structuredClone(page)).documents).toHaveLength(5);
+});
+
+it('preserves names anchored to a unique CTC while repairing its NF and volumes', () => {
+  const first = pre(); first.documents[2]!.nf = '199-1'; first.documents[2]!.recipient = 'CLIENTE COMPLETO';
+  const second = pre(); second.documents[2]!.recipient = 'OUTRO NOME';
+  const result = applyBandRead(first, second);
+  expect(result.documents[2]).toMatchObject({ nf: '102-1', recipient: 'CLIENTE COMPLETO' });
+  expect(result.documents[2]!.review).toEqual(expect.arrayContaining([expect.stringContaining('Destinatário divergente')]));
+});
+
 it('accepts a single B/8 name glyph from the detailed strip while retaining its explicit review', () => {
   const first = pre(); first.documents[0]!.client = 'LABORATORIO B';
   const second = pre(); second.documents[0]!.client = 'LABORATORIO 8';
