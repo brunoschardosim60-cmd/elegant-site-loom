@@ -23,6 +23,23 @@ const result = (id: string, ctc: string, nf: string) => ({
   pre: { id, issueDate: '2026-08-28', plate: 'ABC1D23', driver: 'MOTORISTA', kind: 'pre' as const, readingSource: 'gemini' as const, ctcs: [ctc], documents: [{ ctc, nf, volumes: '2', client: 'LAB', recipient: 'CLIENTE' }], expectedRows: 1, totalVolumes: 2, verification: { status: 'matched' as const, checkedFields: 6, conflicts: 0 } }, text: 'Documento', milliseconds: 3200,
 });
 
+it('blocks registering a mismatched total until explicitly reviewed, and resets review on edit', async () => {
+  const create = vi.fn(() => ({ ok: true as const, manifests: [] }));
+  const reading = result('DI00000000001', '0000000001', '100-1'); reading.pre.totalVolumes = 98;
+  mocks.read.mockImplementation(async (_files: File[], receive: (index: number, value: PhotoReadResult) => void) => receive(0, reading));
+  render(<ManifestImportDialog open onOpenChange={vi.fn()} manifests={[]} onCreate={create} />);
+  await waitFor(() => expect(screen.getByLabelText('Enviar várias fotos')).toBeEnabled());
+  fireEvent.change(screen.getByLabelText('Enviar várias fotos'), { target: { files: [new File(['a'], 'mismatch.jpg', { type: 'image/jpeg' })] } });
+  expect(await screen.findByText('Cabeçalho: 98 volumes · cadastro: 2.')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /^Cadastrar pré$/ })); expect(create).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByLabelText('Confirmar revisão dos totais'));
+  fireEvent.change(screen.getByLabelText('Volumes'), { target: { value: '3' } });
+  expect(screen.getByLabelText('Confirmar revisão dos totais')).not.toBeChecked();
+  fireEvent.click(screen.getByLabelText('Confirmar revisão dos totais'));
+  fireEvent.click(screen.getByRole('button', { name: /^Cadastrar pré$/ }));
+  expect(create).toHaveBeenCalledWith([expect.objectContaining({ totalsReviewed: true, totalVolumes: 98 })]);
+});
+
 it('identifies Lite confirmation while keeping field review and requiring explicit registration', async () => {
   const create = vi.fn(() => ({ ok: true as const, manifests: [] }));
   const reading = result('DI00000000001', '0000000001', '100-1');

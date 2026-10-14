@@ -85,7 +85,7 @@ export class TeamSync {
     // Read failures can recover automatically. A failed save or an actual
     // conflict still requires explicit action, preserving the local edits.
     this.refreshRetryAt = refreshing && !this.collision ? Date.now() + Math.min(60000, 5000 * 2 ** Math.min(this.refreshFailures++, 4)) : 0;
-    this.failure = /CONFERENCE_DUPLICATE/.test(message) ? 'Outra pessoa já cadastrou esse pré, CTC ou foto. Nenhuma duplicata foi salva. Gere o PDF se precisar guardar as alterações locais e recarregue os dados.' : this.collision ? 'O mesmo campo foi alterado por outra pessoa ou o registro foi excluído. Gere o PDF para guardar as alterações locais antes de recarregar.' : 'Não foi possível sincronizar. Mantenha esta página aberta e tente novamente.';
+    this.failure = /CONFERENCE_TOTALS_REVIEW/.test(message) ? 'Os totais diferem do cabeçalho. Revise o pré antes de salvar. As alterações locais foram preservadas.' : /CONFERENCE_DUPLICATE/.test(message) ? 'Outra pessoa já cadastrou esse pré, CTC ou foto. Nenhuma duplicata foi salva. Gere o PDF se precisar guardar as alterações locais e recarregue os dados.' : this.collision ? 'O mesmo campo foi alterado por outra pessoa ou o registro foi excluído. Gere o PDF para guardar as alterações locais antes de recarregar.' : 'Não foi possível sincronizar. Mantenha esta página aberta e tente novamente.';
   }
   async flush() {
     if (this.stopped || this.busy || this.failure || !this.pending()) return;

@@ -20,6 +20,7 @@ beforeAll(async () => {
   await db.exec(await readFile('supabase/migrations/20261013040000_teams.sql', 'utf8'));
   await db.exec(await readFile('supabase/migrations/20261013050000_reader_team_access.sql', 'utf8'));
   await db.exec(await readFile('supabase/migrations/20261013060000_team_members_and_merge.sql', 'utf8'));
+  await db.exec(await readFile('supabase/migrations/20261014010000_manifest_corrections.sql', 'utf8'));
 }, 30000);
 afterAll(async () => { await db?.close(); });
 it('preserves the owner records and shares only with invited confirmed accounts, without a fixed member cap', async () => {
@@ -114,4 +115,31 @@ it('executes the standalone rollback security script without changing existing f
   await as(1, 'postgres');
   await db.exec(await readFile('supabase/tests/conference-security.sql', 'utf8'));
   expect((await db.query<{ count: number }>("select count(*)::int count from auth.users where email like '%@example.invalid'")).rows[0]!.count).toBe(0);
+});
+it('renumbers a pré with stable receipt times, linked authenticated history and conflict protection', async () => {
+  await as(1); const base = (await call('get_conference_team')).data as ConferenceState;
+  const old = base.manifests[0]!;
+  const beforeHistory = await call<any[]>('get_conference_audit', [old.id]);
+  const next = structuredClone(base); const renamed = next.manifests[0]!;
+  renamed.id = 'DI00601869631'; renamed.previousIds = [old.id]; renamed.driver = 'DAVID VARGAS FERNANDES'; renamed.documents[0]!.volumes = 60;
+  await as(2); const saved = (await save(base, next)).data;
+  expect(saved.manifests[0]!.documents[0]!.receivedAt).toBe(old.documents[0]!.receivedAt);
+  expect(saved.manifests[0]!.finishedAt).toBe(old.finishedAt);
+  const history = await call<any[]>('get_conference_audit', [renamed.id]);
+  expect(beforeHistory.length).toBeGreaterThan(0);
+  expect(beforeHistory.every(previous => history.some(entry => entry.id === previous.id))).toBe(true);
+  expect(history.some(e => e.action === 'pre_edited' && e.manifest_id === renamed.id && e.actor_email === 'person2@example.com')).toBe(true);
+  expect(history.some(e => e.action === 'ctc_edited' && e.manifest_id === renamed.id)).toBe(true);
+  expect(history.some(e => e.action === 'pre_removed' && e.manifest_id === old.id)).toBe(false);
+  const stale = structuredClone(base); stale.manifests[0]!.documents[0]!.nf = '888-1';
+  await expect(save(base, stale)).rejects.toThrow('CONFERENCE_CONFLICT');
+  const fabricated = structuredClone(saved); fabricated.manifests[0]!.previousIds = ['DI00000000999'];
+  await expect(save(saved, fabricated)).rejects.toThrow('CONFERENCE_CONFLICT');
+});
+it('rejects a totals mismatch on the server unless explicitly reviewed', async () => {
+  await as(1); const base = (await call('get_conference_team')).data as ConferenceState;
+  const next = structuredClone(base); next.manifests[0]!.totalVolumes = 999;
+  await expect(save(base, next)).rejects.toThrow('CONFERENCE_TOTALS_REVIEW');
+  next.manifests[0]!.totalsReviewed = true;
+  expect((await save(base, next)).data.manifests[0]!.totalVolumes).toBe(999);
 });

@@ -37,12 +37,12 @@ function responses(number: number, rotation: 0 | 90 | 180 | 270 = 0, needsCheck 
   };
   // A positional plate repair is a concrete reason to request verification.
   const pre = normalizeGeminiPhoto({ ...check, plate: needsCheck ? 'ABCID23' : check.plate, documents: check.documents.map(row => ({ ...row, client: 'LAB TESTE', recipient: 'CLIENTE TESTE', review: [] })) });
-  const verification: Response = { ok: true, pre, check: { ...check, clockwiseRotation: 0 }, rotation: 0, text: '' };
-  const full: Response = { ok: true, pre, check: null, rotation, text: '' };
+  const verification: Response = { ok: true, pre, repair: null, check: { ...check, clockwiseRotation: 0 }, rotation: 0, text: '' };
+  const full: Response = { ok: true, pre, repair: null, check: null, rotation, text: '' };
   return { verification, full };
 }
 
-async function pendingCall(name: string, mode: 'full' | 'full-lite' | 'verify', occurrence = 0) {
+async function pendingCall(name: string, mode: 'full' | 'full-lite' | 'verify' | 'repair', occurrence = 0) {
   await waitFor(() => expect(calls.filter(call => call.name === name && call.input.data.mode === mode).length).toBeGreaterThan(occurrence));
   return calls.filter(call => call.name === name && call.input.data.mode === mode)[occurrence]!;
 }
@@ -786,4 +786,26 @@ it('returns a transient Lite failure for local review and keeps cancellation ins
   (await pendingCall('both-transient.jpg', 'full-lite')).pending.resolve({ ok: false, unavailable: true, tryLite: true, retryable: false, error: 'Sem resposta.' }); await batch;
   expect(receive).toHaveBeenCalledExactlyOnceWith(0, { error: 'O Gemini normal ficou indisponível. Flash Lite: Sem resposta.' }); expect(calls).toHaveLength(2);
   await readAiPhotos([photo('both-transient-next.jpg')], receive, undefined, undefined, { singlePass: true, quotaFallback: true, orientations: [0] }); expect(calls).toHaveLength(2);
+});
+
+it('rechecks just a flagged NF and preserves unselected fields with one optional call', async () => {
+ const data=responses(1,0,false); if(!data.full.ok)return;
+ data.full.pre.issueDate='2026-10-13'; data.full.pre.documents[0]!.nf=''; data.full.pre.documents[0]!.review=['Confira NF e série'];
+ const receive=vi.fn(), provisional=vi.fn();
+ const run=readAiPhotos([photo('selective.jpg')],receive,undefined,undefined,{orientations:[0],preferredModel:'lite',selective:true,onProvisional:provisional});
+ (await pendingCall('selective.jpg','full-lite')).pending.resolve(data.full);
+ const repair=await pendingCall('selective.jpg','repair');
+ expect(provisional).toHaveBeenCalledOnce();
+ expect(repair.input.data.repairPlan!.rows).toEqual([{index:0,ctc:'0000000001',nf:'',fields:['nf']}]);
+ repair.pending.resolve({...data.full,check:null,repair:{header:{},rows:[{index:0,ctc:'0000000001',nf:'101-1',volumes:'99',client:'INVENTADO',recipient:'OUTRO'}]}});
+ await run;expect(calls).toHaveLength(2);
+ expect(receive.mock.calls[0]![1].pre.documents[0]).toMatchObject({nf:'101-1',volumes:'3',client:'LAB TESTE',recipient:'CLIENTE TESTE'});
+});
+it('reuses existing uncertain data for a manual repair rather than rereading the full table', async () => {
+ const data=responses(1,0,false);if(!data.full.ok)return;
+ data.full.pre.documents[0]!.review=['Confira volumes'];
+ const run=readAiPhotos([photo('manual-repair.jpg')],vi.fn(),undefined,undefined,{orientations:[0],preferredModel:'lite',selective:true,initialRead:data.full.pre});
+ const repair=await pendingCall('manual-repair.jpg','repair');
+ repair.pending.resolve({...data.full,check:null,repair:{header:{},rows:[{index:0,ctc:'0000000001',nf:'101-1',volumes:'3',client:'',recipient:''}]}});
+ await run;expect(calls).toHaveLength(1);expect(calls[0]!.input.data.mode).toBe('repair');
 });

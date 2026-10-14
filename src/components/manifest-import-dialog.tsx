@@ -4,6 +4,7 @@ import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 import { ManifestDocumentsEditor } from './manifest-documents-editor';
 import type { Manifest } from '@/lib/conference';
+import { reviewManifestTotals } from '@/lib/manifest-review';
 import { findImportConflicts, type ImportDraft, type ImportOutcome } from '@/lib/manifest-import';
 import type { PhotoFields } from '@/lib/photo-fields';
 import type { PhotoReadResult } from '@/lib/photo-reader';
@@ -22,7 +23,7 @@ const blank = (): Draft => ({ key: crypto.randomUUID(), filename: 'Cadastro manu
 const documentCount = (item: Draft) => new Set(item.rows.map(row => row.ctc.trim()).filter(ctc => /^\d{10}$/.test(ctc))).size;
 const volumeCount = (item: Draft) => item.rows.reduce((sum, row) => sum + (Number.isInteger(Number(row.volumes)) && Number(row.volumes) > 0 ? Number(row.volumes) : 0), 0);
 const reviewCount = (item: Draft) => item.rows.filter(row => row.review?.length).length;
-const needsReview = (item: Draft) => item.status === 'error' || !!item.headerReview?.some(message => message !== LOCAL_HEADER_NOTICE && !(item.readingSource === 'local' && message.startsWith('Gemini:'))) || !!reviewCount(item) || item.verification?.status === 'review' || (item.readingSource !== 'local' && item.verification?.status === 'unavailable');
+const needsReview = (item: Draft) => reviewManifestTotals(item.rows, item).messages.length > 0 || item.rows.some(row => !row.ctc || !row.nf || !row.volumes || !row.client || !row.recipient) || item.status === 'error' || !!item.headerReview?.some(message => message !== LOCAL_HEADER_NOTICE && !(item.readingSource === 'local' && message.startsWith('Gemini:'))) || !!reviewCount(item) || item.verification?.status === 'review' || (item.readingSource !== 'local' && item.verification?.status === 'unavailable');
 const statusText = (item: Draft) => item.status === 'read' ? item.readingSource === 'local' ? needsReview(item) ? 'Leitura local · campos a conferir' : 'Leitura local' : item.edited ? 'Ajustado manualmente' : needsReview(item) ? 'Conferir campos' : 'Leitura concluída' : item.status === 'checking' ? 'Conferindo por IA' : item.status === 'error' ? 'Leitura interrompida' : item.status === 'reading' ? 'Lendo documento' : item.status === 'waiting' ? 'Aguardando leitura' : 'Cadastro manual';
 const hasManualContent = (item: Draft) => item.id || item.issueDate || item.plate || item.driver || item.rows.some(row => row.ctc || row.nf || row.client || row.recipient || (row.volumes && row.volumes !== '1'));
 
@@ -73,7 +74,7 @@ export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, 
   for (const conflict of draftConflicts) if (conflict.kind === 'ctc' && conflict.row !== undefined) (ctcConflicts[conflict.row] ??= []).push(conflict.message);
   const conflictIndices = new Set(conflicts.map(conflict => conflict.index));
   const manifestConflictNotice = manifestConflicts.length > 0 && <span className="import-field-warning import-field-conflict" id={`${fieldId}-manifest-conflict`} role="status"><AlertCircle size={13} aria-hidden="true" /><span><strong>Cadastro duplicado</strong>{manifestConflicts.map(message => <span key={message}>{message}</span>)}</span></span>;
-  const update = (change: Partial<Draft>) => { setError(''); setItems(list => list.map((item, i) => i === active ? { ...item, ...change, ...(item.status === 'read' ? { edited: true } : {}) } : item)); };
+  const update = (change: Partial<Draft>) => { setError(''); setItems(list => list.map((item, i) => i === active ? { ...item, ...change, totalsReviewed: false, ...(item.status === 'read' ? { edited: true } : {}) } : item)); };
   const selectItem = (index: number) => { setActive(index); setSelectedRow(0); setPreviewRotation(0); setError(''); };
   const releaseUrl = (url?: string) => { if (url) { URL.revokeObjectURL(url); urls.current = urls.current.filter(item => item !== url); } };
   function stopReading() {
@@ -151,7 +152,7 @@ export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, 
       };
       const keep = currentItems.current.filter(item => item.key !== replaceKey && (item.status !== 'manual' || hasManualContent(item)));
       setItems([...keep, ...additions]); setActive(keep.length);
-      const readPrePhotos = reader === 'ai' ? (await import('@/lib/photo-reader')).readPhotosWithFallback : (await import('@/lib/photo-ocr')).readPrePhotos;
+      const readPrePhotos: typeof import('@/lib/photo-reader').readPhotosWithFallback = reader === 'ai' ? (await import('@/lib/photo-reader')).readPhotosWithFallback : (await import('@/lib/photo-ocr')).readPrePhotos;
       if (!isCurrent()) return;
       await readPrePhotos(files, (index, result: PhotoReadResult) => {
         if (!isCurrent()) return;
@@ -180,7 +181,7 @@ export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, 
         if (finished.has(key)) return;
         setProgress(`Foto ${index + 1} de ${files.length} · ${message}`);
         setItems(list => list.map(item => item.key === key ? { ...item, status: item.status === 'checking' ? 'checking' : 'reading', progress: message } : item));
-      }, abort.signal, detailed);
+      }, abort.signal, detailed, replaceKey && previous?.readingSource === 'gemini' && needsReview(previous) ? { kind: previous.kind ?? 'pre', id: previous.id, plate: previous.plate, driver: previous.driver, ...(previous.issueDate ? { issueDate: previous.issueDate } : {}), documents: previous.rows.map(row => ({ ...row, review: row.review ?? [] })), ctcs: [...new Set(previous.rows.map(row => row.ctc))], ...(previous.expectedRows !== undefined ? { expectedRows: previous.expectedRows } : {}), ...(previous.totalVolumes !== undefined ? { totalVolumes: previous.totalVolumes } : {}), ...(previous.headerReview ? { headerReview: previous.headerReview } : {}), readingSource: 'gemini' } : undefined);
     } catch { if (isCurrent()) setError(additions.length ? 'Falha ao iniciar o leitor. Suas fotos continuam na lista para tentar novamente.' : 'Não foi possível preparar as fotos. Tente selecioná-las novamente.'); }
     finally {
       if (isCurrent()) {
@@ -194,6 +195,8 @@ export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, 
     const conflict = findImportConflicts(manifests, items).find(item => all || item.index === active);
     if (conflict) { setActive(conflict.index); setSelectedRow(conflict.row ?? 0); setError(''); return; }
     const chosen = all ? items : draft ? [draft] : [];
+    const blockedTotals = chosen.findIndex(item => reviewManifestTotals(item.rows, item).blocked);
+    if (blockedTotals >= 0) { setActive(all ? blockedTotals : active); setError('Os totais diferem do cabeçalho. Corrija os campos ou confirme a revisão dos totais antes de cadastrar.'); return; }
     const result = onCreate(chosen);
     if (!result.ok) { setError(result.error); setActive(all ? result.index : active); setSelectedRow(result.row ?? 0); return; }
     const keys = new Set(chosen.map(item => item.key));
@@ -259,6 +262,7 @@ export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, 
             {!draft.targetId && <div className="import-manifest-fields"><label className="form-field" data-conflict={!!manifestConflicts.length}>Número do pré<input aria-label="Número do pré" aria-invalid={manifestConflicts.length ? true : undefined} aria-describedby={manifestConflicts.length ? `${fieldId}-manifest-conflict` : undefined} disabled={fieldsDisabled} value={draft.id} placeholder="DI00000000000" onChange={event => update({ id: event.target.value })} />{manifestConflictNotice}</label><label className="form-field">Data de emissão do pré<input aria-label="Data de emissão do pré" type="date" disabled={fieldsDisabled} value={draft.issueDate ?? ''} onChange={event => update({ issueDate: event.target.value })} /></label><label className="form-field">Placa<input aria-label="Placa" disabled={fieldsDisabled} value={draft.plate} maxLength={8} placeholder="ABC1D23" onChange={event => update({ plate: event.target.value })} /></label><label className="form-field">Motorista<input aria-label="Motorista" disabled={fieldsDisabled} value={draft.driver} placeholder="Nome do motorista" onChange={event => update({ driver: event.target.value })} /></label></div>}
             {!draft.targetId && <p className="import-date-note">Use a data impressa no cabeçalho do pré para contar os dias pendentes. Se não estiver legível, deixe em branco.</p>}
             {(draft.status === 'read' || checking) && <div className="import-document-totals" role="group" aria-label="Totais da foto"><span data-mismatch={ctcTotalMismatch}><strong>{documentCount(draft)}{draft.expectedRows != null && draft.expectedRows > 0 && draft.expectedRows !== documentCount(draft) ? ` / ${draft.expectedRows}` : ''}</strong> CTCs lidos{ctcTotalMismatch && <small>Confira a contagem</small>}</span><span data-mismatch={volumeTotalMismatch}><strong>{volumeCount(draft)}{draft.totalVolumes != null && draft.totalVolumes > 0 && draft.totalVolumes !== volumeCount(draft) ? ` / ${draft.totalVolumes}` : ''}</strong> volumes{volumeTotalMismatch && <small>Confira a soma</small>}</span>{draft.seconds !== undefined && <span><strong>{draft.seconds.toFixed(1)} s</strong> de leitura</span>}</div>}
+            {(ctcTotalMismatch || volumeTotalMismatch) && <div role="alert" className="rounded-lg border border-amber-300 bg-amber-50 p-3 mt-3 text-xs space-y-2">{reviewManifestTotals(draft.rows, draft).messages.map(message => <p key={message}>{message}</p>)}<label className="flex items-start gap-2"><input type="checkbox" aria-label="Confirmar revisão dos totais" checked={!!draft.totalsReviewed} disabled={fieldsDisabled} onChange={event => setItems(list => list.map((item, i) => i === active ? { ...item, totalsReviewed: event.target.checked } : item))} />Conferi a foto e confirmo cadastrar com estes totais diferentes.</label></div>}
           </section>
           {draft.url && <section className="import-photo-panel"><div className="import-photo-heading"><span>Foto original</span><Button type="button" variant="ghost" size="icon" aria-label="Girar visualização da foto" title="Girar visualização da foto" onClick={() => setPreviewRotation(value => (value + 90) % 360)}><RotateCw size={15} /></Button></div><a href={draft.url} target="_blank" rel="noreferrer" className="import-photo-frame" aria-label="Ampliar foto original"><img src={draft.url} style={{ transform: `rotate(${previewRotation}deg)` }} alt="Documento enviado para conferência" /></a><span className="import-photo-caption">Toque na foto para ampliar</span></section>}
         </div>
@@ -267,7 +271,7 @@ export function ManifestImportDialog({ open, onOpenChange, manifests, onCreate, 
           <ManifestDocumentsEditor rows={draft.rows} onChange={rows => update({ rows })} selectedIndex={selectedRow} onSelect={setSelectedRow} disabled={fieldsDisabled} hideReviewNotice={draft.readingSource === 'local' ? LOCAL_ROW_NOTICE : undefined} ctcConflicts={ctcConflicts} />
           {draft.status === 'read' && <p className="import-completeness" role="status">{filled} de {draft.rows.length} linha(s) com NF, volumes, cliente e destinatário preenchidos.{reviewCount(draft) > 0 && ` ${reviewCount(draft)} CTC(s) com campos para conferir.`}</p>}
         </>}
-        {draft.file && !waiting && <div className="import-read-tools"><Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => { void readFiles([draft.file!], true, draft.key); }}><ScanLine size={15} />{draft.status === 'error' ? 'Tentar ler novamente' : 'Reler detalhes desta foto'}</Button>{draft.text && <details className="import-raw-text"><summary>Texto identificado</summary><textarea readOnly aria-label="Texto lido da foto" value={draft.text} /></details>}</div>}
+        {draft.file && !waiting && <div className="import-read-tools"><Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => { void readFiles([draft.file!], true, draft.key); }}><ScanLine size={15} />{draft.status === 'error' ? 'Tentar ler novamente' : needsReview(draft) && draft.readingSource === 'gemini' ? 'Reler campos sinalizados' : 'Reler detalhes desta foto'}</Button>{draft.text && <details className="import-raw-text"><summary>Texto identificado</summary><textarea readOnly aria-label="Texto lido da foto" value={draft.text} /></details>}</div>}
         <div className="import-form-footer"><div className="import-footer-info"><span>{documentCount(draft)} CTCs · {volumeCount(draft)} volumes</span><Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => { releaseUrl(draft.url); setItems(list => list.filter(item => item.key !== draft.key)); selectItem(Math.max(0, active - 1)); }}><Trash2 size={14} />{draft.file ? 'Remover foto' : 'Remover pré'}</Button></div><div className="import-save-actions"><Button type="submit" variant={items.length > 1 ? 'outline' : 'default'} disabled={busy || waiting || !!draftConflicts.length}>{draft.targetId ? 'Adicionar ao pré' : 'Cadastrar pré'}</Button>{items.length > 1 && <Button type="button" disabled={busy || !!conflicts.length} onClick={() => save(true)}>Cadastrar lote ({items.length})</Button>}</div></div>
         {items.length > 1 && <div className="import-file-navigation"><Button type="button" variant="ghost" size="sm" disabled={active === 0} onClick={() => selectItem(active - 1)}><ChevronLeft size={15} />Documento anterior</Button><span>{active + 1} / {items.length}</span><Button type="button" variant="ghost" size="sm" disabled={active === items.length - 1} onClick={() => selectItem(active + 1)}>Próximo documento<ChevronRight size={15} /></Button></div>}
       </form>}

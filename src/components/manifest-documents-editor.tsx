@@ -18,10 +18,10 @@ function reviewFields(message: string): Field[] {
   return named.length ? named : fields.filter(field => patterns[field].test(text));
 }
 
-export function ManifestDocumentsEditor({ rows, onChange, selectedIndex, onSelect, disabled, hideReviewNotice, ctcConflicts = {} }: {
+export function ManifestDocumentsEditor({ rows, onChange, selectedIndex, onSelect, disabled, hideReviewNotice, ctcConflicts = {}, allowStructureChange = true }: {
   rows: ManifestDraftRow[]; onChange: (rows: ManifestDraftRow[]) => void;
   selectedIndex: number; onSelect: (index: number) => void; disabled?: boolean; hideReviewNotice?: string | undefined;
-  ctcConflicts?: Record<number, string[]>;
+  ctcConflicts?: Record<number, string[]>; allowStructureChange?: boolean;
 }) {
   const id = useId();
   const index = Math.max(0, Math.min(selectedIndex, rows.length - 1));
@@ -42,10 +42,10 @@ export function ManifestDocumentsEditor({ rows, onChange, selectedIndex, onSelec
     </div>
     <div className="import-ctc-fields">
       {(['ctc', 'nf', 'volumes'] as const).map(field => <label className="form-field" data-review={!!issues[field].length} data-conflict={field === 'ctc' && !!conflicts.length} key={field}>{labels[field]}<input aria-label={labels[field]} aria-invalid={field === 'ctc' && conflicts.length ? true : undefined} aria-describedby={field === 'ctc' && conflicts.length ? `${id}-ctc-conflict` : issues[field].length ? `${id}-${field}-review` : undefined} required={field !== 'nf'} disabled={disabled} value={row[field]} inputMode={field === 'nf' ? 'text' : 'numeric'} placeholder={field === 'ctc' ? '10 dígitos' : field === 'nf' ? 'Número-série' : '1'} maxLength={field === 'ctc' ? 10 : undefined} type={field === 'volumes' ? 'number' : 'text'} min={field === 'volumes' ? 1 : undefined} step={field === 'volumes' ? 1 : undefined} onChange={event => onChange(rows.map((item, i) => i === index ? { ...item, [field]: event.target.value } : item))} />{warning(field)}</label>)}
-      <Button type="button" variant="ghost" size="icon" className="import-remove-ctc" aria-label="Remover CTC" title="Remover este CTC" disabled={disabled || rows.length === 1} onClick={() => { onChange(rows.filter((_, i) => i !== index)); onSelect(Math.max(0, index - 1)); }}><Trash2 /></Button>
+      {allowStructureChange && <Button type="button" variant="ghost" size="icon" className="import-remove-ctc" aria-label="Remover CTC" title="Remover este CTC" disabled={disabled || rows.length === 1} onClick={() => { onChange(rows.filter((_, i) => i !== index)); onSelect(Math.max(0, index - 1)); }}><Trash2 /></Button>}
     </div>
     <div className="import-client-fields">{(['client', 'recipient'] as const).map(field => <label className="form-field" data-review={!!issues[field].length} key={field}>{field === 'client' ? 'Cliente / laboratório (remetente)' : labels[field]}<input aria-label={labels[field]} aria-describedby={issues[field].length ? `${id}-${field}-review` : undefined} disabled={disabled} value={row[field] ?? ''} placeholder={field === 'client' ? 'Nome impresso no documento' : 'Nome do destinatário'} onChange={event => onChange(rows.map((item, i) => i === index ? { ...item, [field]: event.target.value } : item))} />{warning(field)}</label>)}</div>
     {!!otherIssues.length && <div className="import-inline-review" role="status"><AlertCircle size={14} aria-hidden="true" /><span>{otherIssues.map(message => <span key={message}>{message}</span>)}</span></div>}
-    <div className="import-ctc-bottom"><Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() => { onChange([...rows, { ctc: '', nf: '', volumes: '1' }]); onSelect(rows.length); }}><Plus />Adicionar CTC</Button>{flagged > 0 && <Button type="button" variant="ghost" size="sm" disabled={disabled} onClick={() => { const next = rows.findIndex((item, i) => i > index && isFlagged(item, i)); onSelect(next >= 0 ? next : rows.findIndex(isFlagged)); }}>Ir para campo sinalizado<ChevronRight size={14} /></Button>}</div>
+    <div className="import-ctc-bottom">{allowStructureChange && <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() => { onChange([...rows, { ctc: '', nf: '', volumes: '1' }]); onSelect(rows.length); }}><Plus />Adicionar CTC</Button>}{flagged > 0 && <Button type="button" variant="ghost" size="sm" disabled={disabled} onClick={() => { const next = rows.findIndex((item, i) => i > index && isFlagged(item, i)); onSelect(next >= 0 ? next : rows.findIndex(isFlagged)); }}>Ir para campo sinalizado<ChevronRight size={14} /></Button>}</div>
   </section>;
 }

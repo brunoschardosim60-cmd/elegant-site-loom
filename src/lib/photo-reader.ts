@@ -1,5 +1,6 @@
 import { readAiPhotos } from './photo-ai';
 import { markLocalPhoto } from './local-photo';
+import type { PhotoFields } from './photo-fields';
 import type { PhotoAngle } from './photo-orientation';
 
 type LocalReader = typeof import('./photo-ocr').readPrePhotos;
@@ -36,7 +37,7 @@ async function untilCancelled(task: Promise<unknown>, signal: AbortSignal): Prom
  * Separate technical deadlines protect against stalled requests/workers.
  * Two photos run concurrently; queue waiting is separate from processing.
  */
-export async function readPhotosWithFallback(files: File[], onResult: OnResult, onProgress: OnProgress = () => {}, signal?: AbortSignal, detailed = false) {
+export async function readPhotosWithFallback(files: File[], onResult: OnResult, onProgress: OnProgress = () => {}, signal?: AbortSignal, detailed = false, initialRead?: PhotoFields) {
   if (signal?.aborted || !files.length) return;
   let next = 0;
   const read = async (index: number) => {
@@ -54,6 +55,7 @@ export async function readPhotosWithFallback(files: File[], onResult: OnResult, 
       onResult(index, 'error' in result ? result : { ...result, milliseconds: Math.round(performance.now() - started), pendingVerification: false });
       photo.abort();
     };
+    let provisional: Success | undefined = initialRead ? { pre: initialRead, text: JSON.stringify(initialRead), milliseconds: 0 } : undefined;
     let cause = 'O Flash Lite não concluiu a leitura.';
     try {
       const ai = new AbortController();
@@ -75,7 +77,8 @@ export async function readPhotosWithFallback(files: File[], onResult: OnResult, 
                 ai.abort();
               } else deliver(result);
             }, (_position, message) => { if (!ai.signal.aborted) progress(message); }, ai.signal, {
-              singlePass: true, quotaFallback: true, preferredModel: 'lite', orientations: [0],
+              singlePass: false, selective: true, quotaFallback: true, preferredModel: 'lite', orientations: [0], ...(initialRead ? { initialRead } : {}),
+              onProvisional: (_position, pre) => { if (active()) { provisional = { pre, text: JSON.stringify(pre), milliseconds: performance.now() - started }; onResult(index, { ...provisional, pendingVerification: true }); } },
             });
           } catch (error) {
             if (!active() || ai.signal.aborted) return;
@@ -88,6 +91,7 @@ export async function readPhotosWithFallback(files: File[], onResult: OnResult, 
         clearTimeout(aiTimer); photo.signal.removeEventListener('abort', stopAi); ai.abort();
       }
       if (!active()) return;
+      if (provisional) { deliver({ ...provisional, pre: { ...provisional.pre, headerReview: [...(provisional.pre.headerReview ?? []), 'A releitura não terminou. Dados da primeira leitura preservados; confira os campos sinalizados.'], verification: { status: 'review', checkedFields: 0, conflicts: 0 } } }); return; }
       progress('IA indisponível · lendo no navegador…');
       await untilCancelled((async () => {
         try {

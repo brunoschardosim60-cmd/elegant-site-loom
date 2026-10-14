@@ -1,7 +1,8 @@
 import { parseReading, type Manifest, type DocumentItem } from './conference';
+import { reviewManifestTotals, type ManifestTotals } from './manifest-review';
 import { normalizeIssueDate } from './manifest-date';
 import type { ManifestDraftRow } from '../components/manifest-documents-editor';
-export type ImportDraft = { id: string; plate: string; driver: string; issueDate?: string | undefined; sourcePhotoHash?: string | undefined; rows: ManifestDraftRow[]; targetId?: string };
+export type ImportDraft = { id: string; plate: string; driver: string; issueDate?: string | undefined; sourcePhotoHash?: string | undefined; rows: ManifestDraftRow[]; targetId?: string } & ManifestTotals;
 export type ImportOutcome = { ok: true; manifests: Manifest[] } | { ok: false; error: string; index: number; row?: number | undefined };
 export type ImportConflict = { kind: 'manifest' | 'ctc'; index: number; row?: number; message: string; manifestId?: string };
 
@@ -95,6 +96,8 @@ export function applyImports(existing: Manifest[], drafts: ImportDraft[], now: s
     const issueDate = !target ? normalizeIssueDate(draft.issueDate ?? '') : undefined;
     if (!target && draft.issueDate?.trim() && !issueDate) return fail('Confira a data de emissão do pré.');
     if (!draft.rows.length) return fail('Inclua pelo menos um CTC.');
+    const totals = reviewManifestTotals(draft.rows, draft);
+    if (totals.blocked) return fail(`${totals.messages.join(' ')} Corrija os campos ou confirme a revisão dos totais.`);
     // Existing CTCs remain conflicts (including a selected target for a DACTE).
     // Repeated rows in this incoming draft are grouped below as multiple NFs for one CTC.
     const registeredCtcs = new Set(manifests.flatMap(manifest => manifest.documents.map(document => document.ctc)));
@@ -128,7 +131,7 @@ export function applyImports(existing: Manifest[], drafts: ImportDraft[], now: s
     const invalidSum = docs.find(document => !Number.isSafeInteger(document.volumes));
     if (invalidSum) return fail('Confira a soma de volumes deste CTC.', grouped.get(invalidSum.ctc)!.firstRow);
     if (target) manifests = manifests.map(m => m.id === id ? { ...m, documents: [...m.documents, ...docs], ...(sourcePhotoHash ? { sourcePhotoHashes: [...new Set([...(m.sourcePhotoHashes ?? []).map(hash => hash.toLowerCase()), sourcePhotoHash])] } : {}), finishedAt: undefined } : m);
-    else manifests.push({ id, driver: draft.driver.trim(), plate: draft.plate.trim().toUpperCase(), date: now, ...(issueDate ? { issueDate } : {}), ...(sourcePhotoHash ? { sourcePhotoHashes: [sourcePhotoHash] } : {}), documents: docs });
+    else manifests.push({ id, driver: draft.driver.trim(), plate: draft.plate.trim().toUpperCase(), date: now, ...(draft.expectedRows !== undefined ? { expectedRows: draft.expectedRows } : {}), ...(draft.totalVolumes !== undefined ? { totalVolumes: draft.totalVolumes } : {}), ...(draft.totalsReviewed ? { totalsReviewed: true } : {}), ...(issueDate ? { issueDate } : {}), ...(sourcePhotoHash ? { sourcePhotoHashes: [sourcePhotoHash] } : {}), documents: docs });
   }
   return { ok: true, manifests };
 }

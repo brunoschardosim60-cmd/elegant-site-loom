@@ -26,7 +26,7 @@ describe('AI first, bounded local fallback', () => {
   it('returns one AI result without running local OCR or an orientation worker', async () => {
     mocks.ai.mockImplementation(async(_files:File[],result:OnResult)=>result(0,reading(0)));
     const result=vi.fn();await readPhotosWithFallback([files[0]!],result);
-    expect(mocks.ai.mock.calls[0]![4]).toEqual({singlePass:true,quotaFallback:true,preferredModel:'lite',orientations:[0]});
+    expect(mocks.ai.mock.calls[0]![4]).toEqual({singlePass:false,selective:true,quotaFallback:true,preferredModel:'lite',orientations:[0],onProvisional:expect.any(Function)});
     expect(mocks.local).not.toHaveBeenCalled();expect(result).toHaveBeenCalledExactlyOnceWith(0,expect.objectContaining({pendingVerification:false,pre:expect.objectContaining({readingSource:'gemini'})}));
   });
   it('limits concurrent photos to two and preserves file indices when results arrive out of order', async () => {
