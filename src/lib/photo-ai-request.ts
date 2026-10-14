@@ -20,7 +20,7 @@ export async function requestAiPhoto(input: Parameters<typeof readPhotoWithGemin
   } catch (error) {
     if (input.signal?.aborted) throw error;
     return { ok: false as const, unavailable: true as const, tryLite: true as const, retryable: false as const, error: timeout.aborted
-      ? `O Gemini excedeu o limite de ${timeoutMs / 1000} s; a leitura local pode ser usada.`
-      : 'Não foi possível conectar ao Gemini. A leitura local pode ser usada para esta foto.' };
+      ? `A IA excedeu o limite de ${timeoutMs / 1000} s; a leitura local pode ser usada.`
+      : 'Não foi possível conectar à IA. A leitura local pode ser usada para esta foto.' };
   } finally { signal.removeEventListener('abort', onAbort); }
 }

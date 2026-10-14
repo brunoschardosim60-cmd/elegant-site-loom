@@ -17,7 +17,7 @@ const providerCooldown = 2 * 60 * 1000;
 // Full reading and verification use different models and quota buckets.
 // This version also ignores quotas cached before Flash became the full reader
 // and Lite became the optional verifier; those stage buckets were reversed.
-const providerScope = (userId: string, stage: ProviderStage) => `${userId}:photo-model-stages-v3:${stage}`;
+const providerScope = (userId: string, stage: ProviderStage) => `${userId}:photo-model-stages-v4:${stage}`;
 const verificationQuotaMessage = 'A cota diária da conferência adicional esgotou. A leitura completa foi mantida; confira os campos sinalizados.';
 const verificationUnavailableMessage = 'A conferência adicional está temporariamente indisponível. A leitura completa foi mantida; confira os campos sinalizados.';
 const isQuotaFailure = (failure: ProviderFailure) => 'quota' in failure;
@@ -165,7 +165,7 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
           progress(isQuotaFailure(full) ? 'Cota do Gemini normal atingida · conferindo pelo Flash Lite…' : 'Gemini normal indisponível · conferindo pelo Flash Lite…');
           full = await providerAwareRequest({ data: { ...payload, accessToken, mode: 'full-lite' }, signal: photoSignal });
         }
-        if (full.ok) completedPhoto = { ...full.pre, imageRotation: ((orientation + full.rotation) % 360) as PhotoAngle, aiReader: usedLite ? 'lite' : 'normal', verification: { status: 'single', checkedFields: 0, conflicts: 0 } };
+        if (full.ok) completedPhoto = { ...full.pre, imageRotation: ((orientation + full.rotation) % 360) as PhotoAngle, aiReader: full.pre.aiReader ?? (usedLite ? 'lite' : 'normal'), verification: { status: 'single', checkedFields: 0, conflicts: 0 } };
         if (photoSignal.aborted) throw new Error('Leitura interrompida.');
         if (!full.ok) { if (!signal?.aborted) onResult(index, { error: normalFailure ? `${normalFailure} Flash Lite: ${full.error}` : full.error, ...('fallback' in full && full.fallback === false ? { fallback: false } : {}) }); continue; }
         let pre = completedPhoto!;

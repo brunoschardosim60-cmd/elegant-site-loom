@@ -37,7 +37,7 @@ it.each([['full', 22000], ['full-lite', 27000], ['verify', 12000]] as const)('li
   await vi.advanceTimersByTimeAsync(budget - 1);
   expect(finished).toBe(false);
   await vi.advanceTimersByTimeAsync(1);
-  expect(await run).toMatchObject({ ok: false, unavailable: true, retryable: false, error: `O Gemini excedeu o limite de ${budget / 1000} s; a leitura local pode ser usada.` });
+  expect(await run).toMatchObject({ ok: false, unavailable: true, retryable: false, error: `A IA excedeu o limite de ${budget / 1000} s; a leitura local pode ser usada.` });
   expect(read.mock.calls[0]?.[0].signal.aborted).toBe(true);
   expect(read).toHaveBeenCalledOnce();
 });

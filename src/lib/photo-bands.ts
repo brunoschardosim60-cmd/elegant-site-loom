@@ -61,7 +61,7 @@ export function applyBandRead(pre: PhotoFields, candidate: PhotoFields): PhotoFi
   const headers = ['expectedRows', 'expectedNfs', 'totalVolumes'] as const;
   if (headers.some(field => !candidate[field] || pre[field] && pre[field] !== candidate[field])) return rejected(pre, candidate);
   const result = structuredClone(candidate);
-  if (pre.aiReader) result.aiReader = pre.aiReader;
+  if (!result.aiReader && pre.aiReader) result.aiReader = pre.aiReader;
   if (pre.imageRotation !== undefined) result.imageRotation = pre.imageRotation;
   result.tableRecovery = 'bands';
   let changed = 0;

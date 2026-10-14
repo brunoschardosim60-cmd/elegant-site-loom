@@ -10,7 +10,7 @@ export type PhotoFields = ReturnType<typeof parsePreText> & {
   readingSource?: 'gemini' | 'local';
   imageRotation?: 0 | 90 | 180 | 270;
   tableRecovery?: 'bands';
-  aiReader?: 'normal' | 'lite';
+  aiReader?: 'normal' | 'lite' | 'deepseek';
   readingFallback?: boolean;
   verification?: { status: 'single' | 'matched' | 'review' | 'unavailable'; checkedFields: number; conflicts: number };
 };

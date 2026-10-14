@@ -33,7 +33,7 @@ async function untilCancelled(task: Promise<unknown>, signal: AbortSignal): Prom
   finally { signal.removeEventListener('abort', cancel); }
 }
 
-/** Flash Lite first. Fifteen seconds is a progress target, not cancellation.
+/** Server-configured AI first, then local OCR. Fifteen seconds is a progress target, not cancellation.
  * Separate technical deadlines protect against stalled requests/workers.
  * Two photos run concurrently; queue waiting is separate from processing.
  */
@@ -67,14 +67,14 @@ export async function readPhotosWithFallback(files: File[], onResult: OnResult, 
       photo.abort();
     };
     let provisional: Success | undefined = initialRead ? { pre: initialRead, text: JSON.stringify(initialRead), milliseconds: 0 } : undefined;
-    let cause = 'O Flash Lite não concluiu a leitura.';
+    let cause = 'A IA não concluiu a leitura.';
     try {
       const ai = new AbortController();
       const stopAi = () => ai.abort();
       photo.signal.addEventListener('abort', stopAi, { once: true });
       const aiTimer = setTimeout(stopAi, aiBudgetMs);
       try {
-        progress('Lendo a foto pelo Flash Lite…');
+        progress('Lendo a foto pela IA…');
         await untilCancelled((async () => {
           try {
             await readAiPhotos([files[index]!], (_position, result) => {
@@ -93,11 +93,11 @@ export async function readPhotosWithFallback(files: File[], onResult: OnResult, 
             });
           } catch (error) {
             if (!active() || ai.signal.aborted) return;
-            cause = safeCause(error instanceof Error ? error.message : 'Não foi possível conectar ao Flash Lite.');
+            cause = safeCause(error instanceof Error ? error.message : 'Não foi possível conectar à IA.');
             if (/Entre .*conta|sess[aã]o|autentica/i.test(cause)) deliver({ error: cause, fallback: false });
           }
         })(), ai.signal);
-        if (ai.signal.aborted && active() && cause === 'O Flash Lite não concluiu a leitura.') cause = 'O Flash Lite não respondeu dentro do prazo de segurança. Leitura local de reserva acionada.';
+        if (ai.signal.aborted && active() && cause === 'A IA não concluiu a leitura.') cause = 'A IA não respondeu dentro do prazo de segurança. Leitura local de reserva acionada.';
       } finally {
         clearTimeout(aiTimer); photo.signal.removeEventListener('abort', stopAi); ai.abort();
       }

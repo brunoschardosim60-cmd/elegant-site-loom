@@ -88,7 +88,7 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 describe('AI photo import pipeline', () => {
   it('uses Lite directly even when normal is blocked and makes one independent full read', async () => {
     const session=(await mocks.session()).data.session;
-    rememberPhotoProviderBlock(`${session.user.id}:photo-model-stages-v3:full`,quotaFailure('daily'));
+    rememberPhotoProviderBlock(`${session.user.id}:photo-model-stages-v4:full`,quotaFailure('daily'));
     const receive=vi.fn();
     const batch=readAiPhotos([photo('lite-primary.jpg')],receive,undefined,undefined,{preferredModel:'lite',singlePass:true,quotaFallback:true,orientations:[270]});
     (await pendingCall('lite-primary.jpg','full-lite')).pending.resolve(responses(1,0,true).full);await batch;
@@ -879,4 +879,12 @@ it('preserves the first draft on strip quota failure without starting another ve
   expect(calls).toHaveLength(2);
   expect(receive.mock.calls[0]![1].pre.documents).toEqual(data.full.pre.documents);
   expect(receive.mock.calls[0]![1].pre.headerReview.join(' ')).toContain('faixas indisponível');
+});
+
+it('keeps the actual DeepSeek provider label returned by the server', async () => {
+  const data = responses(1, 0, false); if (!data.full.ok) return;
+  data.full.pre.aiReader = 'deepseek';
+  const receive = vi.fn(), run = readAiPhotos([photo('deepseek.jpg')], receive, undefined, undefined, { orientations: [0], preferredModel: 'lite', singlePass: true });
+  (await pendingCall('deepseek.jpg', 'full-lite')).pending.resolve(data.full); await run;
+  expect(receive.mock.calls[0]![1].pre.aiReader).toBe('deepseek');
 });
