@@ -27,6 +27,7 @@ const countVolumes = (manifests: Manifest[], pendingOnly = false) => manifests.r
 /** Keeps every driver's manifests together while opening only the table being used. */
 export function DriverManifestList({ manifests, query, focusedManifest, age, now, onToggleDocument, onIssueDateChange, onDeleteManifest, onAuditManifest, onEditManifest }: Props) {
   const [expanded, setExpanded] = useState(manifests[0]?.id ?? '');
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [editingDate, setEditingDate] = useState<{ id: string; value: string; error?: string } | null>(null);
   const groups = new Map<string, { driver: string; manifests: Manifest[] }>();
   for (const manifest of manifests) {
@@ -56,8 +57,9 @@ export function DriverManifestList({ manifests, query, focusedManifest, age, now
             <span><FileText size={13} /><strong>{pendingCount || documentCount}</strong> {pendingCount ? pendingCount === 1 ? 'CTC pendente' : 'CTCs pendentes' : documentCount === 1 ? 'CTC conferido' : 'CTCs conferidos'}</span>
             <span><Package size={13} /><strong>{pendingCount ? pendingVolumes : countVolumes(group.manifests)}</strong> {pendingCount ? 'vols. a conferir' : 'vols. conferidos'}</span>
           </div>
+          <Button type="button" variant="ghost" size="sm" className="driver-group-toggle h-8 shrink-0 gap-1 px-2 text-xs" aria-expanded={!collapsedGroups.has(key)} aria-label={`${collapsedGroups.has(key) ? 'Mostrar' : 'Recolher'} manifestos de ${group.driver}`} onClick={() => setCollapsedGroups(old => { const next = new Set(old); if (next.has(key)) next.delete(key); else next.add(key); return next; })}><ChevronDown size={15} className={collapsedGroups.has(key) ? '-rotate-90 transition-transform' : 'transition-transform'} /><span className="hidden sm:inline">{collapsedGroups.has(key) ? 'Mostrar' : 'Recolher'}</span></Button>
         </header>
-        <div className="driver-manifests">
+        {!collapsedGroups.has(key) && <div className="driver-manifests">
           {group.manifests.map(manifest => {
             const totalsReview = reviewManifestTotals(manifest.documents.map(doc => ({ ...doc, client: doc.client ?? '', recipient: doc.recipient ?? '', volumes: String(doc.volumes) })), manifest);
             const count = manifest.documents.filter(doc => doc.received).length;
@@ -75,7 +77,7 @@ export function DriverManifestList({ manifests, query, focusedManifest, age, now
                 <div className="driver-manifest-summary"><span className={`status-badge ${manifest.finishedAt ? 'badge-success' : days >= 2 ? 'badge-warning' : 'badge-pending'}`}>{manifest.finishedAt ? <Check size={11} /> : <Clock3 size={11} />}{manifest.finishedAt ? 'Finalizado' : manifestAgeLabel(manifest, now)}</span><span className="driver-manifest-missing">{remaining ? <><strong>{remaining}</strong> {remaining === 1 ? 'CTC' : 'CTCs'} · <strong>{pendingVols}</strong> vols. faltando</> : <>{count} {count === 1 ? 'CTC conferido' : 'CTCs conferidos'}</>}</span></div>
                 <ChevronDown className="driver-manifest-chevron" size={17} aria-hidden="true" />
               </button>
-              {(onIssueDateChange || onDeleteManifest || onAuditManifest || onEditManifest) && <div className="driver-manifest-date-editor px-4 pb-2 flex flex-wrap items-center gap-x-4 gap-y-2">
+              {(onIssueDateChange || onDeleteManifest || onAuditManifest || onEditManifest) && <div className="driver-manifest-date-editor px-3 pb-1 flex flex-wrap items-center gap-x-1 gap-y-1">
                 {onIssueDateChange && (editingDate?.id === manifest.id ? <form className="flex min-w-0 flex-wrap items-center gap-2" onSubmit={event => {
                   event.preventDefault();
                   const value = editingDate.value.trim();
@@ -90,21 +92,21 @@ export function DriverManifestList({ manifests, query, focusedManifest, age, now
                   <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => setEditingDate(null)}>Cancelar</Button>
                   <span className="basis-full text-[10px] text-muted-foreground">Use a data impressa no cabeçalho. Em branco, a idade usa o cadastro.</span>
                   {editingDate.error && <span role="alert" className="basis-full text-xs text-destructive">{editingDate.error}</span>}
-                </form> : <button type="button" className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground" aria-label={`Editar data do ${noun} ${manifest.id}`} onClick={() => setEditingDate({ id: manifest.id, value: normalizeIssueDate(manifest.issueDate ?? '') ?? '' })}><CalendarDays size={12} />Editar data do {noun}</button>)}
-                {onEditManifest && <button type="button" className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground" aria-label={`Editar ${noun} ${manifest.id}`} onClick={() => onEditManifest(manifest)}><Pencil size={12} />Editar {noun}</button>}
-                {onDeleteManifest && <Button type="button" variant="ghost" size="sm" className="h-7 gap-1 px-1 text-[10px] text-muted-foreground hover:text-destructive [&_svg]:size-3" aria-label={`Excluir ${noun} ${manifest.id}`} onClick={() => onDeleteManifest(manifest.id)}><Trash2 size={12} aria-hidden="true" />Excluir {noun}</Button>}
-                {onAuditManifest && <button type="button" className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground" aria-label={`Histórico do ${noun} ${manifest.id}`} onClick={() => onAuditManifest(manifest.id)}><History size={12} />Histórico</button>}
+                </form> : <button type="button" className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground" aria-label={`Editar data do ${noun} ${manifest.id}`} onClick={() => setEditingDate({ id: manifest.id, value: normalizeIssueDate(manifest.issueDate ?? '') ?? '' })}><CalendarDays size={13} /><span>Data</span></button>)}
+                {onEditManifest && <button type="button" className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground" aria-label={`Editar ${noun} ${manifest.id}`} onClick={() => onEditManifest(manifest)}><Pencil size={13} /><span>Editar</span></button>}
+                {onDeleteManifest && <Button type="button" variant="ghost" size="sm" className="h-7 gap-1 px-1.5 text-[11px] font-normal text-muted-foreground hover:text-destructive [&_svg]:size-3" aria-label={`Excluir ${noun} ${manifest.id}`} onClick={() => onDeleteManifest(manifest.id)}><Trash2 size={12} aria-hidden="true" /><span>Excluir</span></Button>}
+                {onAuditManifest && <button type="button" className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground" aria-label={`Histórico do ${noun} ${manifest.id}`} onClick={() => onAuditManifest(manifest.id)}><History size={13} /><span>Histórico</span></button>}
               </div>}
               {!!totalsReview.messages.length && <p role="status" className="px-4 pb-2 text-[11px] text-amber-700">{totalsReview.messages.join(" ")} Totais revisados manualmente; use Editar pré para corrigir.</p>}
               <div className="driver-manifest-progress"><div className="driver-manifest-progress-label"><span>{count} de {manifest.documents.length} CTCs conferidos</span><strong>{percent}%</strong></div><div className="driver-manifest-progress-track" role="progressbar" aria-label={`Conferência de ${group.driver} · ${manifest.id}`} aria-valuenow={count} aria-valuemin={0} aria-valuemax={manifest.documents.length}><span style={{ width: `${percent}%` }} /></div></div>
               {open && <div className="driver-document-panel" id={tableId}>
                 <table className="document-table driver-document-table"><thead><tr><th>CTC / Cliente</th><th>Nota fiscal</th><th>Vols.</th><th>Status</th><th><span className="sr-only">Ações</span></th></tr></thead><tbody>{[...manifest.documents].sort((a, b) => Number(a.received) - Number(b.received)).map(doc => <tr key={doc.id} className={doc.received ? 'received-row' : ''}>
-                  <td className="ctc-number" data-label="CTC / Cliente">{doc.ctc}{doc.client && <span className="driver-document-client">{doc.client}</span>}{doc.recipient && <span className="driver-document-recipient">Para: {doc.recipient}</span>}</td><td data-label="Nota fiscal">{doc.nf}</td><td data-label="Volumes">{doc.volumes}</td><td data-label="Status"><span className={`status-badge ${doc.received ? 'badge-success' : 'badge-pending'}`}>{doc.received ? <Check size={10} /> : <Clock3 size={10} />}{doc.received ? 'Conferido' : 'Pendente'}</span></td><td><Button variant="ghost" size="icon" className="document-action text-muted-foreground" title={doc.received ? `Desfazer CTC ${doc.ctc}` : `Marcar CTC ${doc.ctc} como recebido`} aria-label={doc.received ? `Desfazer CTC ${doc.ctc}` : `Marcar CTC ${doc.ctc} como recebido`} onClick={() => onToggleDocument(manifest, doc.id, !doc.received)}>{doc.received ? <Undo2 /> : <Check />}</Button></td>
+                  <td className="ctc-number" data-label="CTC / Cliente">{doc.ctc}{doc.client && <span className="driver-document-client">{doc.client}</span>}{doc.recipient && <span className="driver-document-recipient">Para: {doc.recipient}</span>}</td><td data-label="Nota fiscal">{doc.nf}</td><td data-label="Volumes">{doc.volumes}</td><td data-label="Status"><span className={`status-badge ${doc.received ? 'badge-success' : 'badge-pending'}`}>{doc.received ? <Check size={12} aria-hidden="true" /> : <Clock3 size={12} aria-hidden="true" />}{doc.received ? 'Conferido' : 'Pendente'}</span></td><td><Button variant="ghost" size="icon" className="document-action text-muted-foreground" title={doc.received ? `Desfazer CTC ${doc.ctc}` : `Marcar CTC ${doc.ctc} como recebido`} aria-label={doc.received ? `Desfazer CTC ${doc.ctc}` : `Marcar CTC ${doc.ctc} como recebido`} onClick={() => onToggleDocument(manifest, doc.id, !doc.received)}>{doc.received ? <Undo2 /> : <Check />}</Button></td>
                 </tr>)}</tbody></table>
               </div>}
             </article>;
           })}
-        </div>
+        </div>}
       </section>;
     })}
   </div>;
