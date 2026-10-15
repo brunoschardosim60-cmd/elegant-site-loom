@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { type SupabaseClient, type Session } from '@supabase/supabase-js';
-import { Button } from './ui/button';
+import { AccountFeedback, AccountStatusBar } from './account-status';
 import { ConferenceWorkspace } from './conference-workspace';
 import { getSupabaseClient } from '@/lib/supabase-client';
 import type { ConferenceState } from '@/lib/conference-state';
@@ -67,8 +67,8 @@ export function AccountWorkspace() {
     }).catch(() => { if (active) { setError('Não foi possível conectar à sua conta. Recarregue a página para tentar novamente.'); setReady(true); } });
     return () => { active = false; unsubscribe?.(); };
   }, []);
-  if (!ready) return <AccountPanel><p>Conectando à sua conta…</p></AccountPanel>;
-  if (!client || error) return <AccountPanel><p role="alert">{error}</p><Button onClick={() => window.location.reload()}>Tentar novamente</Button></AccountPanel>;
+  if (!ready) return <AccountPanel><AccountFeedback message="Conectando à sua conta…"/></AccountPanel>;
+  if (!client || error) return <AccountPanel><AccountFeedback error message={error} onRetry={() => window.location.reload()}/></AccountPanel>;
   const finishAuth = () => { recoveryActive.current = false; recoveryAccountId.current = undefined; setAuthScreen('normal'); setInvalidRecoveryLink(false); setAwaitingRecovery(false); setPasswordRecoveryMarker(false); };
   if (authScreen === 'recovery') return <PasswordReset key={session?.user.id ?? 'no-session'} client={client} hasSession={!!session && !invalidRecoveryLink && !awaitingRecovery} email={session?.user.email} onComplete={finishAuth} onRequestLink={() => { recoveryActive.current = false; recoveryAccountId.current = undefined; setPasswordRecoveryMarker(false); setInvalidRecoveryLink(false); setAwaitingRecovery(false); setAuthScreen('forgot'); }} />;
   if (!session || authScreen === 'forgot') return <Login client={client} initialMode={authScreen === 'forgot' ? 'forgot' : 'login'} onAuthenticated={finishAuth} onBack={finishAuth} />;
@@ -98,7 +98,7 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
     return () => { active = false; sync.current?.stop(); sync.current = undefined; window.clearInterval(timer); window.removeEventListener('beforeunload', preventLoss); window.removeEventListener('online', refresh); window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', refresh); };
   }, [client, session.user.id]);
   function changed(snapshot: ConferenceState) { sync.current?.change(snapshot); }
-  if (loadError) return <AccountPanel><p role="alert">{loadError}</p><Button onClick={() => window.location.reload()}>Tentar novamente</Button></AccountPanel>;
-  if (!view) return <AccountPanel><p>Carregando seus cadastros…</p></AccountPanel>;
-  return <div className="account-shell"><div className="account-bar"><span className="account-identity">{session.user.email} · <span role="status">{view.status}</span></span><Button size="sm" variant="ghost" onClick={() => { setAuditPre(''); setTeamOpen(true); void sync.current?.refresh(true); }}>{view.team.invitation ? 'Equipe · convite' : 'Equipe'}</Button><Button size="sm" variant="ghost" disabled={view.pending} onClick={() => void client.auth.signOut()}>Sair da conta</Button>{view.error && <div role="alert" className="account-save-error text-destructive">{view.error} {view.conflict ? <Button size="sm" variant="outline" onClick={() => window.location.reload()}>Recarregar dados salvos</Button> : <Button size="sm" variant="outline" onClick={() => sync.current?.retry()}>Tentar salvar novamente</Button>}</div>}</div><ConferenceWorkspace initialState={view.state} externalState={view.state} onSnapshot={changed} accountEmail={session.user.email || ''} onAuditManifest={id => { setAuditPre(id); setTeamOpen(true); }} /><TeamPanel client={client} team={view.team} open={teamOpen} onOpenChange={setTeamOpen} onRefresh={() => void sync.current?.refresh(true)} selectedPre={auditPre} canJoin={!view.pending} /></div>;
+  if (loadError) return <AccountPanel><AccountFeedback error message={loadError} onRetry={() => window.location.reload()}/></AccountPanel>;
+  if (!view) return <AccountPanel><AccountFeedback message="Carregando seus cadastros…"/></AccountPanel>;
+  return <div className="account-shell"><AccountStatusBar email={session.user.email || ''} status={view.status} pending={view.pending} error={view.error} conflict={view.conflict} invitation={!!view.team.invitation} onTeam={() => { setAuditPre(''); setTeamOpen(true); void sync.current?.refresh(true); }} onSignOut={() => void client.auth.signOut()} onRetry={() => sync.current?.retry()} onReload={() => window.location.reload()} /><ConferenceWorkspace initialState={view.state} externalState={view.state} onSnapshot={changed} accountEmail={session.user.email || ''} onAuditManifest={id => { setAuditPre(id); setTeamOpen(true); }} /><TeamPanel client={client} team={view.team} open={teamOpen} onOpenChange={setTeamOpen} onRefresh={() => void sync.current?.refresh(true)} selectedPre={auditPre} canJoin={!view.pending} /></div>;
 }

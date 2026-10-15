@@ -39,8 +39,9 @@ export function DriverManifestList({ manifests, query, focusedManifest, age, now
   const firstManifestId = manifests[0]?.id ?? '';
   const expandedVisible = !expanded || manifests.some(manifest => manifest.id === expanded);
   useEffect(() => { if (!expandedVisible) setExpanded(firstManifestId); }, [expandedVisible, firstManifestId]);
-  useEffect(() => { if (query.trim()) setExpanded(firstManifestId); }, [query, firstManifestId]);
-  useEffect(() => { if (focusedManifest) setExpanded(focusedManifest.id); }, [focusedManifest]);
+  useEffect(() => { if (query.trim()) { setExpanded(firstManifestId); setCollapsedGroups(new Set()); } }, [query, firstManifestId]);
+  const focusedDriverKey = driverKey(manifests.find(manifest => manifest.id === focusedManifest?.id)?.driver ?? '');
+  useEffect(() => { if (focusedManifest) { setExpanded(focusedManifest.id); setCollapsedGroups(old => { if (!old.has(focusedDriverKey)) return old; const next = new Set(old); next.delete(focusedDriverKey); return next; }); } }, [focusedManifest, focusedDriverKey]);
 
   return <div className="driver-list">
     <div className="driver-list-caption"><UserRound size={14} /><span>{groups.size} {groups.size === 1 ? 'motorista' : 'motoristas'} · {manifests.length} {manifests.length === 1 ? 'manifesto' : 'manifestos'}</span><span>Selecione um manifesto para conferir</span></div>

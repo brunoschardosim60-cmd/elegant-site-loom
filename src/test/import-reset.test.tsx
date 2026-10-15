@@ -10,7 +10,7 @@ it('discards an unsaved import when closed and opens a blank form', async () => 
   fireEvent.change(field, { target: { value: 'DI00123456789' } });
   fireEvent.change(screen.getByLabelText('Motorista'), { target: { value: 'RASCUNHO' } });
   fireEvent.change(screen.getByLabelText('NF-série'), { target: { value: '123-1' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Fechar' }));
   fireEvent.click(screen.getByRole('button', { name: /Novo pré/ }));
   expect(await screen.findByLabelText('Número do pré')).toHaveValue('');
   expect(screen.getByLabelText('Motorista')).toHaveValue('');

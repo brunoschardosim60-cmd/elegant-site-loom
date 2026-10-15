@@ -70,3 +70,15 @@ it('allows clearing an explicitly stored issue date to restore registration-base
   fireEvent.click(screen.getByRole('button', { name: 'Salvar data' }));
   expect(onIssueDateChange).toHaveBeenCalledExactlyOnceWith('DI000000001', undefined);
 });
+
+it('reopens a collapsed driver after a new scan or search without receiving anything', () => {
+ const toggle=vi.fn();const view=render(<DriverManifestList {...props} onToggleDocument={toggle}/>);
+ fireEvent.click(screen.getByRole('button',{name:'Recolher manifestos de ANA SILVA'}));
+ expect(screen.queryByRole('button',{name:'Marcar CTC 0000000001 como recebido'})).not.toBeInTheDocument();
+ view.rerender(<DriverManifestList {...props} onToggleDocument={toggle} focusedManifest={{id:'DI000000002'}}/>);
+ expect(screen.getByRole('button',{name:'Marcar CTC 0000000002 como recebido'})).toBeInTheDocument();
+ fireEvent.click(screen.getByRole('button',{name:'Recolher manifestos de ANA SILVA'}));
+ view.rerender(<DriverManifestList {...props} onToggleDocument={toggle} query="ANA"/>);
+ expect(screen.getByRole('button',{name:'Marcar CTC 0000000001 como recebido'})).toBeInTheDocument();
+ expect(toggle).not.toHaveBeenCalled();
+});

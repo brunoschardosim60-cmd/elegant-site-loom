@@ -241,7 +241,7 @@ it('aborts an in-flight photo and does not refill a reopened draft with its late
   await waitFor(() => expect(screen.getByLabelText('Enviar várias fotos')).not.toBeDisabled());
   fireEvent.change(screen.getByLabelText('Enviar várias fotos'), { target: { files: [new File(['a'], 'foto.jpg', { type: 'image/jpeg' })] } });
   await waitFor(() => expect(callbacks).toBeDefined());
-  fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Fechar' }));
   expect(callbacks![3]?.aborted).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: 'Reabrir' }));
   await act(async () => { callbacks![1](0, result('DI00000000001', '0000000001', '11-1')); finish!(); });
@@ -364,7 +364,7 @@ it('cancels photo preparation on close and ignores a late duplicate check after 
   fireEvent.change(screen.getByLabelText('Enviar várias fotos'), { target: { files: [file] } });
   await waitFor(() => expect(finishHash).toBeDefined());
   const signal = mocks.unique.mock.calls[0]?.[2] as AbortSignal;
-  fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Fechar' }));
   expect(signal.aborted).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: 'Reabrir' }));
   await act(async () => { finishHash!({ files: [file], duplicates: 0 }); });
@@ -543,7 +543,7 @@ it('discards a late fingerprint after closing and reopening without starting OCR
   await waitFor(() => expect(screen.getByLabelText('Enviar várias fotos')).not.toBeDisabled());
   fireEvent.change(screen.getByLabelText('Enviar várias fotos'), { target: { files: [new File(['a'], 'a.jpg', { type: 'image/jpeg' })] } });
   await waitFor(() => expect(mocks.fingerprint).toHaveBeenCalledOnce());
-  fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Fechar' }));
   fireEvent.click(screen.getByRole('button', { name: 'Reabrir' }));
   await act(async () => { finishHash('c'.repeat(64)); });
   expect(mocks.read).not.toHaveBeenCalled();
