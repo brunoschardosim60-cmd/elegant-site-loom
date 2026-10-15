@@ -8,7 +8,7 @@ import { selectTrackingRows, type TrackingStatus } from './ctc-tracking';
 type ReportIssue = { title: string; description: string; time: string; at?: string | undefined };
 type ReportView = 'pending' | 'missing' | 'finished' | 'issues' | 'tracking';
 export type ConferencePdfInput = { manifests: Manifest[]; issues: ReportIssue[]; view: ReportView; query?: string; filter?: string; trackingStatus?: TrackingStatus; generatedAt?: Date };
-const labels: Record<ReportView, string> = { pending: 'Pré-manifestos em aberto', missing: 'CTCs pendentes', finished: 'Pré-manifestos finalizados', issues: 'Ocorrências da conferência', tracking: 'Rastreamento de CTCs' };
+const labels: Record<ReportView, string> = { pending: 'Manifestos em aberto', missing: 'CTCs pendentes', finished: 'Manifestos finalizados', issues: 'Ocorrências da conferência', tracking: 'Rastreamento de CTCs' };
 const ink: [number, number, number] = [23, 43, 64];
 const blue: [number, number, number] = [0, 73, 124];
 const muted: [number, number, number] = [92, 107, 120];
@@ -54,35 +54,37 @@ export function createConferencePdf(input: ConferencePdfInput) {
   pdf.setProperties({ title: `confere. - ${labels[input.view]}`, subject: 'Conferência de CTCs e pré-manifestos', author: 'confere.', creator: 'confere.' });
   const width = pdf.internal.pageSize.getWidth();
   const height = pdf.internal.pageSize.getHeight();
-  const margin = 14;
+  const margin = 12;
   const available = width - margin * 2;
-  let cursor = 42;
+  const continuationTop = 12;
+  let cursor = 34;
   const text = (value: string, x: number, y: number, size = 9, bold = false, color = ink) => {
     pdf.setFont('helvetica', bold ? 'bold' : 'normal'); pdf.setFontSize(size); pdf.setTextColor(...color); pdf.text(clean(value), x, y);
   };
-  // The right-side metadata uses explicit alignment, independent of title length.
-  const drawHeader = () => {
-    text('confere.', margin, 18, 23, true, blue);
-    text(labels[input.view], margin, 27, 13, true);
+  // Report branding and generation metadata belong only on the first page.
+  // Continuations reserve space only for the current driver/manifest and columns.
+  const drawFirstHeader = () => {
+    text('confere.', margin, 16, 18, true, blue);
+    text(labels[input.view], margin, 23, 11, true);
     pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.setTextColor(...muted);
-    pdf.text(`Emitido em ${date(generatedAt, true)}`, width - margin, 17, { align: 'right' });
-    pdf.text('Horário de Brasília', width - margin, 22, { align: 'right' });
-    pdf.setFillColor(...blue); pdf.rect(margin, 32, available, .7, 'F');
+    pdf.text(`Emitido em ${date(generatedAt, true)}`, width - margin, 15, { align: 'right' });
+    pdf.text('Horário de Brasília', width - margin, 20, { align: 'right' });
+    pdf.setFillColor(...blue); pdf.rect(margin, 27, available, .6, 'F');
   };
-  const newPage = () => { pdf.addPage(); drawHeader(); cursor = 42; };
-  const reserve = (space: number) => { if (cursor + space > height - 18) newPage(); };
-  drawHeader();
+  const newPage = () => { pdf.addPage(); cursor = continuationTop; };
+  const reserve = (space: number) => { if (cursor + space > height - 14) newPage(); };
+  drawFirstHeader();
   const documents = selected.manifests.flatMap(manifest => manifest.documents);
   const metrics = input.view === 'issues'
     ? [['OCORRÊNCIAS', String(selected.issues.length)]]
-    : [['PRÉS', String(selected.manifests.length)], ['CTCs', String(documents.length)], ['PENDENTES', String(documents.filter(doc => !doc.received).length)], ['CONFERIDOS', String(documents.filter(doc => doc.received).length)], ['VOLUMES', String(documents.reduce((sum, doc) => sum + doc.volumes, 0))]];
+    : [['MANIFESTOS', String(selected.manifests.length)], ['CTCs', String(documents.length)], ['PENDENTES', String(documents.filter(doc => !doc.received).length)], ['CONFERIDOS', String(documents.filter(doc => doc.received).length)], ['VOLUMES', String(documents.reduce((sum, doc) => sum + doc.volumes, 0))]];
   const cardWidth = (available - 4 * (metrics.length - 1)) / metrics.length;
   metrics.forEach(([label, value], index) => {
     const x = margin + index * (cardWidth + 4);
-    pdf.setFillColor(242, 246, 249); pdf.roundedRect(x, cursor - 2, cardWidth, 21, 2, 2, 'F');
-    text(label!, x + 4, cursor + 4, 7.5, true, muted); text(value!, x + 4, cursor + 14, 17, true, blue);
+    pdf.setFillColor(242, 246, 249); pdf.roundedRect(x, cursor - 2, cardWidth, 15, 1.5, 1.5, 'F');
+    text(label!, x + 3, cursor + 3, 7, true, muted); text(value!, x + 3, cursor + 10, 13, true, blue);
   });
-  cursor += 25;
+  cursor += 18;
   const filters = [input.view !== 'issues' && clean(input.query) ? `Busca: ${clean(input.query)}` : '', input.view !== 'issues' && input.filter === 'old' ? 'Há 2 dias ou mais pela emissão; sem emissão, pelo cadastro' : '', input.view === 'tracking' && input.trackingStatus && input.trackingStatus !== 'all' ? `Status: ${input.trackingStatus === 'received' ? 'Conferidos' : 'Pendentes'}` : ''].filter(Boolean).join(' | ');
   if (filters) {
     pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8);
@@ -92,16 +94,15 @@ export function createConferencePdf(input: ConferencePdfInput) {
 
   if (input.view === 'issues') {
     if (selected.issues.length) {
-      autoTable(pdf, { startY: cursor, margin: { left: margin, right: margin, top: 42, bottom: 22 },
+      autoTable(pdf, { startY: cursor, margin: { left: margin, right: margin, top: continuationTop, bottom: 14 },
         head: [['Data / hora', 'Ocorrência', 'Detalhe']], body: selected.issues.map(issue => [field(activityTimestamp(issue)), field(issue.title), field(issue.description)]),
         styles: { font: 'helvetica', fontSize: 9, cellPadding: 3, textColor: ink, overflow: 'linebreak', lineColor: line, lineWidth: .1 },
         headStyles: { fillColor: blue, textColor: [255, 255, 255], fontStyle: 'bold' }, alternateRowStyles: { fillColor: [245, 248, 250] },
         columnStyles: { 0: { cellWidth: 40 }, 1: { cellWidth: 65 } }, rowPageBreak: 'avoid',
-        willDrawPage: data => { if (data.pageNumber > 1) drawHeader(); },
       });
     } else text('Nenhuma ocorrência registrada.', margin, cursor + 8, 11, false, muted);
   } else if (!selected.manifests.length) {
-    text('Nenhum pré-manifesto encontrado nesta seleção.', margin, cursor + 8, 11, false, muted);
+    text('Nenhum manifesto encontrado nesta seleção.', margin, cursor + 8, 11, false, muted);
   } else {
     const groups = new Map<string, Manifest[]>();
     for (const manifest of selected.manifests) {
@@ -126,11 +127,11 @@ export function createConferencePdf(input: ConferencePdfInput) {
           pdf.text(`${manifest.documents.length} CTCs | ${manifest.documents.reduce((sum, doc) => sum + doc.volumes, 0)} volumes | ${pending ? `${pending} pendente(s)` : 'Todos conferidos'}`, width - margin - 3, cursor + 5, { align: 'right' });
           if (manifest.finishedAt) { pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.setTextColor(...muted); pdf.text(`Finalizado em ${date(manifest.finishedAt, true)}`, width - margin - 3, cursor + 12, { align: 'right' }); }
         };
-        if (cursor + 36 > height - 18) { newPage(); drawDriver(); }
+        if (cursor + 36 > height - 14) { newPage(); drawDriver(); }
         header(); cursor += 19;
         const tableStartPage = pdf.getCurrentPageInfo().pageNumber;
         autoTable(pdf, {
-          startY: cursor, margin: { left: margin, right: margin, top: 42 + driverHeight + 19, bottom: 18 },
+          startY: cursor, margin: { left: margin, right: margin, top: continuationTop + driverHeight + 19, bottom: 14 },
           head: [['CTC', 'NF / série', 'Vols.', 'Cliente / laboratório', 'Destinatário', 'Situação']],
           body: manifest.documents.map(doc => [field(doc.ctc), field(doc.nf), String(doc.volumes), field(doc.client), field(doc.recipient), doc.received ? `Conferido${doc.receivedAt ? `\n${date(doc.receivedAt, true)}` : ''}` : 'Pendente']),
           styles: { font: 'helvetica', fontSize: 8.5, cellPadding: 1.8, textColor: ink, valign: 'middle', overflow: 'linebreak', lineColor: line, lineWidth: .1 },
@@ -139,22 +140,21 @@ export function createConferencePdf(input: ConferencePdfInput) {
           columnStyles: { 0: { cellWidth: 28, fontStyle: 'bold' }, 1: { cellWidth: 28 }, 2: { cellWidth: 13, halign: 'center' }, 3: { cellWidth: 71 }, 4: { cellWidth: available - 178 }, 5: { cellWidth: 38 } },
           rowPageBreak: 'avoid', showHead: 'everyPage',
           willDrawPage: () => {
-            drawHeader();
-            if (pdf.getCurrentPageInfo().pageNumber > tableStartPage) { cursor = 42; drawDriver(); header(true); }
+            if (pdf.getCurrentPageInfo().pageNumber > tableStartPage) { cursor = continuationTop; drawDriver(); header(true); }
           },
           didParseCell: data => {
             if (data.section === 'body' && data.column.index === 5) data.cell.styles.textColor = manifest.documents[data.row.index]?.received ? [22, 105, 77] : [146, 91, 17];
           },
         });
-        cursor = (pdf as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 11;
+        cursor = (pdf as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8;
       }
     }
   }
   const pages = pdf.getNumberOfPages();
   for (let page = 1; page <= pages; page++) {
-    pdf.setPage(page); pdf.setDrawColor(...line); pdf.line(margin, height - 15, width - margin, height - 15);
-    text('confere. | Controle de retorno de documentos', margin, height - 9, 7.5, false, muted);
-    pdf.setFontSize(7.5); pdf.text(`${page} / ${pages}`, width - margin, height - 9, { align: 'right' });
+    pdf.setPage(page); pdf.setDrawColor(...line); pdf.line(margin, height - 10, width - margin, height - 10);
+    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.5); pdf.setTextColor(...muted);
+    pdf.text(`${page} / ${pages}`, width - margin, height - 6, { align: 'right' });
   }
   return pdf;
 }

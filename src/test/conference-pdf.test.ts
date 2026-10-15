@@ -74,6 +74,32 @@ describe('PDF report scope', () => {
     expect(long.documents).toHaveLength(85);
     expect(long.documents[84]!.ctc).toBe('0000000085');
   });
+  it('prints report branding only once and keeps every CTC on compact continuation pages', () => {
+    const long = { ...manifests[0]!, documents: Array.from({ length: 85 }, (_, i) => ({ ...manifests[0]!.documents[0]!, id: String(i), ctc: String(i + 1).padStart(10, '0'), client: 'LABORATÓRIO COM NOME COMPLETO PARA CONFERÊNCIA', recipient: 'DESTINATÁRIO COM NOME COMPLETO PARA CONFERÊNCIA' })) };
+    const pdf = createConferencePdf({ ...base, manifests: [long], view: 'pending' });
+    const pages = (pdf.internal.pages as unknown as string[][]).slice(1).map(page => page.join('\n'));
+    expect(pages.length).toBeGreaterThan(1);
+    expect(pages[0]).toContain('(confere.) Tj');
+    for (const page of pages.slice(1)) {
+      expect(page).not.toContain('confere.');
+      expect(page).not.toContain('Emitido em');
+      expect(page).not.toContain('Manifestos em aberto');
+      expect(page).toContain('DIOGO');
+      expect(page).toContain('DI00000000001');
+      expect(page).toContain('(CTC) Tj');
+    }
+    const allText = pages.join('\n');
+    for (const doc of long.documents) expect(allText.split(`(${doc.ctc}) Tj`)).toHaveLength(2);
+  });
+  it('also uses compact continuation pages for occurrences', () => {
+    const issues = Array.from({ length: 80 }, (_, i) => ({ title: `Ocorrência ${i + 1}`, description: `CTC ${String(i + 1).padStart(10, '0')}`, time: '10:15', at: '2026-10-11T13:15:00Z' }));
+    const pdf = createConferencePdf({ ...base, view: 'issues', issues });
+    const pages = (pdf.internal.pages as unknown as string[][]).slice(1).map(page => page.join('\n'));
+    expect(pages.length).toBeGreaterThan(1);
+    expect(pages[0]).toContain('(confere.) Tj');
+    for (const page of pages.slice(1)) { expect(page).not.toContain('confere.'); expect(page).not.toContain('Emitido em'); }
+    expect(pages.join('\n')).toContain('0000000080');
+  });
   it('creates an explicit empty report instead of including data from another view', () => {
     const pdf = createConferencePdf({ ...base, view: 'pending', query: 'does not exist' });
     expect(pdf.getNumberOfPages()).toBe(1);
