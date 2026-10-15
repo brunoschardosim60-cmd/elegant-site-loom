@@ -4,6 +4,8 @@ import { readFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { TeamSync, teamSchema, type TeamSyncView } from '@/lib/conference-team';
+import { parseLuft108 } from '@/lib/luft-spreadsheet';
+import { applyImports } from '@/lib/manifest-import';
 import { emptyConference, type ConferenceState } from '@/lib/conference-state';
 
 // Three independent clients send overlapping HTTP requests to the actual SQL
@@ -126,4 +128,23 @@ it('retries a lost response after commit without duplicate audit or undoing anot
   await vi.waitFor(() => expect(views[1]!.pending).toBe(false)); sessions[0]!.retry();
   await settle(sessions, views); expect(views.every(v => !v.error && !v.pending && v.state.manifests[0]!.documents.filter(d => d.received).length === 2)).toBe(true);
   expect((await audit()).filter(e => e.action === 'ctc_received')).toHaveLength(2);
+});
+
+it('persists a fifty-manifest five-day spreadsheet while another client receives an existing CTC', async () => {
+  const {sessions,views}=await clients();
+  const headers=['Manifesto','Motivo','Filial','Dataemissao','Placa','Motorista','CTRC','Remet Nome','Dest Nome','NF','Serie','Volumes'];
+  const rows=Array.from({length:50},(_,i)=>[String(60000000+i),'DIS','06',`${10+Math.floor(i/10)}/10/2026`,'ABC1D23','ANA',String(1000000000+i),'LAB','CLIENTE',String(100+i),'1',2]);
+  const parsed=parseLuft108([{name:'108',rows:[headers,...rows]}]);
+  const added=applyImports(views[0]!.state.manifests,parsed.drafts,'2026-10-15T00:00:00Z');
+  expect(added.ok).toBe(true);if(!added.ok)return;
+  sessions[0]!.change({...views[0]!.state,manifests:added.manifests});
+  sessions[1]!.change(receive(views[1]!.state,0));
+  await settle(sessions,views);
+  expect(views.every(v=>!v.error&&!v.pending&&v.state.manifests.length===51)).toBe(true);
+  const stored=views[2]!.state.manifests.filter(m=>/^\d{8}$/.test(m.id));
+  expect(stored).toHaveLength(50);
+  for(let day=10;day<=14;day++)expect(stored.filter(m=>m.issueDate===`2026-10-${day}`)).toHaveLength(10);
+  expect(views[2]!.state.manifests.find(m=>m.id===pre().id)!.documents[0]!.received).toBe(true);
+  const count=await db.query<{total:number}>("select count(*)::int total from public.conference_audit where action='pre_added'");
+  expect(count.rows[0]!.total).toBe(50);
 });

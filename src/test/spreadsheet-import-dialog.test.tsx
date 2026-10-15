@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { SpreadsheetImportDialog } from '@/components/spreadsheet-import-dialog';
+import type { ImportDraft } from '@/lib/manifest-import';
 import type { LuftExport } from '@/lib/luft-spreadsheet';
 const mock = vi.hoisted(() => ({ read: vi.fn() }));
 vi.mock('@/lib/read-luft-spreadsheet', () => ({ readLuftSpreadsheet: mock.read }));
@@ -43,4 +44,20 @@ it('aborts immediately on stop and ignores a late parser result', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Parar' })); expect(signal.aborted).toBe(true);
   await act(async () => resolve(data()));
   expect(screen.queryByLabelText('Selecionar manifesto 06052233')).not.toBeInTheDocument(); expect(save).not.toHaveBeenCalled();
+});
+
+it('shows original manifesto dates and filters fifty manifests without silently changing selection', async () => {
+  const original=data().drafts[0]!;
+  const result={...data(),drafts:Array.from({length:50},(_,i)=>({...original,id:String(60000000+i),issueDate:`2026-10-${10+Math.floor(i/10)}`,rows:original.rows.map(row=>({...row,ctc:String(1000000000+i)}))}))};
+  mock.read.mockResolvedValueOnce(result);const save=vi.fn((_drafts: ImportDraft[])=>({ok:true as const,manifests:[]}));
+  render(<SpreadsheetImportDialog manifests={[]} onClose={vi.fn()} onCreate={save}/>);upload();
+  await screen.findByLabelText('Selecionar manifesto 60000000');
+  expect(screen.getAllByRole('checkbox')).toHaveLength(50);expect(screen.getByText('Manifestado em')).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText('Dia do manifesto'),{target:{value:'2026-10-12'}});
+  expect(screen.getAllByRole('checkbox')).toHaveLength(10);
+  expect(screen.getByRole('button',{name:'Cadastrar 50 manifestos'})).toBeEnabled();
+  fireEvent.click(screen.getByRole('button',{name:'Selecionar resultados'}));
+  fireEvent.click(screen.getByRole('button',{name:'Cadastrar 10 manifestos'}));
+  expect(save.mock.calls[0]![0]).toHaveLength(10);
+  expect(save.mock.calls[0]![0].every(draft=>draft.issueDate==='2026-10-12')).toBe(true);
 });

@@ -120,7 +120,7 @@ export function createConferencePdf(input: ConferencePdfInput) {
           pdf.setFillColor(233, 240, 245); pdf.roundedRect(margin, cursor - 1, available, 17, 1.5, 1.5, 'F');
           text(`${field(manifest.id)}${continuation ? ' (continuação)' : ''}`, margin + 3, cursor + 5, 10, true);
           const issueDate = normalizeIssueDate(manifest.issueDate ?? '');
-          const timing = [issueDate ? `Emissão ${formatManifestDate(issueDate)}` : '', `Cadastro ${date(manifest.date)}`, !manifest.finishedAt ? manifestAgeLabel(manifest, generatedAt) : ''].filter(Boolean).join(' | ');
+          const timing = [issueDate ? `${/^\d{8,12}$/.test(manifest.id) ? 'Manifestado em' : 'Emissão'} ${formatManifestDate(issueDate)}` : '', `Cadastro ${date(manifest.date)}`, !manifest.finishedAt ? manifestAgeLabel(manifest, generatedAt) : ''].filter(Boolean).join(' | ');
           text(`Placa ${field(manifest.plate)} | ${timing}`, margin + 3, cursor + 12, 8, false, muted);
           pdf.setFont('helvetica', 'bold'); pdf.setFontSize(9); pdf.setTextColor(...blue);
           const pending = manifest.documents.filter(doc => !doc.received).length;

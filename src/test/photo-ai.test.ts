@@ -790,7 +790,7 @@ it('returns a transient Lite failure for local review and keeps cancellation ins
 
 it('rechecks just a flagged NF and preserves unselected fields with one optional call', async () => {
  const data=responses(1,0,false); if(!data.full.ok)return;
- data.full.pre.aiReader='deepseek'; data.full.pre.issueDate='2026-10-13'; data.full.pre.documents[0]!.nf=''; data.full.pre.documents[0]!.review=['Confira NF e série'];
+ data.full.pre.aiReader='normal'; data.full.pre.issueDate='2026-10-13'; data.full.pre.documents[0]!.nf=''; data.full.pre.documents[0]!.review=['Confira NF e série'];
  const receive=vi.fn(), provisional=vi.fn();
  const run=readAiPhotos([photo('selective.jpg')],receive,undefined,undefined,{orientations:[0],preferredModel:'lite',selective:true,onProvisional:provisional});
  (await pendingCall('selective.jpg','full-lite')).pending.resolve(data.full);
@@ -855,7 +855,7 @@ it('cancels a stalled numeric verifier without late results and releases the pho
 it('uses one full-width strip request for a structural gap, without also running whole-page verification', async () => {
   const data = responses(1, 90, false); if (!data.full.ok) return;
   mocks.orient.mockImplementationOnce(async (_files: File[], _progress: unknown, _signal: unknown, confirmed: (index: number, angle: number) => void) => { confirmed(0, 270); return [270]; });
-  data.full.pre.aiReader = 'deepseek';
+  data.full.pre.aiReader = 'normal';
   data.full.pre.expectedNfs = 2; data.full.pre.totalVolumes = 4;
   const fixed = structuredClone(data.full);
   if (!fixed.ok) return;
@@ -884,10 +884,10 @@ it('preserves the first draft on strip quota failure without starting another ve
   expect(receive.mock.calls[0]![1].pre.headerReview.join(' ')).toContain('faixas indisponível');
 });
 
-it('keeps the actual DeepSeek provider label returned by the server', async () => {
+it('keeps the actual normal provider label returned by the server', async () => {
   const data = responses(1, 0, false); if (!data.full.ok) return;
-  data.full.pre.aiReader = 'deepseek';
-  const receive = vi.fn(), run = readAiPhotos([photo('deepseek.jpg')], receive, undefined, undefined, { orientations: [0], preferredModel: 'lite', singlePass: true });
-  (await pendingCall('deepseek.jpg', 'full-lite')).pending.resolve(data.full); await run;
-  expect(receive.mock.calls[0]![1].pre.aiReader).toBe('deepseek');
+  data.full.pre.aiReader = 'normal';
+  const receive = vi.fn(), run = readAiPhotos([photo('normal-labelled.jpg')], receive, undefined, undefined, { orientations: [0], preferredModel: 'lite', singlePass: true });
+  (await pendingCall('normal-labelled.jpg', 'full-lite')).pending.resolve(data.full); await run;
+  expect(receive.mock.calls[0]![1].pre.aiReader).toBe('normal');
 });

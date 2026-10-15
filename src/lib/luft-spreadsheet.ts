@@ -10,7 +10,9 @@ const literal = (value: SheetCell | undefined) => typeof value === 'string' ? va
 
 /** Literal cell values only. No OCR substitutions, inferred series or guessed zeros. */
 export function parseLuft108(sheets: LuftSheet[]): LuftExport {
-  const sheet = sheets.find(sheet => fields.every(field => sheet.rows[0]?.some(cell => normalized(cell) === normalized(field))));
+  const matching = sheets.filter(sheet => fields.every(field => sheet.rows[0]?.some(cell => normalized(cell) === normalized(field))));
+  if (matching.length > 1) throw new Error('A planilha tem mais de uma aba de relatório 108. Exporte os dias juntos em uma única aba.');
+  const sheet = matching[0];
   if (!sheet) throw new Error('Envie o relatório 108 — Relação de Notas por Manifesto, em XLSX. Faltam colunas obrigatórias.');
   const headers = sheet.rows[0]!;
   const indexes = Object.fromEntries(fields.map(field => [field, headers.findIndex(cell => normalized(cell) === normalized(field))])) as Record<typeof fields[number], number>;
@@ -53,10 +55,22 @@ export function parseLuft108(sheets: LuftSheet[]): LuftExport {
     draft.rows.push({ ctc, nf: `${nf}-${series}`, volumes: String(volumes), client, recipient });
     groups.set(id, draft);
   }
-  const drafts = [...groups.values()].map(draft => ({ ...draft, expectedRows: new Set(draft.rows.map(row => row.ctc)).size, expectedNfs: draft.rows.length, totalVolumes: draft.rows.reduce((sum, row) => sum + Number(row.volumes), 0) }));
+  const drafts = [...groups.values()].map(draft => ({ ...draft, expectedRows: new Set(draft.rows.map(row => row.ctc)).size, expectedNfs: draft.rows.length, totalVolumes: draft.rows.reduce((sum, row) => sum + Number(row.volumes), 0) })).sort((a, b) => (a.issueDate ?? '').localeCompare(b.issueDate ?? '') || a.id.localeCompare(b.id));
   for (const draft of drafts) if (draft.expectedRows > 300 || draft.totalVolumes > 1000000) errors.push(`Manifesto ${draft.id}: excede o limite de CTCs ou volumes por cadastro.`);
   if (!selectedRows) throw new Error('Nenhuma linha da filial 06 com motivo DIS foi encontrada. TRA e outras filiais não são importados.');
   return { drafts, ignored, repeated, selectedRows, errors };
+}
+
+export function luftManifestDays(drafts: ImportDraft[]) {
+  const days = new Map<string, { date: string; manifests: number; ctcs: number; nfs: number; volumes: number }>();
+  for (const draft of drafts) {
+    const date = draft.issueDate ?? '';
+    const day = days.get(date) ?? { date, manifests: 0, ctcs: 0, nfs: 0, volumes: 0 };
+    day.manifests++; day.ctcs += draft.expectedRows ?? new Set(draft.rows.map(row => row.ctc)).size;
+    day.nfs += draft.rows.length; day.volumes += draft.totalVolumes ?? draft.rows.reduce((sum, row) => sum + Number(row.volumes), 0);
+    days.set(date, day);
+  }
+  return [...days.values()].sort((a, b) => a.date.localeCompare(b.date));
 }
 
 /** Check declared ZIP expansion before loading Excel; the worker has its own time limit. */

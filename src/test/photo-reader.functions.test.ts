@@ -34,85 +34,9 @@ it('sends the whole page and ordered strips in a single authenticated provider r
   expect(body.contents[0].parts[0].text).toContain('FAIXAS horizontais');
 });
 
-const deepseekResponse = (photo = parsedPhoto) => new Response(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(photo) } }] }));
-
-it('accepts an orientation-only DeepSeek response without demanding table fields', async () => {
-  vi.stubEnv('DEEPSEEK_API_KEY', `synthetic-deepseek-angle-${user}`); vi.stubEnv('PHOTO_OCR_PROVIDER', 'deepseek');
-  mocks.fetch.mockResolvedValue(new Response(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ kind: 'pre', clockwiseRotation: 270 }) } }] })));
-  expect(await readPhotoWithGemini({ data: { ...input.data, mode: 'survey', orientationOnly: true } })).toMatchObject({ ok: true, rotation: 270, pre: { documents: [], aiReader: 'deepseek' } });
-});
-
-it('uses DeepSeek only after explicit server activation and keeps the session token out of its request', async () => {
-  vi.stubEnv('DEEPSEEK_API_KEY', `synthetic-deepseek-${user}`); vi.stubEnv('PHOTO_OCR_PROVIDER', 'deepseek');
-  mocks.fetch.mockResolvedValue(deepseekResponse());
-  const result = await readPhotoWithGemini({ data: { ...input.data, mode: 'full-lite', bands: ['a'.repeat(120)] } });
-  expect(result).toMatchObject({ ok: true, pre: { aiReader: 'deepseek', documents: [{ ctc: '0000000001', nf: '100-1', volumes: '2' }] } });
-  expect(mocks.fetch).toHaveBeenCalledOnce();
-  const [url, request] = mocks.fetch.mock.calls[0]!;
-  const body = JSON.parse(request.body);
-  expect(url).toBe('https://api.deepseek.com/chat/completions');
-  expect(request.headers.Authorization).toBe(`Bearer synthetic-deepseek-${user}`);
-  expect(body.model).toBe('deepseek-flash'); expect(body.thinking.type).toBe('disabled'); expect(body.response_format.type).toBe('json_object');
-  expect(body.messages[1].content.filter((part: { image_url?: unknown }) => part.image_url)).toHaveLength(2);
-  expect(request.body).not.toContain(input.data.accessToken);
-  expect(JSON.stringify(result)).not.toContain('synthetic-deepseek');
-});
-
-it('keeps Gemini active while a DeepSeek key is stored but the provider has not been enabled', async () => {
-  vi.stubEnv('DEEPSEEK_API_KEY', `synthetic-deepseek-disabled-${user}`);
-  mocks.fetch.mockResolvedValue(successResponse()); await readPhotoWithGemini(input);
-  expect(mocks.fetch).toHaveBeenCalledOnce(); expect(mocks.fetch.mock.calls[0]![0]).toContain('generativelanguage.googleapis.com');
-});
-
-it.each([402, 429, 503])('falls back from DeepSeek HTTP %s to Gemini without exposing the provider body', async status => {
-  vi.stubEnv('DEEPSEEK_API_KEY', `synthetic-deepseek-fallback-${user}`); vi.stubEnv('PHOTO_OCR_PROVIDER', 'deepseek');
-  mocks.fetch.mockResolvedValueOnce(new Response('sensitive provider diagnostic', { status })).mockResolvedValueOnce(successResponse());
-  const result = await readPhotoWithGemini({ data: { ...input.data, mode: 'full-lite' } });
-  expect(result).toMatchObject({ ok: true, pre: { aiReader: 'lite' } }); expect(mocks.fetch).toHaveBeenCalledTimes(2);
-  expect(mocks.fetch.mock.calls[1]![0]).toContain('generativelanguage.googleapis.com');
-  expect(JSON.stringify(result)).not.toContain('sensitive provider diagnostic');
-});
-
-it('does not cache a Gemini daily quota over a recoverable DeepSeek credit failure', async () => {
-  vi.stubEnv('DEEPSEEK_API_KEY', `synthetic-deepseek-credit-${user}`); vi.stubEnv('PHOTO_OCR_PROVIDER', 'deepseek');
-  mocks.fetch.mockResolvedValueOnce(new Response('', { status: 402 })).mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: 'daily quota' } }), { status: 429 }));
-  const result = await readPhotoWithGemini({ data: { ...input.data, mode: 'full-lite' } });
-  expect(result).toMatchObject({ ok: false, unavailable: true }); expect(result).not.toHaveProperty('quota');
-});
-
-it('rejects an unauthorized team before calling DeepSeek', async () => {
-  vi.stubEnv('DEEPSEEK_API_KEY', `synthetic-deepseek-denied-${user}`); vi.stubEnv('PHOTO_OCR_PROVIDER', 'deepseek');
-  mocks.membership.mockResolvedValue({ data: 'another@example.com', error: null });
-  expect(await readPhotoWithGemini(input)).toMatchObject({ ok: false, fallback: false }); expect(mocks.fetch).not.toHaveBeenCalled();
-});
-
-it('bounds a stalled DeepSeek call and leaves time for Gemini in the same request', async () => {
-  vi.stubEnv('DEEPSEEK_API_KEY', `synthetic-deepseek-timeout-${user}`); vi.stubEnv('PHOTO_OCR_PROVIDER', 'deepseek');
-  mocks.fetch.mockImplementationOnce(() => new Promise(() => {})).mockResolvedValueOnce(successResponse());
-  const run = readPhotoWithGemini({ data: { ...input.data, mode: 'full-lite' } });
-  await vi.waitFor(() => expect(mocks.fetch).toHaveBeenCalledOnce());
-  await vi.advanceTimersByTimeAsync(12000);
-  expect(await run).toMatchObject({ ok: true }); expect(mocks.fetch.mock.calls[0]![1].signal.aborted).toBe(true);
-  expect(mocks.fetch).toHaveBeenCalledTimes(2);
-});
-
-it('does not invoke a reserve after cancellation while DeepSeek is reading', async () => {
-  vi.stubEnv('DEEPSEEK_API_KEY', `synthetic-deepseek-cancel-${user}`); vi.stubEnv('PHOTO_OCR_PROVIDER', 'deepseek');
-  const controller = new AbortController(); mocks.request.mockReturnValue({ signal: controller.signal });
-  mocks.fetch.mockImplementation(() => new Promise(() => {}));
-  const run = readPhotoWithGemini(input); await vi.waitFor(() => expect(mocks.fetch).toHaveBeenCalledOnce());
-  controller.abort(); expect(await run).toMatchObject({ ok: false, fallback: false }); expect(mocks.fetch).toHaveBeenCalledOnce();
-});
-
-it('returns a safe local fallback for invalid DeepSeek JSON when no Gemini key is configured', async () => {
-  vi.stubEnv('DEEPSEEK_API_KEY', `synthetic-deepseek-json-${user}`); vi.stubEnv('PHOTO_OCR_PROVIDER', 'deepseek'); vi.stubEnv('GEMINI_API_KEY', undefined);
-  expect(await photoReaderStatus()).toEqual({ configured: true });
-  mocks.fetch.mockResolvedValue(new Response(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: 'not-json sensitive text' } }] })));
-  const result = await readPhotoWithGemini(input); expect(result).toMatchObject({ ok: false, unavailable: true }); expect(JSON.stringify(result)).not.toContain('sensitive text');
-});
 beforeEach(() => {
   vi.clearAllMocks(); mocks.fetch.mockReset(); vi.useFakeTimers();
-  vi.stubEnv('DEEPSEEK_API_KEY', undefined); vi.stubEnv('PHOTO_OCR_PROVIDER', undefined); vi.stubEnv('GEMINI_API_KEY', 'synthetic-provider-key'); vi.stubEnv('GEMINI_API_KEY_FALLBACK', undefined); vi.stubEnv('GEMINI_API_KEY_FALLBACK_2', undefined); vi.stubEnv('GEMINI_OCR_MODEL', undefined); vi.stubEnv('GEMINI_OCR_VERIFY_MODEL', undefined);
+  vi.stubEnv('GEMINI_API_KEY', 'synthetic-provider-key'); vi.stubEnv('GEMINI_API_KEY_FALLBACK', undefined); vi.stubEnv('GEMINI_API_KEY_FALLBACK_2', undefined); vi.stubEnv('GEMINI_OCR_MODEL', undefined); vi.stubEnv('GEMINI_OCR_VERIFY_MODEL', undefined);
   mocks.user.mockResolvedValue({ data: { user: { id: `server-test-${++user}` } }, error: null });
   mocks.membership.mockResolvedValue({ data: 'brunoschardosim60@gmail.com', error: null });
   mocks.client.mockImplementation(() => ({ auth: { getUser: mocks.user }, rpc: mocks.membership }));

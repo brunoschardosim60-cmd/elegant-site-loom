@@ -65,7 +65,7 @@ export function DriverManifestList({ manifests, query, focusedManifest, age, now
             const pendingVols = countVolumes([manifest], true);
             const days = age(manifest);
             const noun = manifestNoun(manifest.id);
-            const dateLabel = normalizeIssueDate(manifest.issueDate ?? '') ? 'Emissão' : 'Cadastro';
+            const dateLabel = normalizeIssueDate(manifest.issueDate ?? '') ? isExportManifest(manifest.id) ? 'Manifestado em' : 'Emissão' : 'Cadastro';
             const open = expanded === manifest.id;
             const tableId = `driver-documents-${manifest.id}`;
             const percent = manifest.documents.length ? Math.round(count / manifest.documents.length * 100) : 0;

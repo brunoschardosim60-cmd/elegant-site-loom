@@ -6,8 +6,6 @@ import { supabaseConfig } from './supabase-config';
 import { repairPlanSchema, repairResponseSchema, repairJsonSchema, repairPrompt } from './photo-repair';
 import { photoQuotaFailure } from './photo-quota';
 const requests = new Map<string, { count: number; until: number }>();
-let deepseekPause: { key: string; until: number; error: string } | undefined;
-const deepseekKey = () => process.env['PHOTO_OCR_PROVIDER'] === 'deepseek' ? process.env['DEEPSEEK_API_KEY']?.trim() : undefined;
 
 function providerKeys(preferAdditional = false) {
   const primary = process.env['GEMINI_API_KEY'];
@@ -37,7 +35,7 @@ async function withinSignal<T>(operation: () => Promise<T>, signal: AbortSignal)
   finally { signal.removeEventListener('abort', onAbort); }
 }
 
-export const photoReaderStatus = createServerFn({ method: 'GET' }).handler(async () => ({ configured: providerKeys().length > 0 || !!deepseekKey() }));
+export const photoReaderStatus = createServerFn({ method: 'GET' }).handler(async () => ({ configured: providerKeys().length > 0 }));
 
 export const photoReaderInputSchema = z.object({ accessToken: z.string().min(20).max(10000), data: z.string().min(100).max(2800000).regex(/^[A-Za-z0-9+/=]+$/), detail: z.string().max(1000000).regex(/^[A-Za-z0-9+/=]+$/).optional(), bands: z.array(z.string().min(100).max(1000000).regex(/^[A-Za-z0-9+/=]+$/)).min(1).max(6).optional(), mimeType: z.literal('image/jpeg'), mode: z.enum(['survey', 'full', 'full-lite', 'verify', 'repair']).optional(), orientationOnly: z.boolean().optional(), repairPlan: repairPlanSchema.optional() }).refine(value => value.mode !== 'repair' || !!value.repairPlan, 'Alvos da releitura ausentes')
   .refine(value => !value.bands || (!value.detail && (value.mode === 'full-lite' || value.mode === 'full')), 'Faixas exigem leitura completa')
@@ -79,28 +77,13 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
       // Ana's additional credential is preferred for the photo reader. The
       // original remains a technical reserve, never quota rotation.
       const keys = providerKeys(true);
-      const deepseek = deepseekKey();
-      if (!keys.length && !deepseek) return { ok: false as const, unavailable: true, error: 'Configure uma chave de leitura por IA no servidor da Vercel.' };
+      if (!keys.length) return { ok: false as const, unavailable: true, error: 'Configure uma chave de leitura por IA no servidor da Vercel.' };
       const now = Date.now();
       for (const [ip, value] of requests) if (value.until < now) requests.delete(ip);
       const userId = user.user.id;
       const bucket = requests.get(userId) || { count: 0, until: now + 600000 };
       if (bucket.count >= 80) return { ok: false as const, unavailable: true, error: 'Muitas fotos seguidas. Aguarde alguns minutos.' };
       bucket.count++; requests.set(userId, bucket);
-      let deepseekFailure: string | undefined;
-      if (deepseek) {
-        if (deepseekPause?.key === deepseek && deepseekPause.until > Date.now()) deepseekFailure = deepseekPause.error;
-        else {
-          stage = 'deepseek';
-          const { readDeepSeekPhoto } = await withinSignal(() => import('./deepseek-photo'), signal);
-          const result = await readDeepSeekPhoto({ data: data.data, mimeType: data.mimeType, mode: data.mode, detail: data.detail, bands: data.bands, orientationOnly: data.orientationOnly, repairPlan: data.repairPlan }, deepseek, signal);
-          signal.throwIfAborted();
-          if (result.ok) { deepseekPause = undefined; return result; }
-          deepseekFailure = result.error;
-          deepseekPause = { key: deepseek, until: Date.now() + result.cooldownMs, error: result.error };
-        }
-        if (!keys.length) return { ok: false as const, unavailable: true, retryable: false as const, error: `${deepseekFailure} A leitura local permanece disponível.` };
-      }
       const compact = data.mode === 'survey' || data.mode === 'verify' || data.mode === 'repair';
       stage = 'connection';
       // A retired model returns 404; retry once with Google's stable alias of the same tier.
@@ -168,7 +151,6 @@ export const readPhotoWithGemini = createServerFn({ method: 'POST' })
         // Reserve quota says nothing about the primary's quota after its
         // technical failure. Use only the existing short unavailability pause.
         if (attemptedKey > 0) return { ok: false as const, unavailable: true, tryLite: true, retryable: false, error: failure.error };
-        if (deepseekFailure) return { ok: false as const, unavailable: true, retryable: false as const, error: `${deepseekFailure} Gemini: ${failure.error}` };
         return failure;
       }
       if (response.status === 400) {
