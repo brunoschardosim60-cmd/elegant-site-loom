@@ -22,6 +22,7 @@ beforeAll(async () => {
   await db.exec(await readFile('supabase/migrations/20261013060000_team_members_and_merge.sql', 'utf8'));
   await db.exec(await readFile('supabase/migrations/20261014010000_manifest_corrections.sql', 'utf8'));
   await db.exec(await readFile('supabase/migrations/20261014020000_ctc_identity_conflicts.sql', 'utf8'));
+  await db.exec(await readFile('supabase/migrations/20261014030000_export_manifest_ids.sql', 'utf8'));
 }, 30000);
 afterAll(async () => { await db?.close(); });
 it('preserves the owner records and shares only with invited confirmed accounts, without a fixed member cap', async () => {
@@ -158,4 +159,18 @@ it('rejects a simultaneous CTC identity correction and a scan of the old identit
  const restored=(await save(corrected,restore)).data;
  const a=structuredClone(restored),b=structuredClone(restored);a.manifests.at(-1)!.documents[0]!.received=true;b.manifests.at(-1)!.documents[0]!.ctc='0099999902';
  await as(2);await save(restored,a);await as(3);await expect(save(restored,b)).rejects.toThrow('CONFERENCE_CONFLICT');
+});
+
+it('saves literal exported manifest IDs and rejects simultaneous duplicates without altering legacy prés', async () => {
+  await as(1); const base = (await call('get_conference_team')).data as ConferenceState;
+  const a = structuredClone(base), b = structuredClone(base);
+  a.manifests.push(make('06052233', '0088888801'));
+  b.manifests.push(make('06052233', '0088888802'));
+  await as(2); const saved = await save(base, a);
+  expect(saved.data.manifests.find(m => m.id === '06052233')).toBeTruthy();
+  expect(saved.data.manifests.filter(m => m.id.startsWith('DI'))).toEqual(base.manifests.filter(m => m.id.startsWith('DI')));
+  await as(3); await expect(save(base, b)).rejects.toThrow();
+  expect((await call('get_conference_team')).data).toEqual(saved.data);
+  const bad = structuredClone(saved.data); bad.manifests.push(make('MANIFESTO-ERRADO', '0088888803'));
+  await expect(save(saved.data, bad)).rejects.toThrow('CONFERENCE_INVALID');
 });

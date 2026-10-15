@@ -1,3 +1,4 @@
+import { manifestIdPattern, manifestNoun } from './manifest-id';
 import { parseReading, type Manifest, type DocumentItem } from './conference';
 import { reviewManifestTotals, type ManifestTotals } from './manifest-review';
 import { normalizeIssueDate } from './manifest-date';
@@ -10,7 +11,7 @@ type Owner = { id: string; driver: string };
 type DraftOwner = Owner & { index: number; row?: number };
 const normalizedId = (id: string) => id.trim().toUpperCase();
 const normalizedHash = (hash: string | undefined) => hash && /^[a-f0-9]{64}$/i.test(hash) ? hash.toLowerCase() : undefined;
-const ownerLabel = (owner: Owner) => `pré ${owner.id || 'sem número'} · motorista ${owner.driver.trim() || 'não informado'}`;
+const ownerLabel = (owner: Owner) => `${manifestNoun(owner.id)} ${owner.id || 'sem número'} · motorista ${owner.driver.trim() || 'não informado'}`;
 const addOwner = <T,>(map: Map<string, T[]>, key: string, owner: T) => { map.set(key, [...(map.get(key) ?? []), owner]); };
 
 /** Report every affected draft/row, without rejecting duplicate legacy snapshots. */
@@ -37,7 +38,7 @@ export function findImportConflicts(existing: Manifest[], drafts: ImportDraft[])
     const id = normalizedId(draft.targetId || draft.id);
     const target = draft.targetId ? existing.find(manifest => normalizedId(manifest.id) === id) ?? drafts.find(item => !item.targetId && normalizedId(item.id) === id) : undefined;
     const owner: DraftOwner = { id, driver: target?.driver ?? draft.driver, index };
-    if (!draft.targetId && /^DI\d{8,12}$/.test(id)) addOwner(ids, id, owner);
+    if (!draft.targetId && manifestIdPattern.test(id)) addOwner(ids, id, owner);
     const hash = normalizedHash(draft.sourcePhotoHash);
     if (hash) addOwner(hashes, hash, owner);
     for (const [row, item] of draft.rows.entries()) {
@@ -84,7 +85,7 @@ export function applyImports(existing: Manifest[], drafts: ImportDraft[], now: s
     const target = draft.targetId ? manifests.find(m => m.id === id) : undefined;
     const fail = (error: string, row?: number): ImportOutcome => ({ ok: false, error, index, row });
     if (draft.targetId && !target) return fail('Selecione um pré-manifesto cadastrado.');
-    if (!/^DI\d{8,12}$/.test(id)) return fail('Confira o número do pré (DI seguido de 8 a 12 dígitos).');
+    if (!manifestIdPattern.test(id)) return fail('Confira o número: DI seguido de 8 a 12 dígitos para pré, ou 8 a 12 dígitos para manifesto.');
     if (!target && (!draft.driver.trim() || !draft.plate.trim())) return fail('Preencha motorista e placa.');
     const sourcePhotoHash = normalizedHash(draft.sourcePhotoHash);
     if (draft.sourcePhotoHash !== undefined && !sourcePhotoHash) return fail('Confira a identificação da foto antes de cadastrar novamente.');

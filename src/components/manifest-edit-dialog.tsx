@@ -1,3 +1,4 @@
+import { isExportManifest } from '@/lib/manifest-id';
 import { useState } from 'react';
 import type { Manifest } from '@/lib/conference';
 import type { ImportDraft, ImportOutcome } from '@/lib/manifest-import';
@@ -11,11 +12,12 @@ export function ManifestEditDialog({ manifest, onClose, onSave }: { manifest: Ma
   const [selected, setSelected] = useState(0);
   const [error, setError] = useState('');
   const update = (patch: Partial<ImportDraft>) => { setError(''); setDraft(value => ({ ...value, ...patch, totalsReviewed: false })); };
+  const labels = isExportManifest(manifest.id) ? ['Número do manifesto', 'Data de emissão do manifesto', 'Placa', 'Motorista'] : ['Número do pré', 'Data de emissão do pré', 'Placa', 'Motorista'];
   const totals = reviewManifestTotals(draft.rows, draft);
   return <Dialog open onOpenChange={open => { if (!open) onClose(); }}><DialogContent className="manifest-edit-dialog max-w-3xl max-h-[90dvh] overflow-y-auto">
-    <DialogHeader><DialogTitle>Editar pré-manifesto</DialogTitle><DialogDescription>Corrija os dados. As conferências, horários e o histórico são preservados. Para corrigir um CTC recebido, desfaça a conferência primeiro.</DialogDescription></DialogHeader>
+    <DialogHeader><DialogTitle>{isExportManifest(manifest.id) ? 'Editar manifesto' : 'Editar pré-manifesto'}</DialogTitle><DialogDescription>Corrija os dados. As conferências, horários e o histórico são preservados. Para corrigir um CTC recebido, desfaça a conferência primeiro.</DialogDescription></DialogHeader>
     <form className="space-y-5" onSubmit={event => { event.preventDefault(); const result = onSave(manifest, draft); if (result.ok) onClose(); else { setError(result.error); setSelected(result.row ?? 0); } }}>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{(['id', 'issueDate', 'plate', 'driver'] as const).map((field, index) => <label className="form-field" key={field}>{['Número do pré', 'Data de emissão do pré', 'Placa', 'Motorista'][index]}<input aria-label={['Número do pré', 'Data de emissão do pré', 'Placa', 'Motorista'][index]} type={field === 'issueDate' ? 'date' : 'text'} required={field !== 'issueDate'} value={draft[field] ?? ''} onChange={event => update({ [field]: event.target.value })} /></label>)}</div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{(['id', 'issueDate', 'plate', 'driver'] as const).map((field, index) => <label className="form-field" key={field}>{labels[index]}<input aria-label={labels[index]} type={field === 'issueDate' ? 'date' : 'text'} required={field !== 'issueDate'} value={draft[field] ?? ''} onChange={event => update({ [field]: event.target.value })} /></label>)}</div>
       <details><summary className="text-xs cursor-pointer">Totais impressos no cabeçalho</summary><div className="grid grid-cols-2 gap-3 mt-3">{(['expectedRows', 'totalVolumes'] as const).map((field, index) => <label className="form-field" key={field}>{['CTCs no cabeçalho', 'Volumes no cabeçalho'][index]}<input aria-label={['CTCs no cabeçalho', 'Volumes no cabeçalho'][index]} type="number" min="1" step="1" value={draft[field] ?? ''} onChange={event => update({ [field]: event.target.value ? Number(event.target.value) : undefined })} /></label>)}</div></details>
       <ManifestDocumentsEditor rows={draft.rows} onChange={rows => update({ rows })} selectedIndex={selected} onSelect={setSelected} allowStructureChange={false} />
       <p className="text-xs">{totals.ctcs} CTCs · {totals.volumes} volumes</p>

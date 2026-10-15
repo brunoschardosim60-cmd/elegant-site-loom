@@ -1,3 +1,4 @@
+import { isExportManifest } from '@/lib/manifest-id';
 import { useRef } from 'react';
 import { Trash2 } from 'lucide-react';
 import type { Manifest } from '@/lib/conference';
@@ -8,6 +9,7 @@ export function ManifestDeleteDialog({ manifest, onCancel, onConfirm }: {
   manifest: Manifest | null; onCancel: () => void; onConfirm: (id: string) => void;
 }) {
   const cancel = useRef<HTMLButtonElement>(null);
+  const exported = !!manifest && isExportManifest(manifest.id);
   const documents = manifest?.documents ?? [];
   const volumes = documents.reduce((sum, document) => sum + document.volumes, 0);
   const received = documents.filter(document => document.received).length;
@@ -15,12 +17,12 @@ export function ManifestDeleteDialog({ manifest, onCancel, onConfirm }: {
     <AlertDialogContent className="w-[calc(100vw_-_2rem)] max-h-[calc(100dvh_-_2rem)] overflow-y-auto rounded-lg p-5 sm:p-6" onOpenAutoFocus={event => { event.preventDefault(); cancel.current?.focus(); }}>
       <AlertDialogHeader>
         <div className="mx-auto mb-1 flex h-10 w-10 items-center justify-center rounded-full bg-destructive/10 text-destructive sm:mx-0"><Trash2 size={20} aria-hidden="true" /></div>
-        <AlertDialogTitle>Excluir pré-manifesto?</AlertDialogTitle>
-        <AlertDialogDescription>O pré e todos os seus CTCs serão removidos da sua conta. Esta ação não pode ser desfeita.</AlertDialogDescription>
+        <AlertDialogTitle>{exported ? 'Excluir manifesto?' : 'Excluir pré-manifesto?'}</AlertDialogTitle>
+        <AlertDialogDescription>O {exported ? 'manifesto' : 'pré'} e todos os seus CTCs serão removidos da sua conta. Esta ação não pode ser desfeita.</AlertDialogDescription>
       </AlertDialogHeader>
       {manifest && <div className="min-w-0 rounded-lg border bg-muted/30 p-4">
         <dl className="grid min-w-0 gap-3 text-sm">
-          <div className="grid min-w-0 gap-1"><dt className="text-xs text-muted-foreground">Pré-manifesto</dt><dd className="break-all font-mono font-semibold">{manifest.id}</dd></div>
+          <div className="grid min-w-0 gap-1"><dt className="text-xs text-muted-foreground">{exported ? 'Manifesto' : 'Pré-manifesto'}</dt><dd className="break-all font-mono font-semibold">{manifest.id}</dd></div>
           <div className="grid min-w-0 gap-1"><dt className="text-xs text-muted-foreground">Motorista</dt><dd className="break-words font-medium">{manifest.driver}</dd></div>
           <div className="grid min-w-0 gap-1"><dt className="text-xs text-muted-foreground">Placa</dt><dd className="break-all font-mono">{manifest.plate}</dd></div>
         </dl>
@@ -32,7 +34,7 @@ export function ManifestDeleteDialog({ manifest, onCancel, onConfirm }: {
       </div>}
       <AlertDialogFooter className="gap-2 sm:gap-0 [&_button]:h-auto [&_button]:min-h-9 [&_button]:whitespace-normal">
         <AlertDialogCancel ref={cancel} type="button" className="mt-0">Cancelar</AlertDialogCancel>
-        <AlertDialogAction type="button" className={buttonVariants({ variant: 'destructive' })} onClick={event => { event.preventDefault(); if (manifest) onConfirm(manifest.id); }}>Excluir pré-manifesto</AlertDialogAction>
+        <AlertDialogAction type="button" className={buttonVariants({ variant: 'destructive' })} onClick={event => { event.preventDefault(); if (manifest) onConfirm(manifest.id); }}>{exported ? 'Excluir manifesto' : 'Excluir pré-manifesto'}</AlertDialogAction>
       </AlertDialogFooter>
     </AlertDialogContent>
   </AlertDialog>;

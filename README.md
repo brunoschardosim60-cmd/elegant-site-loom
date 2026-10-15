@@ -94,3 +94,16 @@ O número do pré também pode ser recuperado localmente de seu código de barra
 Para avaliar velocidade e acerto, use o mesmo arquivo e a mesma orientação nos três leitores, confira cada CTC, NF e volume contra a foto e registre falhas do provedor separadamente. Tempo do OCR local e tempo da requisição direta à IA não representam o mesmo percurso completo. Uma soma correta ou uma única foto com bom resultado não substitui a revisão das células.
 
 A leitura local separa os glifos observados DI dos dígitos do pré para recuperar zeros na própria imagem. A soma de um volume faltante exige uma tabela completa pelas contagens de CTCs e NFs e quantidades positivas; o valor calculado fica sinalizado. Quando a IA junta uma NF-série literal ao número do pedido separado por espaço, o normalizador extrai somente o token de NF e preserva aviso. Não são separados números concatenados, múltiplas NFs nem chaves fiscais.
+
+
+## Importação do relatório 108 da Luft
+
+O botão **Importar planilha** lê um XLSX por vez no navegador, em um Web Worker cancelável. Não envia a planilha à IA nem persiste arquivos ou rascunhos. O filtro é fixo em **Filial 06 + Motivo DIS**; transferências TRA e outras filiais são descartadas. A prévia permite buscar motorista, placa ou manifesto e escolher os manifestos antes de cadastrar.
+
+O identificador é o número literal do **manifesto** exportado, com 8 a 12 dígitos e zeros preservados. Não inventa DI nem usa chave MDF-e/CT-e como CTC. Os prés DI históricos continuam válidos. `Dataemissao` representa a emissão do manifesto, não a data do pré original.
+
+As linhas são agrupadas por manifesto e CTC, mantendo NF-série e somando os volumes de cada NF uma única vez. Repetições com todos os dados operacionais iguais são removidas; conflitos em CTC/NF, motorista, placa ou data bloqueiam o lote. CTCs já cadastrados permanecem bloqueados, com as conferências e horários existentes preservados. Dados inválidos de uma linha elegível impedem cadastro parcial silencioso.
+
+Limites: arquivo de 8 MB, expansão ZIP declarada de 48 MB, 20 mil linhas, 100 colunas, dois milhões de células e 20 segundos no worker. Fórmulas não são executadas nem usadas como identificadores. Se o arquivo exceder o limite, exporte um período menor.
+
+A migração `20261014030000_export_manifest_ids.sql` aceita IDs numéricos no RPC compartilhado e nos aliases históricos, preservando toda a autenticação, RLS, auditoria e resolução de conflitos. Foi aplicada ao projeto confere em 14/10/2026. Testes de PostgreSQL isolado cobrem salvamento e duplicatas simultâneas dos novos IDs.

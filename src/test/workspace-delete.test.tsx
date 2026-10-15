@@ -77,10 +77,10 @@ it('deletes only the selected open pré, preserving all other records and updati
   expect(saved.issues).toEqual(state.issues);
   expect(saved.activity.filter(entry => entry.title === 'Pré-manifesto excluído')).toHaveLength(1);
   expect(saved.activity).toEqual(expect.arrayContaining(state.activity));
-  expectMetric('Pré-manifestos em aberto', '01');
+  expectMetric('Manifestos em aberto', '01');
   expectMetric('Documentos pendentes', '02');
   expectMetric('Documentos conferidos', '01');
-  expectMetric('Pré-manifestos finalizados', '01');
+  expectMetric('Manifestos finalizados', '01');
   expect(screen.getByText('7 volumes a conferir')).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: `Excluir pré ${state.manifests[0]!.id}` })).not.toBeInTheDocument();
   expect(state.manifests).toHaveLength(3);
@@ -97,10 +97,10 @@ it('also deletes a completed pré without changing any open conference', async (
   await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
   const saved = onSnapshot.mock.lastCall![0];
   expect(saved.manifests).toEqual(state.manifests.slice(0, 2));
-  expectMetric('Pré-manifestos em aberto', '02');
+  expectMetric('Manifestos em aberto', '02');
   expectMetric('Documentos pendentes', '04');
   expectMetric('Documentos conferidos', '00');
-  expectMetric('Pré-manifestos finalizados', '00');
+  expectMetric('Manifestos finalizados', '00');
   expect(screen.getByRole('heading', { name: 'Nenhum pré finalizado' })).toBeInTheDocument();
   expect(saved.issues).toEqual(state.issues);
 });
@@ -207,6 +207,6 @@ it('emits an empty registered manifest list when the final pré is deleted', asy
   expect(saved.issues).toEqual(state.issues);
   expect(saved.activity.filter(entry => entry.title === 'Pré-manifesto excluído')).toHaveLength(1);
   expect(screen.getByRole('heading', { name: 'Nenhum pré pendente' })).toBeInTheDocument();
-  expectMetric('Pré-manifestos em aberto', '00');
+  expectMetric('Manifestos em aberto', '00');
   expectMetric('Documentos pendentes', '00');
 });

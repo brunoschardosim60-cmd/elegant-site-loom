@@ -23,7 +23,7 @@ beforeAll(async () => {
   db = new PGlite();
   await db.exec(`create role anon; create role authenticated; create schema auth; create table auth.users(id uuid primary key,email text,email_confirmed_at timestamptz); create function auth.uid() returns uuid language sql as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$; grant usage on schema auth to authenticated,anon; grant execute on function auth.uid() to authenticated,anon;`);
   for (let n = 1; n <= 4; n++) await db.query('insert into auth.users values($1,$2,now())', [uid(n), `device${n}@example.invalid`]);
-  for (const migration of ['20261011040000_conference.sql', '20261013040000_teams.sql', '20261013050000_reader_team_access.sql', '20261013060000_team_members_and_merge.sql']) await db.exec(await readFile(`supabase/migrations/${migration}`, 'utf8'));
+  for (const migration of ['20261011040000_conference.sql', '20261013040000_teams.sql', '20261013050000_reader_team_access.sql', '20261013060000_team_members_and_merge.sql', '20261014010000_manifest_corrections.sql', '20261014020000_ctc_identity_conflicts.sql', '20261014030000_export_manifest_ids.sql']) await db.exec(await readFile(`supabase/migrations/${migration}`, 'utf8'));
   server = createServer(async (request, response) => {
     const user = Number(request.headers['x-test-user']);
     let saving = false;
