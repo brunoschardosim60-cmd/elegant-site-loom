@@ -47,4 +47,3 @@ begin
   execute replace(definition, marker, marker || guard);
 end
 $migration$;
-
