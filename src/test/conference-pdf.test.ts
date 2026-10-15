@@ -228,4 +228,27 @@ describe("PDF report scope", () => {
       selectConferenceReport({ ...base, view: "pending", query: "does not exist" }).manifests,
     ).toEqual([]);
   });
+  it("prints remanifestation history while counting only the current route as pending", () => {
+    const routes = [13, 15].map((day, index) => ({
+      ...manifests[0]!,
+      id: `0605222${index}`,
+      driver: index ? "OUTRO MOTORISTA" : "DIOGO",
+      issueDate: `2026-10-${day}`,
+      issueTime: index ? "08:53" : "17:03",
+      documents: [
+        { ...manifests[0]!.documents[0]!, id: `route-${index}`, deliveryDates: ["2026-10-16"] },
+      ],
+    }));
+    const report = selectConferenceReport({ ...base, manifests: routes, view: "missing" });
+    expect(report.manifests).toHaveLength(1);
+    expect(report.manifests[0]!.id).toBe("06052221");
+    const pdf = createConferencePdf({ ...base, manifests: routes, view: "tracking" });
+    const text = pdf.internal.pages.flat().join("\n");
+    expect(text).toContain("17:03");
+    expect(text).toContain("16/10/2026");
+    expect(text).toContain("Nova rota 06052221");
+    expect(text).toContain("Motorista: OUTRO");
+    expect(text).toContain("MOTORISTA");
+    expect(routes[0]!.documents[0]!.received).toBe(false);
+  });
 });

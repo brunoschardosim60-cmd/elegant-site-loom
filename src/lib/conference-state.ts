@@ -1,6 +1,6 @@
 import { manifestIdPattern } from "./manifest-id";
 import { z } from "zod";
-import { normalizeIssueDate } from "./manifest-date";
+import { normalizeIssueDate, normalizeIssueTime } from "./manifest-date";
 
 const activitySchema = z.object({
   id: z.union([z.number(), z.string().uuid()]),
@@ -19,6 +19,10 @@ const documentSchema = z.object({
   volumes: z.number().int().positive(),
   received: z.boolean(),
   receivedAt: z.string().optional(),
+  deliveryDates: z
+    .array(z.string().refine((value) => normalizeIssueDate(value) === value))
+    .max(300)
+    .optional(),
 });
 export const conferenceStateSchema = z.object({
   manifests: z.array(
@@ -30,6 +34,10 @@ export const conferenceStateSchema = z.object({
       issueDate: z
         .string()
         .refine((value) => normalizeIssueDate(value) === value, "Data de emissão inválida")
+        .optional(),
+      issueTime: z
+        .string()
+        .refine((value) => normalizeIssueTime(value) === value)
         .optional(),
       previousIds: z.array(z.string().regex(manifestIdPattern)).optional(),
       expectedRows: z.number().int().min(0).max(300).optional(),

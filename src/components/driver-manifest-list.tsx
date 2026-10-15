@@ -255,6 +255,7 @@ export function DriverManifestList({
                           </span>
                           <span className="driver-manifest-date">
                             {dateLabel} {formatManifestDate(manifestReferenceDate(manifest))}
+                            {manifest.issueTime && ` às ${manifest.issueTime}`}
                             <span>·</span>
                             <span className="plate">{manifest.plate}</span>
                           </span>

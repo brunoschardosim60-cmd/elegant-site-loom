@@ -104,7 +104,13 @@ export function CtcTracking({
                             : "Emissão"
                           : "Cadastro"}{" "}
                         {formatManifestDate(manifestReferenceDate(manifest))}
+                        {manifest.issueTime && ` às ${manifest.issueTime}`}
                       </span>
+                      {!!doc.deliveryDates?.length && (
+                        <span className="tracking-detail">
+                          Prev. entrega: {doc.deliveryDates.map(formatManifestDate).join(", ")}
+                        </span>
+                      )}
                     </td>
                     <td data-label="Volumes">{doc.volumes}</td>
                     <td data-label="Status">

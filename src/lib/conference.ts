@@ -7,6 +7,7 @@ export type DocumentItem = {
   volumes: number;
   received: boolean;
   receivedAt?: string | undefined;
+  deliveryDates?: string[] | undefined;
   /** Derived for display only; never persisted. */
   reroutedTo?: string | undefined;
 };
@@ -16,6 +17,7 @@ export type Manifest = {
   plate: string;
   date: string;
   issueDate?: string | undefined;
+  issueTime?: string | undefined;
   sourcePhotoHashes?: string[] | undefined;
   previousIds?: string[] | undefined;
   expectedRows?: number | undefined;

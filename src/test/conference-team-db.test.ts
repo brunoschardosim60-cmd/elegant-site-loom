@@ -75,6 +75,9 @@ beforeAll(async () => {
   await db.exec(
     await readFile("supabase/migrations/20261015090000_remanifested_routes.sql", "utf8"),
   );
+  await db.exec(
+    await readFile("supabase/migrations/20261015110000_manifest_schedule_metadata.sql", "utf8"),
+  );
 }, 30000);
 afterAll(async () => {
   await db?.close();
@@ -396,4 +399,22 @@ it("preserves remanifestations across drivers and rejects a stale receipt on the
   const duplicate = structuredClone(confirmed.data);
   duplicate.manifests.push({ ...make("06059993", "0077777701"), issueDate: "2026-10-15" });
   await expect(save(confirmed.data, duplicate)).rejects.toThrow("CONFERENCE_DUPLICATE");
+});
+it("preserves issuance clock time and separate delivery dates with authenticated validation", async () => {
+  await as(1);
+  const base = (await call("get_conference_team")).data;
+  const next = structuredClone(base);
+  next.manifests[0]!.issueTime = "17:03";
+  next.manifests[0]!.documents[0]!.deliveryDates = ["2026-10-16"];
+  const saved = await save(base, next);
+  expect(saved.data.manifests[0]).toMatchObject({
+    issueTime: "17:03",
+    documents: expect.arrayContaining([expect.objectContaining({ deliveryDates: ["2026-10-16"] })]),
+  });
+  expect(saved.data.manifests[0]!.documents[0]!.receivedAt).toBe(
+    base.manifests[0]!.documents[0]!.receivedAt,
+  );
+  const invalid = structuredClone(saved.data);
+  invalid.manifests[0]!.issueTime = "25:00";
+  await expect(save(saved.data, invalid)).rejects.toThrow("CONFERENCE_INVALID");
 });

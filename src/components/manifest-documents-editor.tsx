@@ -10,6 +10,7 @@ export type ManifestDraftRow = {
   client?: string;
   recipient?: string;
   review?: string[];
+  deliveryDate?: string | undefined;
 };
 type Field = "ctc" | "nf" | "volumes" | "client" | "recipient";
 const labels: Record<Field, string> = {

@@ -1,6 +1,11 @@
 import type { Manifest } from "./conference";
 
 type ManifestDates = Pick<Manifest, "date" | "issueDate">;
+/** Printed local clock time, independent from registration time and delivery agenda. */
+export function normalizeIssueTime(value: string): string | undefined {
+  const match = /^(\d{1,2}):([0-5]\d)(?::[0-5]\d)?$/.exec(value.trim());
+  return match && Number(match[1]) < 24 ? `${match[1]!.padStart(2, "0")}:${match[2]}` : undefined;
+}
 const brazilDate = new Intl.DateTimeFormat("en-CA", {
   timeZone: "America/Sao_Paulo",
   year: "numeric",

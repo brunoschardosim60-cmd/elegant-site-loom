@@ -1,5 +1,5 @@
 import type { ImportDraft } from "./manifest-import";
-import { normalizeIssueDate } from "./manifest-date";
+import { normalizeIssueDate, normalizeIssueTime } from "./manifest-date";
 import { isAnotherRoute } from "./conference-routes";
 
 export type SheetCell = string | number | boolean | null;
@@ -54,6 +54,16 @@ export function parseLuft108(sheets: LuftSheet[]): LuftExport {
       "Envie o relatório 108 — Relação de Notas por Manifesto, em XLSX. Faltam colunas obrigatórias.",
     );
   const headers = sheet.rows[0]!;
+  const timeIndex = headers.findIndex((cell) => normalized(cell) === "HORAEMISSAO");
+  const deliveryIndex = headers.findIndex((cell) => normalized(cell) === "PREV ENTREGA");
+  if (
+    ["HORAEMISSAO", "PREV ENTREGA"].some(
+      (field) => headers.filter((cell) => normalized(cell) === field).length > 1,
+    )
+  )
+    throw new Error(
+      "As colunas de horário ou previsão de entrega estão repetidas. Gere novamente o relatório 108.",
+    );
   const indexes = Object.fromEntries(
     fields.map((field) => [
       field,
@@ -93,6 +103,10 @@ export function parseLuft108(sheets: LuftSheet[]): LuftExport {
     const client = String(at("Remet Nome") ?? "").trim(),
       recipient = String(at("Dest Nome") ?? "").trim();
     const issueDate = normalizeIssueDate(literal(at("Dataemissao")));
+    const rawTime = timeIndex >= 0 ? literal(cells[timeIndex]) : "";
+    const issueTime = normalizeIssueTime(rawTime);
+    const deliveryDate =
+      deliveryIndex >= 0 ? normalizeIssueDate(literal(cells[deliveryIndex])) : undefined;
     const rawVolumes = at("Volumes");
     const volumes =
       typeof rawVolumes === "number"
@@ -114,7 +128,9 @@ export function parseLuft108(sheets: LuftSheet[]): LuftExport {
                 ? "motorista, remetente ou destinatário"
                 : !issueDate
                   ? "data de emissão do manifesto"
-                  : "";
+                  : rawTime && !issueTime
+                    ? "horário de emissão"
+                    : "";
     const fail = (message: string) => {
       if (errors.length < 100) errors.push(`Linha ${index + 2}: ${message}.`);
     };
@@ -130,6 +146,8 @@ export function parseLuft108(sheets: LuftSheet[]): LuftExport {
       client,
       recipient,
       volumes,
+      issueTime,
+      deliveryDate,
     ]);
     if (seen.has(identity)) {
       if (seen.get(identity) === content) repeated++;
@@ -137,16 +155,31 @@ export function parseLuft108(sheets: LuftSheet[]): LuftExport {
       continue;
     }
     seen.set(identity, content);
-    const draft = groups.get(id) ?? { id, plate, driver, issueDate, rows: [] };
+    const draft = groups.get(id) ?? {
+      id,
+      plate,
+      driver,
+      issueDate,
+      ...(issueTime ? { issueTime } : {}),
+      rows: [],
+    };
     if (
       draft.plate !== plate ||
       normalized(draft.driver) !== normalized(driver) ||
-      draft.issueDate !== issueDate
+      draft.issueDate !== issueDate ||
+      draft.issueTime !== issueTime
     ) {
       fail(`o manifesto ${id} tem motorista, placa ou data conflitantes`);
       continue;
     }
-    draft.rows.push({ ctc, nf: `${nf}-${series}`, volumes: String(volumes), client, recipient });
+    draft.rows.push({
+      ctc,
+      nf: `${nf}-${series}`,
+      volumes: String(volumes),
+      client,
+      recipient,
+      ...(deliveryDate ? { deliveryDate } : {}),
+    });
     groups.set(id, draft);
   }
   const drafts = [...groups.values()]

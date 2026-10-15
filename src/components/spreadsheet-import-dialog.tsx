@@ -596,6 +596,9 @@ export function SpreadsheetImportDialog({
                         </td>
                         <td data-label="Manifestado em" className="border-t p-3 whitespace-nowrap">
                           {formatManifestDate(draft.issueDate)}
+                          {draft.issueTime && (
+                            <span className="block text-muted-foreground">{draft.issueTime}</span>
+                          )}
                         </td>
                         <td data-label="CTCs" className="border-t p-3">
                           {draft.expectedRows}
@@ -660,7 +663,14 @@ export function SpreadsheetImportDialog({
                         {current.rows.map((row, i) => (
                           <tr key={i}>
                             <td className="py-2 pr-4 font-mono whitespace-nowrap">{row.ctc}</td>
-                            <td className="py-2 pr-4 whitespace-nowrap">{row.nf}</td>
+                            <td className="py-2 pr-4 whitespace-nowrap">
+                              {row.nf}
+                              {row.deliveryDate && (
+                                <span className="block text-muted-foreground">
+                                  Prev. {formatManifestDate(row.deliveryDate)}
+                                </span>
+                              )}
+                            </td>
                             <td className="py-2 pr-4">{row.volumes}</td>
                             <td className="py-2 pr-4">{row.client}</td>
                             <td className="py-2">{row.recipient}</td>

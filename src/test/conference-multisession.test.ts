@@ -68,6 +68,7 @@ beforeAll(async () => {
     "20261014020000_ctc_identity_conflicts.sql",
     "20261014030000_export_manifest_ids.sql",
     "20261015090000_remanifested_routes.sql",
+    "20261015110000_manifest_schedule_metadata.sql",
   ])
     await db.exec(await readFile(`supabase/migrations/${migration}`, "utf8"));
   server = createServer(async (request, response) => {

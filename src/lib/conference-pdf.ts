@@ -9,6 +9,7 @@ import {
   manifestAgeDays,
   manifestAgeLabel,
   normalizeIssueDate,
+  normalizeIssueTime,
 } from "./manifest-date";
 import { selectTrackingRows, type TrackingStatus } from "./ctc-tracking";
 
@@ -117,10 +118,10 @@ export function createConferencePdf(input: ConferencePdfInput) {
   });
   const width = pdf.internal.pageSize.getWidth();
   const height = pdf.internal.pageSize.getHeight();
-  const margin = 12;
+  const margin = 10;
   const available = width - margin * 2;
-  const continuationTop = 12;
-  let cursor = 34;
+  const continuationTop = 10;
+  let cursor = 27;
   const text = (value: string, x: number, y: number, size = 9, bold = false, color = ink) => {
     pdf.setFont("helvetica", bold ? "bold" : "normal");
     pdf.setFontSize(size);
@@ -130,15 +131,16 @@ export function createConferencePdf(input: ConferencePdfInput) {
   // Report branding and generation metadata belong only on the first page.
   // Continuations reserve space only for the current driver/manifest and columns.
   const drawFirstHeader = () => {
-    text("confere.", margin, 16, 18, true, blue);
-    text(labels[input.view], margin, 23, 11, true);
+    text("confere.", margin, 13, 15, true, blue);
+    text(labels[input.view], margin + 30, 13, 11, true);
     pdf.setFont("helvetica", "normal");
     pdf.setFontSize(8);
     pdf.setTextColor(...muted);
-    pdf.text(`Emitido em ${date(generatedAt, true)}`, width - margin, 15, { align: "right" });
-    pdf.text("Horário de Brasília", width - margin, 20, { align: "right" });
+    pdf.text(`Emitido em ${date(generatedAt, true)} · Brasília`, width - margin, 13, {
+      align: "right",
+    });
     pdf.setFillColor(...blue);
-    pdf.rect(margin, 27, available, 0.6, "F");
+    pdf.rect(margin, 20, available, 0.5, "F");
   };
   const newPage = () => {
     pdf.addPage();
@@ -154,20 +156,51 @@ export function createConferencePdf(input: ConferencePdfInput) {
       ? [["OCORRÊNCIAS", String(selected.issues.length)]]
       : [
           ["MANIFESTOS", String(selected.manifests.length)],
-          ["CTCs", String(documents.length)],
+          ["CTCs ÚNICOS", String(new Set(documents.map((doc) => doc.ctc)).size)],
           ["PENDENTES", String(documents.filter(isPendingDocument).length)],
-          ["CONFERIDOS", String(documents.filter((doc) => doc.received).length)],
-          ["VOLUMES", String(documents.reduce((sum, doc) => sum + doc.volumes, 0))],
+          [
+            "CONFERIDOS ATUAIS",
+            String(documents.filter((doc) => doc.received && !doc.reroutedTo).length),
+          ],
+          ["REMANIFESTADOS", String(documents.filter((doc) => doc.reroutedTo).length)],
+          [
+            "VOLS. PENDENTES",
+            String(documents.filter(isPendingDocument).reduce((sum, doc) => sum + doc.volumes, 0)),
+          ],
         ];
   const cardWidth = (available - 4 * (metrics.length - 1)) / metrics.length;
   metrics.forEach(([label, value], index) => {
     const x = margin + index * (cardWidth + 4);
     pdf.setFillColor(242, 246, 249);
-    pdf.roundedRect(x, cursor - 2, cardWidth, 15, 1.5, 1.5, "F");
-    text(label!, x + 3, cursor + 3, 7, true, muted);
-    text(value!, x + 3, cursor + 10, 13, true, blue);
+    pdf.roundedRect(x, cursor - 2, cardWidth, 12, 1.5, 1.5, "F");
+    text(label!, x + 3, cursor + 2, 6.8, true, muted);
+    text(value!, x + 3, cursor + 8, 11.5, true, blue);
   });
-  cursor += 18;
+  cursor += 14;
+  if (input.view !== "issues") {
+    const nfs = documents.reduce(
+      (sum, doc) => sum + doc.nf.split(/[,;]/).filter((nf) => /^\d/.test(nf.trim())).length,
+      0,
+    );
+    text(
+      `${documents.length} registros de rota · ${nfs} NFs por rota. Remanifestados mantêm o histórico e não somam pendências.`,
+      margin,
+      cursor,
+      7.5,
+      false,
+      muted,
+    );
+    cursor += 5;
+    text(
+      "Emissão não define a agenda: a previsão de entrega vem da planilha. Tempo desde emissão não significa atraso.",
+      margin,
+      cursor,
+      7.5,
+      false,
+      muted,
+    );
+    cursor += 6;
+  }
   const filters = [
     input.view !== "issues" && clean(input.query) ? `Busca: ${clean(input.query)}` : "",
     input.view !== "issues" && input.filter === "old"
@@ -235,42 +268,43 @@ export function createConferencePdf(input: ConferencePdfInput) {
       reserve(driverHeight + 36);
       drawDriver();
       for (const manifest of manifests) {
+        const issueDate = normalizeIssueDate(manifest.issueDate ?? "");
+        const issueTime = normalizeIssueTime(manifest.issueTime ?? "");
+        const timing = [
+          `Placa ${field(manifest.plate)}`,
+          issueDate
+            ? `Emissão ${formatManifestDate(issueDate)}${issueTime ? ` às ${issueTime}` : ""}`
+            : `Cadastro ${date(manifest.date)}`,
+          !manifest.finishedAt && !manifest.routeResolved
+            ? manifestAgeLabel(manifest, generatedAt)
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" | ");
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(7.5);
+        const timingLines = pdf.splitTextToSize(timing, available * 0.64) as string[];
+        const headerHeight = 8 + timingLines.length * 3.3;
+        const pending = manifest.documents.filter(isPendingDocument).length;
+        const remanifested = manifest.documents.filter((doc) => doc.reroutedTo).length;
         const header = (continuation = false) => {
           pdf.setFillColor(233, 240, 245);
-          pdf.roundedRect(margin, cursor - 1, available, 17, 1.5, 1.5, "F");
+          pdf.roundedRect(margin, cursor - 1, available, headerHeight, 1.5, 1.5, "F");
           text(
             `${field(manifest.id)}${continuation ? " (continuação)" : ""}`,
-            margin + 3,
-            cursor + 5,
-            10,
+            margin + 2,
+            cursor + 3,
+            9,
             true,
           );
-          const issueDate = normalizeIssueDate(manifest.issueDate ?? "");
-          const timing = [
-            issueDate
-              ? `${/^\d{8,12}$/.test(manifest.id) ? "Manifestado em" : "Emissão"} ${formatManifestDate(issueDate)}`
-              : "",
-            `Cadastro ${date(manifest.date)}`,
-            !manifest.finishedAt ? manifestAgeLabel(manifest, generatedAt) : "",
-          ]
-            .filter(Boolean)
-            .join(" | ");
-          text(
-            `Placa ${field(manifest.plate)} | ${timing}`,
-            margin + 3,
-            cursor + 12,
-            8,
-            false,
-            muted,
-          );
+          text(timingLines.join("\n"), margin + 2, cursor + 7.5, 7.5, false, muted);
           pdf.setFont("helvetica", "bold");
-          pdf.setFontSize(9);
+          pdf.setFontSize(8);
           pdf.setTextColor(...blue);
-          const pending = manifest.documents.filter(isPendingDocument).length;
           pdf.text(
-            `${manifest.documents.length} CTCs | ${manifest.documents.reduce((sum, doc) => sum + doc.volumes, 0)} volumes | ${pending ? `${pending} pendente(s)` : manifest.documents.some((doc) => !doc.received && doc.reroutedTo) ? "Rota encerrada com remanifestação" : "Todos conferidos"}`,
-            width - margin - 3,
-            cursor + 5,
+            `${manifest.documents.length} CTCs | ${manifest.documents.reduce((sum, doc) => sum + doc.volumes, 0)} vol. | ${pending} pend.${remanifested ? ` | ${remanifested} remanif.` : ""}`,
+            width - margin - 2,
+            cursor + 3,
             { align: "right" },
           );
           if (manifest.finishedAt) {
@@ -280,28 +314,38 @@ export function createConferencePdf(input: ConferencePdfInput) {
             pdf.text(
               `Finalizado em ${date(manifest.finishedAt, true)}`,
               width - margin - 3,
-              cursor + 12,
+              cursor + 7.5,
               { align: "right" },
             );
           }
         };
-        if (cursor + 36 > height - 14) {
+        if (cursor + headerHeight + 17 > height - 14) {
           newPage();
           drawDriver();
         }
         header();
-        cursor += 19;
+        cursor += headerHeight + 2;
         const tableStartPage = pdf.getCurrentPageInfo().pageNumber;
+        const hasDelivery = manifest.documents.some((doc) => doc.deliveryDates?.length);
+        const statusIndex = hasDelivery ? 6 : 5;
         autoTable(pdf, {
           startY: cursor,
           margin: {
             left: margin,
             right: margin,
-            top: continuationTop + driverHeight + 19,
+            top: continuationTop + driverHeight + headerHeight + 2,
             bottom: 14,
           },
           head: [
-            ["CTC", "NF / série", "Vols.", "Cliente / laboratório", "Destinatário", "Situação"],
+            [
+              "CTC",
+              "NF / série",
+              "Vols.",
+              "Cliente / laboratório",
+              "Destinatário",
+              ...(hasDelivery ? ["Prev. entrega"] : []),
+              "Situação",
+            ],
           ],
           body: manifest.documents.map((doc) => [
             field(doc.ctc),
@@ -309,16 +353,24 @@ export function createConferencePdf(input: ConferencePdfInput) {
             String(doc.volumes),
             field(doc.client),
             field(doc.recipient),
-            doc.received
-              ? `Conferido${doc.receivedAt ? `\n${date(doc.receivedAt, true)}` : ""}`
-              : doc.reroutedTo
-                ? `Remanifestado\n${doc.reroutedTo}`
-                : "Pendente",
+            ...(hasDelivery
+              ? [doc.deliveryDates?.map((day) => formatManifestDate(day)).join("\n") || "-"]
+              : []),
+            (() => {
+              const status = doc.received
+                ? `Conferido${doc.receivedAt ? `\n${date(doc.receivedAt, true)}` : ""}`
+                : doc.reroutedTo
+                  ? "Remanifestado"
+                  : "Pendente";
+              if (!doc.reroutedTo) return status;
+              const target = input.manifests.find((item) => item.id === doc.reroutedTo);
+              return `${status}\nNova rota ${doc.reroutedTo}${target?.issueDate ? ` · ${formatManifestDate(target.issueDate)}` : ""}${target && target.driver.trim().toUpperCase() !== manifest.driver.trim().toUpperCase() ? `\nMotorista: ${target.driver}` : ""}`;
+            })(),
           ]),
           styles: {
             font: "helvetica",
             fontSize: 8.5,
-            cellPadding: 1.8,
+            cellPadding: 1.5,
             textColor: ink,
             valign: "middle",
             overflow: "linebreak",
@@ -333,12 +385,13 @@ export function createConferencePdf(input: ConferencePdfInput) {
           },
           alternateRowStyles: { fillColor: [245, 248, 250] },
           columnStyles: {
-            0: { cellWidth: 28, fontStyle: "bold" },
-            1: { cellWidth: 28 },
-            2: { cellWidth: 13, halign: "center" },
-            3: { cellWidth: 71 },
-            4: { cellWidth: available - 178 },
-            5: { cellWidth: 38 },
+            0: { cellWidth: 26, fontStyle: "bold" },
+            1: { cellWidth: 26 },
+            2: { cellWidth: 12, halign: "center" },
+            3: { cellWidth: 61 },
+            4: { cellWidth: available - 166 - (hasDelivery ? 24 : 0) },
+            ...(hasDelivery ? { 5: { cellWidth: 24 } } : {}),
+            [statusIndex]: { cellWidth: 41 },
           },
           rowPageBreak: "avoid",
           showHead: "everyPage",
@@ -350,13 +403,17 @@ export function createConferencePdf(input: ConferencePdfInput) {
             }
           },
           didParseCell: (data) => {
-            if (data.section === "body" && data.column.index === 5)
+            if (data.section === "body" && manifest.documents[data.row.index]?.reroutedTo)
+              data.cell.styles.fillColor = [235, 243, 250];
+            if (data.section === "body" && data.column.index === statusIndex)
               data.cell.styles.textColor = manifest.documents[data.row.index]?.received
                 ? [22, 105, 77]
-                : [146, 91, 17];
+                : manifest.documents[data.row.index]?.reroutedTo
+                  ? blue
+                  : [146, 91, 17];
           },
         });
-        cursor = (pdf as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8;
+        cursor = (pdf as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 4;
       }
     }
   }

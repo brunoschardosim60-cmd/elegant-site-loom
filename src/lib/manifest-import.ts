@@ -1,7 +1,7 @@
 import { manifestIdPattern, manifestNoun } from "./manifest-id";
 import { parseReading, type Manifest, type DocumentItem } from "./conference";
 import { reviewManifestTotals, type ManifestTotals } from "./manifest-review";
-import { normalizeIssueDate } from "./manifest-date";
+import { normalizeIssueDate, normalizeIssueTime } from "./manifest-date";
 import { isAnotherRoute } from "./conference-routes";
 import type { ManifestDraftRow } from "../components/manifest-documents-editor";
 export type ImportDraft = {
@@ -9,6 +9,7 @@ export type ImportDraft = {
   plate: string;
   driver: string;
   issueDate?: string | undefined;
+  issueTime?: string | undefined;
   sourcePhotoHash?: string | undefined;
   rows: ManifestDraftRow[];
   targetId?: string;
@@ -177,8 +178,11 @@ export function applyImports(
     const ctcConflict = conflicts.find((conflict) => conflict.kind === "ctc");
     if (ctcConflict) return fail(ctcConflict.message, ctcConflict.row);
     const issueDate = !target ? normalizeIssueDate(draft.issueDate ?? "") : undefined;
+    const issueTime = !target ? normalizeIssueTime(draft.issueTime ?? "") : undefined;
     if (!target && draft.issueDate?.trim() && !issueDate)
       return fail("Confira a data de emissão do pré.");
+    if (!target && draft.issueTime?.trim() && !issueTime)
+      return fail("Confira o horário de emissão do manifesto.");
     if (!draft.rows.length) return fail("Inclua pelo menos um CTC.");
     const totals = reviewManifestTotals(draft.rows, draft);
     if (totals.blocked)
@@ -224,6 +228,7 @@ export function applyImports(
       grouped.set(reading.number, group);
     }
     const docs: DocumentItem[] = [...grouped.entries()].map(([ctc, group]) => {
+      const deliveryDates = group.rows.map((row) => normalizeIssueDate(row.deliveryDate ?? ""));
       const unique = (field: "nf" | "client" | "recipient") => [
         ...new Set(group.rows.map((item) => item[field]?.trim() ?? "").filter(Boolean)),
       ];
@@ -235,6 +240,9 @@ export function applyImports(
         recipient: unique("recipient").join(" / "),
         volumes: group.rows.reduce((sum, item) => sum + Number(item.volumes), 0),
         received: false,
+        ...(deliveryDates.every((day) => !!day)
+          ? { deliveryDates: [...new Set(deliveryDates as string[])].sort() }
+          : {}),
       };
     });
     const invalidSum = docs.find((document) => !Number.isSafeInteger(document.volumes));
@@ -270,6 +278,7 @@ export function applyImports(
         ...(draft.totalVolumes !== undefined ? { totalVolumes: draft.totalVolumes } : {}),
         ...(draft.totalsReviewed ? { totalsReviewed: true } : {}),
         ...(issueDate ? { issueDate } : {}),
+        ...(issueTime ? { issueTime } : {}),
         ...(sourcePhotoHash ? { sourcePhotoHashes: [sourcePhotoHash] } : {}),
         documents: docs,
       });

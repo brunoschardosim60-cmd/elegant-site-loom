@@ -48,7 +48,14 @@ export function applyManifestEdit(
     const old = latest.documents[index]!;
     if (old.received && old.ctc !== doc.ctc)
       throw new Error("Desfaça a conferência antes de corrigir o número de um CTC recebido.");
-    return { ...old, ...doc, id: old.id, received: old.received, receivedAt: old.receivedAt };
+    return {
+      ...old,
+      ...doc,
+      id: old.id,
+      received: old.received,
+      receivedAt: old.receivedAt,
+      deliveryDates: doc.ctc === old.ctc && doc.nf === old.nf ? old.deliveryDates : undefined,
+    };
   });
   const edited: Manifest = {
     ...latest,

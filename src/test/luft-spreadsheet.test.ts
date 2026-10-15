@@ -169,3 +169,24 @@ it("checks declared ZIP expansion before reading the workbook", () => {
   view.setUint32(24, 100, true);
   expect(() => validateSpreadsheetZip(buffer)).not.toThrow();
 });
+it("keeps issuance time and next-day delivery forecast separate without applying an afternoon cutoff", () => {
+  const result = parseLuft108([
+    {
+      name: "108",
+      rows: [
+        [...headers, "Horaemissao", "Prev Entrega"],
+        [...row({ Dataemissao: "13/10/2026" }), "17:03", "2026-10-14"],
+      ],
+    },
+  ]);
+  expect(result.errors).toEqual([]);
+  expect(result.drafts[0]).toMatchObject({ issueDate: "2026-10-13", issueTime: "17:03" });
+  const saved = applyImports([], result.drafts, "2026-10-15T13:00:00Z");
+  expect(saved.ok).toBe(true);
+  if (!saved.ok) return;
+  expect(saved.manifests[0]).toMatchObject({
+    issueDate: "2026-10-13",
+    issueTime: "17:03",
+    documents: [{ deliveryDates: ["2026-10-14"] }],
+  });
+});
