@@ -47,6 +47,18 @@ function expectMetric(label: string, value: string) {
   expect(within(metric as HTMLElement).getByText(value, { selector: '.metric-value' })).toBeInTheDocument();
 }
 
+it.each(['confirm', 'cancel'])('restores scanner focus without scrolling after deletion dialog %s', async action => {
+  const { scanner } = setup();
+  openDelete();
+  const focus = vi.spyOn(scanner, 'focus');
+  if (action === 'confirm') confirmDelete();
+  else fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+  await waitFor(() => expect(scanner).toHaveFocus());
+  expect(focus).toHaveBeenLastCalledWith({ preventScroll: true });
+  focus.mockRestore();
+});
+
 it.each(['Cancelar', 'Escape'])('opens the complete warning and dismisses it with %s without changing any saved data', async action => {
   const { state, onSnapshot, scanner } = setup();
   const snapshotsBefore = onSnapshot.mock.calls.length;

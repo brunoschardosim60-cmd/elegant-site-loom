@@ -20,6 +20,12 @@ dist-ssr
 .wrangler/
 .dev.vars
 
+# Local credentials and deployment metadata never belong in source control.
+.env
+.env.*
+!.env.example
+.vercel/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -11,7 +11,50 @@ const data = (): LuftExport => ({ ignored: 3004, repeated: 0, selectedRows: 2, e
 ] });
 beforeEach(() => { mock.read.mockReset().mockResolvedValue(data()); });
 afterEach(cleanup);
+it('lets the user remove a newly registered team duplicate while preserving the other selected manifests', async () => {
+  const save = vi.fn(() => ({ ok: true as const, manifests: [] }));
+  const view = render(<SpreadsheetImportDialog manifests={[]} onClose={vi.fn()} onCreate={save} />);
+  upload(); await screen.findByLabelText('Selecionar manifesto 06052233');
+  view.rerender(<SpreadsheetImportDialog manifests={[{ id: '06052233', driver: 'ANA', plate: 'ABC1D23', date: '2026-10-15', documents: [{ id: 'saved', ctc: '0000000001', nf: '123-1', volumes: 2, received: true }] }]} onClose={vi.fn()} onCreate={save} />);
+  expect(screen.getByRole('button', { name: 'Cadastrar 2 manifestos' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Remover repetidos da seleção' }));
+  expect(screen.getByLabelText('Selecionar manifesto 06052233')).not.toBeChecked();
+  expect(screen.getByLabelText('Selecionar manifesto 06052234')).toBeChecked();
+  fireEvent.click(screen.getByRole('button', { name: 'Cadastrar 1 manifestos' }));
+  expect(save).toHaveBeenCalledWith([expect.objectContaining({ id: '06052234' })]);
+});
 const upload = () => fireEvent.change(screen.getByLabelText('Enviar planilha 108'), { target: { files: [new File(['xlsx'], '108.xlsx')] } });
+const droppedFile = () => new File(['xlsx'], '108.xlsx');
+const dropZone = () => screen.getByLabelText('Enviar planilha 108').closest('label')!;
+it('highlights a dragged file, keeps the highlight across children and reads a drop exactly once without registering', async () => {
+  const save = vi.fn(); render(<SpreadsheetImportDialog manifests={[]} onClose={vi.fn()} onCreate={save} />);
+  const file = droppedFile(), transfer = { types: ['Files'], files: [file], dropEffect: '' };
+  fireEvent.dragEnter(dropZone(), { dataTransfer: transfer });
+  fireEvent.dragEnter(screen.getByText('Solte a planilha aqui'), { dataTransfer: transfer });
+  fireEvent.dragLeave(screen.getByText('Solte a planilha aqui'), { dataTransfer: transfer });
+  expect(dropZone()).toHaveAttribute('data-dragging', 'true');
+  fireEvent.drop(dropZone(), { dataTransfer: transfer });
+  await screen.findByLabelText('Selecionar manifesto 06052233');
+  expect(mock.read).toHaveBeenCalledExactlyOnceWith(file, expect.any(AbortSignal));
+  expect(dropZone()).not.toHaveAttribute('data-dragging'); expect(save).not.toHaveBeenCalled();
+});
+it('rejects several dropped files and ignores drops during an active read', async () => {
+  mock.read.mockImplementation(() => new Promise(() => {}));
+  render(<SpreadsheetImportDialog manifests={[]} onClose={vi.fn()} onCreate={vi.fn()} />);
+  fireEvent.drop(dropZone(), { dataTransfer: { types: ['Files'], files: [droppedFile(), droppedFile()] } });
+  expect(screen.getByRole('alert')).toHaveTextContent('apenas uma planilha'); expect(mock.read).not.toHaveBeenCalled();
+  fireEvent.drop(dropZone(), { dataTransfer: { types: ['Files'], files: [droppedFile()] } });
+  await waitFor(() => expect(mock.read).toHaveBeenCalledOnce());
+  const signal = mock.read.mock.calls[0]![1] as AbortSignal;
+  fireEvent.drop(dropZone(), { dataTransfer: { types: ['Files'], files: [droppedFile()] } });
+  expect(mock.read).toHaveBeenCalledOnce(); expect(signal.aborted).toBe(false);
+});
+it('announces a rejected file from the reader and does not register it', async () => {
+  mock.read.mockRejectedValueOnce(new Error('Envie o relatório 108 em XLSX, com até 8 MB.'));
+  const save = vi.fn(); render(<SpreadsheetImportDialog manifests={[]} onClose={vi.fn()} onCreate={save} />);
+  fireEvent.drop(dropZone(), { dataTransfer: { types: ['Files'], files: [new File(['pdf'], 'documento.pdf')] } });
+  expect(await screen.findByRole('alert')).toHaveTextContent('XLSX, com até 8 MB'); expect(save).not.toHaveBeenCalled();
+});
 it('previews all eligible manifests, filters by driver and requires explicit registration', async () => {
   const save = vi.fn(() => ({ ok: true as const, manifests: [] }));
   render(<SpreadsheetImportDialog manifests={[]} onClose={vi.fn()} onCreate={save} />);

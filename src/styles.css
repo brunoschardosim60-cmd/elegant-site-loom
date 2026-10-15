@@ -167,7 +167,8 @@
 .account-save-error { flex-basis: 100%; line-height: 1.6; overflow-wrap: anywhere; }
 .account-save-error button { white-space: normal; height: auto; min-height: 32px; }
 .workspace { display: grid; grid-template-columns: 224px minmax(0, 1fr); height: 100dvh; min-height: 0; overflow: hidden; }
-.account-shell > .workspace { height: 100%; }
+.account-shell > .workspace, .account-workspace-content > .workspace { height: 100%; }
+.account-workspace-content { height: 100%; min-height: 0; }
 .sidebar { background: var(--sidebar); color: var(--sidebar-foreground); padding: 34px 20px 22px; display: flex; flex-direction: column; width: 224px; height: 100%; min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; z-index: 20; }
 .sidebar > * { flex-shrink: 0; }
 .brand { display: flex; align-items: center; gap: 10px; font-size: 28px; font-weight: 800; }
@@ -842,7 +843,30 @@ h1 { font-size: 22px; }
 .sheet-manifest-table { min-width:760px; }
 .sheet-nfs-wrap table { min-width:620px; }
 .sheet-import-dialog input[type=checkbox] { width:18px; height:18px; accent-color:var(--primary); }
+
+/* Keep the compact layout effective beside the earlier workspace styles. */
+.workspace-refreshed .page-content { padding:20px 24px; }
+.workspace-refreshed .scanner-band { padding:16px 18px; margin-bottom:20px; }
+.workspace-refreshed .metric-grid { margin-bottom:16px; }
+.workspace-refreshed .search-wrap input { font-size:13px; }
+.driver-document-table { font-size:12px; }
+.driver-document-table th { font-size:11px; }
+.driver-document-table td:nth-child(2) { white-space:normal; overflow-wrap:anywhere; max-width:240px; }
+.driver-document-client, .driver-document-recipient { font-size:11px; line-height:1.6; }
+.driver-manifest-date, .driver-manifest-progress-label { font-size:11px; }
+
+@media (min-width:761px) and (max-width:1000px) {
+  .scanner-band { flex-wrap:wrap; }
+  .scan-form { flex-basis:100%; max-width:none; }
+  .metric-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px 0; }
+  .metric:nth-child(2n) { border-right:0; }
+}
 @media(max-width:760px) {
+  .workspace-refreshed .page-content { padding:18px 14px; }
+  .workspace-refreshed .search-wrap input { font-size:16px; }
+  .driver-manifest-date-editor button { min-height:32px; }
+  .driver-group-toggle { min-width:36px; min-height:36px; }
+  .driver-document-table td:nth-child(2) { max-width:none; }
   .account-identity { flex-basis:100%; }
   .account-save-error { align-items:flex-start; }
   .account-save-error > button { width:100%; }

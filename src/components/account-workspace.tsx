@@ -79,6 +79,9 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
   const [view, setView] = useState<TeamSyncView>();
   const [loadError, setLoadError] = useState('');
   const [teamOpen, setTeamOpen] = useState(false); const [auditPre, setAuditPre] = useState('');
+  const [signingOut, setSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState('');
+  const signOutPending = useRef(false);
   const sync = useRef<TeamSync | undefined>(undefined);
   useEffect(() => {
     let active = true;
@@ -98,7 +101,16 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
     return () => { active = false; sync.current?.stop(); sync.current = undefined; window.clearInterval(timer); window.removeEventListener('beforeunload', preventLoss); window.removeEventListener('online', refresh); window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', refresh); };
   }, [client, session.user.id]);
   function changed(snapshot: ConferenceState) { sync.current?.change(snapshot); }
+  async function signOut() {
+    if (signOutPending.current || sync.current?.pending()) return;
+    signOutPending.current = true; setSigningOut(true); setSignOutError('');
+    try {
+      const result = await client.auth.signOut();
+      if (result?.error) throw result.error;
+    } catch { setSignOutError('Não foi possível sair da conta. Confira sua conexão e tente novamente.'); }
+    finally { signOutPending.current = false; setSigningOut(false); }
+  }
   if (loadError) return <AccountPanel><AccountFeedback error message={loadError} onRetry={() => window.location.reload()}/></AccountPanel>;
   if (!view) return <AccountPanel><AccountFeedback message="Carregando seus cadastros…"/></AccountPanel>;
-  return <div className="account-shell"><AccountStatusBar email={session.user.email || ''} status={view.status} pending={view.pending} error={view.error} conflict={view.conflict} invitation={!!view.team.invitation} onTeam={() => { setAuditPre(''); setTeamOpen(true); void sync.current?.refresh(true); }} onSignOut={() => void client.auth.signOut()} onRetry={() => sync.current?.retry()} onReload={() => window.location.reload()} /><ConferenceWorkspace initialState={view.state} externalState={view.state} onSnapshot={changed} accountEmail={session.user.email || ''} onAuditManifest={id => { setAuditPre(id); setTeamOpen(true); }} /><TeamPanel client={client} team={view.team} open={teamOpen} onOpenChange={setTeamOpen} onRefresh={() => void sync.current?.refresh(true)} selectedPre={auditPre} canJoin={!view.pending} /></div>;
+  return <div className="account-shell"><AccountStatusBar email={session.user.email || ''} status={view.status} pending={view.pending} error={view.error} conflict={view.conflict} invitation={!!view.team.invitation} onTeam={() => { setAuditPre(''); setTeamOpen(true); void sync.current?.refresh(true); }} signingOut={signingOut} signOutError={signOutError} onSignOut={() => void signOut()} onRetry={() => sync.current?.retry()} onReload={() => window.location.reload()} /><div className="account-workspace-content" inert={signingOut || undefined}><ConferenceWorkspace initialState={view.state} externalState={view.state} onSnapshot={changed} accountEmail={session.user.email || ''} onAuditManifest={id => { setAuditPre(id); setTeamOpen(true); }} /></div><TeamPanel client={client} team={view.team} open={teamOpen} onOpenChange={setTeamOpen} onRefresh={() => void sync.current?.refresh(true)} selectedPre={auditPre} canJoin={!view.pending} /></div>;
 }

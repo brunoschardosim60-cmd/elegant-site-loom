@@ -17,6 +17,24 @@ function submitScan(value: string) {
   return scanner;
 }
 
+it.each(['spreadsheet', 'manual', 'edit-cancel', 'edit-save', 'scan-warning'])('restores scanner focus without pulling the page after closing %s', async flow => {
+  render(<ConferenceWorkspace initialState={initialState} />);
+  const scanner = screen.getByRole('textbox', { name: 'Código do CTC' });
+  if (flow === 'spreadsheet') fireEvent.click(screen.getByRole('button', { name: 'Importar planilha' }));
+  else if (flow === 'manual') fireEvent.click(screen.getByRole('button', { name: /Novo pré/ }));
+  else if (flow.startsWith('edit')) fireEvent.click(screen.getByRole('button', { name: 'Editar pré DI00123456789' }));
+  else submitScan('0000009999');
+  await screen.findByRole('dialog');
+  const focus = vi.spyOn(scanner, 'focus');
+  try {
+    const name = flow === 'manual' ? 'Fechar' : flow === 'edit-save' ? 'Salvar alterações' : flow === 'scan-warning' ? /Entendido, continuar/ : 'Cancelar';
+    fireEvent.click(screen.getByRole('button', { name }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(scanner).toHaveFocus());
+    expect(focus).toHaveBeenLastCalledWith({ preventScroll: true });
+  } finally { focus.mockRestore(); }
+});
+
 it('receives a unique leading-zero CTC once even when two submit events arrive before rendering', () => {
   const onSnapshot = vi.fn<(state: ConferenceState) => void>();
   render(<ConferenceWorkspace initialState={initialState} onSnapshot={onSnapshot} />);

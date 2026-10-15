@@ -8,15 +8,16 @@ export function AccountFeedback({message,error=false,onRetry}: {message:string;e
   </div>;
 }
 
-type Props={email:string;status:string;pending:boolean;error:string;conflict:boolean;invitation?:boolean;onTeam:()=>void;onSignOut:()=>void;onRetry:()=>void;onReload:()=>void};
+type Props={email:string;status:string;pending:boolean;error:string;conflict:boolean;invitation?:boolean;signingOut?:boolean;signOutError?:string;onTeam:()=>void;onSignOut:()=>void;onRetry:()=>void;onReload:()=>void};
 /** Presentation only; persistence and retry decisions remain in TeamSync. */
-export function AccountStatusBar({email,status,pending,error,conflict,invitation,onTeam,onSignOut,onRetry,onReload}:Props) {
+export function AccountStatusBar({email,status,pending,error,conflict,invitation,signingOut=false,signOutError='',onTeam,onSignOut,onRetry,onReload}:Props) {
   return <div className="account-bar">
     <div className="account-identity"><span className="account-email">{email}</span><span role="status" aria-live="polite" className={`account-sync-status ${error ? 'account-sync-error' : pending ? 'account-sync-pending' : 'account-sync-saved'}`}>
       {error ? <AlertCircle aria-hidden="true" size={14}/> : pending ? <Loader2 aria-hidden="true" size={14} className="animate-spin"/> : <CheckCircle2 aria-hidden="true" size={14}/>}{status}
     </span></div>
-    <Button size="sm" variant="ghost" onClick={onTeam}>{invitation ? 'Equipe · convite' : 'Equipe'}</Button>
-    <Button size="sm" variant="ghost" disabled={pending} onClick={onSignOut}>Sair da conta</Button>
-    {error && <div role="alert" className="account-save-error"><AlertCircle aria-hidden="true" size={18}/><p>{error}</p>{conflict ? <Button size="sm" variant="outline" onClick={onReload}>Recarregar dados salvos</Button> : <Button size="sm" variant="outline" onClick={onRetry}>Tentar salvar novamente</Button>}</div>}
+    <Button size="sm" variant="ghost" disabled={signingOut} onClick={onTeam}>{invitation ? 'Equipe · convite' : 'Equipe'}</Button>
+    <Button size="sm" variant="ghost" disabled={pending || signingOut} onClick={onSignOut}>{signingOut ? 'Saindo…' : 'Sair da conta'}</Button>
+    {signOutError && <p role="alert" className="account-save-error text-destructive">{signOutError}</p>}
+    {error && <div role="alert" className="account-save-error"><AlertCircle aria-hidden="true" size={18}/><p>{error}</p>{conflict ? <Button size="sm" variant="outline" onClick={onReload}>Recarregar dados salvos</Button> : <Button size="sm" variant="outline" onClick={onRetry}>{pending ? 'Tentar salvar novamente' : 'Tentar sincronizar novamente'}</Button>}</div>}
   </div>;
 }

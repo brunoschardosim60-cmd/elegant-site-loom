@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AccountWorkspace } from '@/components/account-workspace';
 const mocks = vi.hoisted(() => ({ rpc: vi.fn(), save: vi.fn(), read: vi.fn(), signOut: vi.fn() }));
@@ -14,6 +14,30 @@ beforeEach(() => {
   mocks.rpc.mockImplementation((name, args) => name.startsWith('get_conference_') ? mocks.read(args) : mocks.save(args));
 });
 afterEach(() => { cleanup(); });
+it('reports sign-out errors and permits retry without losing the workspace', async () => {
+  mocks.signOut.mockResolvedValueOnce({ error: { message: 'network' } }).mockResolvedValueOnce({ error: null });
+  render(<AccountWorkspace />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Sair da conta' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('Não foi possível sair');
+  expect(screen.getByRole('textbox', { name: 'Código do CTC' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Sair da conta' }));
+  await waitFor(() => expect(mocks.signOut).toHaveBeenCalledTimes(2));
+  expect(mocks.save).not.toHaveBeenCalled();
+});
+it('prevents repeated logout and interaction while logout is in flight, then restores it after failure', async () => {
+  let reject!: (reason: Error) => void;
+  mocks.signOut.mockImplementation(() => new Promise((_resolve, fail) => { reject = fail; }));
+  render(<AccountWorkspace />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Sair da conta' }));
+  const pending = screen.getByRole('button', { name: 'Saindo…' });
+  expect(pending).toBeDisabled(); fireEvent.click(pending);
+  expect(mocks.signOut).toHaveBeenCalledOnce();
+  expect(screen.getByRole('textbox', { name: 'Código do CTC' }).closest('[inert]')).not.toBeNull();
+  await act(async () => reject(new Error('offline')));
+  expect(screen.getByRole('textbox', { name: 'Código do CTC' }).closest('[inert]')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Sair da conta' })).toBeEnabled();
+  expect(mocks.save).not.toHaveBeenCalled();
+});
 it('restores shared records and saves only a user action with the loaded base and photo hashes', async () => {
   const photoHash = 'a'.repeat(64);
   const stored = { ...saved, manifests: saved.manifests.map(m => ({ ...m, sourcePhotoHashes: [photoHash] })) };
