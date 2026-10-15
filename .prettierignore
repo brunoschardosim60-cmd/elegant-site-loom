@@ -6,3 +6,10 @@ pnpm-lock.yaml
 package-lock.json
 bun.lock
 routeTree.gen.ts
+.tanstack
+.nitro
+.vercel
+.layout-qa*
+.sheet-review*
+.ocr-*
+*.local.*

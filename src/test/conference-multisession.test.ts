@@ -1,150 +1,341 @@
 // @vitest-environment node
-import { PGlite } from '@electric-sql/pglite';
-import { readFile } from 'node:fs/promises';
-import { createServer, type Server } from 'node:http';
-import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest';
-import { TeamSync, teamSchema, type TeamSyncView } from '@/lib/conference-team';
-import { parseLuft108 } from '@/lib/luft-spreadsheet';
-import { applyImports } from '@/lib/manifest-import';
-import { emptyConference, type ConferenceState } from '@/lib/conference-state';
+import { PGlite } from "@electric-sql/pglite";
+import { readFile } from "node:fs/promises";
+import { createServer, type Server } from "node:http";
+import { afterAll, beforeAll, beforeEach, expect, it, vi } from "vitest";
+import { TeamSync, teamSchema, type TeamSyncView } from "@/lib/conference-team";
+import { parseLuft108 } from "@/lib/luft-spreadsheet";
+import { applyImports } from "@/lib/manifest-import";
+import { emptyConference, type ConferenceState } from "@/lib/conference-state";
 
 // Three independent clients send overlapping HTTP requests to the actual SQL
 // RPCs. PostgreSQL transactions serialize the commits. No production data,
 // credentials, browser sessions or physical devices are involved.
 let db: PGlite, server: Server, origin: string;
-let inflight = 0, peak = 0, loseResponseFor = 0;
-const uid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
-const pre = (n = 1) => ({ id: `DI${String(n).padStart(11, '0')}`, driver: 'Motorista teste', plate: 'ABC1234', date: '2026-10-13', documents: [1, 2, 3].map(d => ({ id: `${n}-${d}`, ctc: String(n * 10 + d).padStart(10, '0'), nf: `${n * 10 + d}-1`, volumes: d, received: false })) });
-const routes: Record<string, string[]> = { get_conference_team: ['accept_invitation'], get_conference_revision: [], save_team_conference: ['base_data', 'next_data'], invite_conference_member: ['member_email'], get_conference_audit: ['pre_id', 'before_id'] };
+let inflight = 0,
+  peak = 0,
+  loseResponseFor = 0;
+const uid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+const pre = (n = 1) => ({
+  id: `DI${String(n).padStart(11, "0")}`,
+  driver: "Motorista teste",
+  plate: "ABC1234",
+  date: "2026-10-13",
+  documents: [1, 2, 3].map((d) => ({
+    id: `${n}-${d}`,
+    ctc: String(n * 10 + d).padStart(10, "0"),
+    nf: `${n * 10 + d}-1`,
+    volumes: d,
+    received: false,
+  })),
+});
+const routes: Record<string, string[]> = {
+  get_conference_team: ["accept_invitation"],
+  get_conference_revision: [],
+  save_team_conference: ["base_data", "next_data"],
+  invite_conference_member: ["member_email"],
+  get_conference_audit: ["pre_id", "before_id"],
+};
 async function rpc(user: number, name: string, args: Record<string, unknown> = {}) {
   try {
-    return await (await fetch(origin, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-test-user': String(user) }, body: JSON.stringify({ name, args }) })).json();
-  } catch { return { data: null, error: { message: 'network' } }; }
+    return await (
+      await fetch(origin, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-test-user": String(user) },
+        body: JSON.stringify({ name, args }),
+      })
+    ).json();
+  } catch {
+    return { data: null, error: { message: "network" } };
+  }
 }
 beforeAll(async () => {
   db = new PGlite();
-  await db.exec(`create role anon; create role authenticated; create schema auth; create table auth.users(id uuid primary key,email text,email_confirmed_at timestamptz); create function auth.uid() returns uuid language sql as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$; grant usage on schema auth to authenticated,anon; grant execute on function auth.uid() to authenticated,anon;`);
-  for (let n = 1; n <= 4; n++) await db.query('insert into auth.users values($1,$2,now())', [uid(n), `device${n}@example.invalid`]);
-  for (const migration of ['20261011040000_conference.sql', '20261013040000_teams.sql', '20261013050000_reader_team_access.sql', '20261013060000_team_members_and_merge.sql', '20261014010000_manifest_corrections.sql', '20261014020000_ctc_identity_conflicts.sql', '20261014030000_export_manifest_ids.sql']) await db.exec(await readFile(`supabase/migrations/${migration}`, 'utf8'));
+  await db.exec(
+    `create role anon; create role authenticated; create schema auth; create table auth.users(id uuid primary key,email text,email_confirmed_at timestamptz); create function auth.uid() returns uuid language sql as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$; grant usage on schema auth to authenticated,anon; grant execute on function auth.uid() to authenticated,anon;`,
+  );
+  for (let n = 1; n <= 4; n++)
+    await db.query("insert into auth.users values($1,$2,now())", [
+      uid(n),
+      `device${n}@example.invalid`,
+    ]);
+  for (const migration of [
+    "20261011040000_conference.sql",
+    "20261013040000_teams.sql",
+    "20261013050000_reader_team_access.sql",
+    "20261013060000_team_members_and_merge.sql",
+    "20261014010000_manifest_corrections.sql",
+    "20261014020000_ctc_identity_conflicts.sql",
+    "20261014030000_export_manifest_ids.sql",
+  ])
+    await db.exec(await readFile(`supabase/migrations/${migration}`, "utf8"));
   server = createServer(async (request, response) => {
-    const user = Number(request.headers['x-test-user']);
+    const user = Number(request.headers["x-test-user"]);
     let saving = false;
     try {
-      if (![1, 2, 3, 4].includes(user)) throw new Error('test identity required');
-      const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(chunk);
+      if (![1, 2, 3, 4].includes(user)) throw new Error("test identity required");
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(chunk);
       const { name, args } = JSON.parse(Buffer.concat(chunks).toString());
-      if (!Object.hasOwn(routes, name)) throw new Error('unknown RPC');
-      const params = routes[name]!.map(k => args[k] ?? null);
-      saving = name === 'save_team_conference';
-      if (saving) { peak = Math.max(peak, ++inflight); await new Promise(done => setTimeout(done, 30)); }
-      const data = await db.transaction(async tx => {
-        await tx.exec('set local role authenticated');
+      if (!Object.hasOwn(routes, name)) throw new Error("unknown RPC");
+      const params = routes[name]!.map((k) => args[k] ?? null);
+      saving = name === "save_team_conference";
+      if (saving) {
+        peak = Math.max(peak, ++inflight);
+        await new Promise((done) => setTimeout(done, 30));
+      }
+      const data = await db.transaction(async (tx) => {
+        await tx.exec("set local role authenticated");
         await tx.query("select set_config('request.jwt.claim.sub',$1,true)", [uid(user)]);
-        return (await tx.query<{ result: unknown }>(`select public.${name}(${params.map((_, i) => `$${i + 1}`).join(',')}) result`, params)).rows[0]!.result;
+        return (
+          await tx.query<{ result: unknown }>(
+            `select public.${name}(${params.map((_, i) => `$${i + 1}`).join(",")}) result`,
+            params,
+          )
+        ).rows[0]!.result;
       });
-      if (saving && loseResponseFor === user) { loseResponseFor = 0; response.destroy(); return; }
-      response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ data, error: null }));
-    } catch (error) { response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ data: null, error: { message: String((error as Error).message) } })); }
-    finally { if (saving) inflight--; }
+      if (saving && loseResponseFor === user) {
+        loseResponseFor = 0;
+        response.destroy();
+        return;
+      }
+      response.setHeader("Content-Type", "application/json");
+      response.end(JSON.stringify({ data, error: null }));
+    } catch (error) {
+      response.setHeader("Content-Type", "application/json");
+      response.end(
+        JSON.stringify({ data: null, error: { message: String((error as Error).message) } }),
+      );
+    } finally {
+      if (saving) inflight--;
+    }
   });
-  await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
+  await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
   origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
-  await rpc(1, 'get_conference_team');
-  for (const n of [2, 3, 4]) { expect((await rpc(1, 'invite_conference_member', { member_email: `device${n}@example.invalid` })).error).toBeNull(); expect((await rpc(n, 'get_conference_team', { accept_invitation: true })).error).toBeNull(); }
+  await rpc(1, "get_conference_team");
+  for (const n of [2, 3, 4]) {
+    expect(
+      (await rpc(1, "invite_conference_member", { member_email: `device${n}@example.invalid` }))
+        .error,
+    ).toBeNull();
+    expect((await rpc(n, "get_conference_team", { accept_invitation: true })).error).toBeNull();
+  }
 }, 30000);
 beforeEach(async () => {
-  peak = 0; loseResponseFor = 0;
-  await db.query('update public.conference_states set revision=0,data=$1 where user_id=$2', [{ ...emptyConference, manifests: [pre()] }, uid(1)]);
-  await db.exec('delete from public.conference_audit');
+  peak = 0;
+  loseResponseFor = 0;
+  await db.query("update public.conference_states set revision=0,data=$1 where user_id=$2", [
+    { ...emptyConference, manifests: [pre()] },
+    uid(1),
+  ]);
+  await db.exec("delete from public.conference_audit");
 });
-afterAll(async () => { await new Promise<void>(done => server?.close(() => done())); await db?.close(); });
+afterAll(async () => {
+  await new Promise<void>((done) => server?.close(() => done()));
+  await db?.close();
+});
 async function clients() {
   const views: TeamSyncView[] = [];
-  const sessions = await Promise.all([1, 2, 3].map(async n => {
-    const team = teamSchema.parse((await rpc(n, 'get_conference_team')).data);
-    views[n - 1] = { team, state: team.data, status: '', error: '', pending: false, conflict: false };
-    return new TeamSync(team, (name, args) => rpc(n, name, args), view => { views[n - 1] = view; });
-  }));
+  const sessions = await Promise.all(
+    [1, 2, 3].map(async (n) => {
+      const team = teamSchema.parse((await rpc(n, "get_conference_team")).data);
+      views[n - 1] = {
+        team,
+        state: team.data,
+        status: "",
+        error: "",
+        pending: false,
+        conflict: false,
+      };
+      return new TeamSync(
+        team,
+        (name, args) => rpc(n, name, args),
+        (view) => {
+          views[n - 1] = view;
+        },
+      );
+    }),
+  );
   return { sessions, views };
 }
-async function settle(sessions: TeamSync[], views: TeamSyncView[]) { await vi.waitFor(() => expect(views.every(v => !v.pending || v.error)).toBe(true)); await Promise.all(sessions.map(s => s.refresh(true))); }
-function receive(base: ConferenceState, doc: number) { const next = structuredClone(base); next.manifests[0]!.documents[doc]!.received = true; next.manifests[0]!.documents[doc]!.receivedAt = '1900-01-01'; return next; }
-const audit = async () => (await rpc(1, 'get_conference_audit')).data as { action: string; actor_email: string }[];
+async function settle(sessions: TeamSync[], views: TeamSyncView[]) {
+  await vi.waitFor(() => expect(views.every((v) => !v.pending || v.error)).toBe(true));
+  await Promise.all(sessions.map((s) => s.refresh(true)));
+}
+function receive(base: ConferenceState, doc: number) {
+  const next = structuredClone(base);
+  next.manifests[0]!.documents[doc]!.received = true;
+  next.manifests[0]!.documents[doc]!.receivedAt = "1900-01-01";
+  return next;
+}
+const audit = async () =>
+  (await rpc(1, "get_conference_audit")).data as { action: string; actor_email: string }[];
 
-it('three simultaneous sessions receive different CTCs, converge and finish once with correct actors', async () => {
-  const { sessions, views } = await clients(); expect(views[0]!.team.members).toHaveLength(4);
+it("three simultaneous sessions receive different CTCs, converge and finish once with correct actors", async () => {
+  const { sessions, views } = await clients();
+  expect(views[0]!.team.members).toHaveLength(4);
   sessions.forEach((s, i) => s.change(receive(views[i]!.state, i)));
   await settle(sessions, views);
-  expect(peak).toBe(3); expect(views.every(v => !v.pending && !v.error)).toBe(true);
-  expect(views[1]!.state).toEqual(views[0]!.state); expect(views[2]!.state).toEqual(views[0]!.state);
-  expect(views[0]!.state.manifests[0]!.documents.every(d => d.received && d.receivedAt !== '1900-01-01')).toBe(true);
+  expect(peak).toBe(3);
+  expect(views.every((v) => !v.pending && !v.error)).toBe(true);
+  expect(views[1]!.state).toEqual(views[0]!.state);
+  expect(views[2]!.state).toEqual(views[0]!.state);
+  expect(
+    views[0]!.state.manifests[0]!.documents.every(
+      (d) => d.received && d.receivedAt !== "1900-01-01",
+    ),
+  ).toBe(true);
   expect(views[0]!.state.manifests[0]!.finishedAt).toBeTruthy();
-  const events = await audit(); expect(events.filter(e => e.action === 'pre_finished')).toHaveLength(1);
-  expect(events.filter(e => e.action === 'ctc_received').map(e => e.actor_email).sort()).toEqual([1, 2, 3].map(n => `device${n}@example.invalid`));
+  const events = await audit();
+  expect(events.filter((e) => e.action === "pre_finished")).toHaveLength(1);
+  expect(
+    events
+      .filter((e) => e.action === "ctc_received")
+      .map((e) => e.actor_email)
+      .sort(),
+  ).toEqual([1, 2, 3].map((n) => `device${n}@example.invalid`));
 });
-it('a CTC scanned in all three sessions is received and audited only once', async () => {
-  const { sessions, views } = await clients(); sessions.forEach((s, i) => s.change(receive(views[i]!.state, 0)));
-  await settle(sessions, views); expect(peak).toBe(3);
-  expect(views.every(v => v.state.manifests[0]!.documents.filter(d => d.received).length === 1 && !v.error)).toBe(true);
-  expect((await audit()).filter(e => e.action === 'ctc_received')).toHaveLength(1);
-});
-it('combines different imports and rejects two concurrent attempts to register the same pre', async () => {
-  let { sessions, views } = await clients();
-  sessions.forEach((s, i) => { const next = structuredClone(views[i]!.state); next.manifests.push(pre(i + 2)); s.change(next); });
-  await settle(sessions, views); expect(views.every(v => v.state.manifests.length === 4 && !v.error)).toBe(true);
-  ({ sessions, views } = await clients());
-  sessions.forEach((s, i) => { const next = structuredClone(views[i]!.state); const duplicate = pre(5); duplicate.driver = `Pessoa ${i}`; next.manifests.push(duplicate); s.change(next); });
+it("a CTC scanned in all three sessions is received and audited only once", async () => {
+  const { sessions, views } = await clients();
+  sessions.forEach((s, i) => s.change(receive(views[i]!.state, 0)));
   await settle(sessions, views);
-  expect(views.filter(v => v.conflict)).toHaveLength(2); expect(views.filter(v => v.error.includes('Nenhuma duplicata'))).toHaveLength(2);
-  const stored = (await rpc(1, 'get_conference_team')).data.data;
+  expect(peak).toBe(3);
+  expect(
+    views.every(
+      (v) => v.state.manifests[0]!.documents.filter((d) => d.received).length === 1 && !v.error,
+    ),
+  ).toBe(true);
+  expect((await audit()).filter((e) => e.action === "ctc_received")).toHaveLength(1);
+});
+it("combines different imports and rejects two concurrent attempts to register the same pre", async () => {
+  let { sessions, views } = await clients();
+  sessions.forEach((s, i) => {
+    const next = structuredClone(views[i]!.state);
+    next.manifests.push(pre(i + 2));
+    s.change(next);
+  });
+  await settle(sessions, views);
+  expect(views.every((v) => v.state.manifests.length === 4 && !v.error)).toBe(true);
+  ({ sessions, views } = await clients());
+  sessions.forEach((s, i) => {
+    const next = structuredClone(views[i]!.state);
+    const duplicate = pre(5);
+    duplicate.driver = `Pessoa ${i}`;
+    next.manifests.push(duplicate);
+    s.change(next);
+  });
+  await settle(sessions, views);
+  expect(views.filter((v) => v.conflict)).toHaveLength(2);
+  expect(views.filter((v) => v.error.includes("Nenhuma duplicata"))).toHaveLength(2);
+  const stored = (await rpc(1, "get_conference_team")).data.data;
   expect(stored.manifests.filter((m: { id: string }) => m.id === pre(5).id)).toHaveLength(1);
-  expect((await audit()).filter(e => e.action === 'pre_added')).toHaveLength(4);
+  expect((await audit()).filter((e) => e.action === "pre_added")).toHaveLength(4);
 });
-it('rejects duplicate CTCs across different pres without losing other successful changes', async () => {
+it("rejects duplicate CTCs across different pres without losing other successful changes", async () => {
   const { sessions, views } = await clients();
-  sessions.forEach((s, i) => { const next = structuredClone(views[i]!.state), added = pre(i + 2); added.documents = [{ ...added.documents[0]!, ctc: '0000000999' }]; next.manifests.push(added); s.change(next); });
-  await settle(sessions, views); expect(views.filter(v => v.conflict)).toHaveLength(2);
-  expect((await rpc(1, 'get_conference_team')).data.data.manifests).toHaveLength(2);
+  sessions.forEach((s, i) => {
+    const next = structuredClone(views[i]!.state),
+      added = pre(i + 2);
+    added.documents = [{ ...added.documents[0]!, ctc: "0000000999" }];
+    next.manifests.push(added);
+    s.change(next);
+  });
+  await settle(sessions, views);
+  expect(views.filter((v) => v.conflict)).toHaveLength(2);
+  expect((await rpc(1, "get_conference_team")).data.data.manifests).toHaveLength(2);
 });
-it('keeps incompatible field edits local instead of silently overwriting the winning NF', async () => {
+it("keeps incompatible field edits local instead of silently overwriting the winning NF", async () => {
   const { sessions, views } = await clients();
-  sessions.forEach((s, i) => { const next = structuredClone(views[i]!.state); next.manifests[0]!.documents[0]!.nf = `${i + 100}-1`; s.change(next); });
-  await settle(sessions, views); expect(views.filter(v => v.conflict)).toHaveLength(2);
-  const stored = (await rpc(1, 'get_conference_team')).data.data;
-  expect(['100-1', '101-1', '102-1']).toContain(stored.manifests[0].documents[0].nf);
-  expect((await audit()).filter(e => e.action === 'ctc_edited')).toHaveLength(1);
+  sessions.forEach((s, i) => {
+    const next = structuredClone(views[i]!.state);
+    next.manifests[0]!.documents[0]!.nf = `${i + 100}-1`;
+    s.change(next);
+  });
+  await settle(sessions, views);
+  expect(views.filter((v) => v.conflict)).toHaveLength(2);
+  const stored = (await rpc(1, "get_conference_team")).data.data;
+  expect(["100-1", "101-1", "102-1"]).toContain(stored.manifests[0].documents[0].nf);
+  expect((await audit()).filter((e) => e.action === "ctc_edited")).toHaveLength(1);
 });
-it('does not resurrect a pre when a stale device tries to receive a deleted CTC', async () => {
-  const { sessions, views } = await clients(); const next = structuredClone(views[0]!.state); next.manifests = []; sessions[0]!.change(next);
+it("does not resurrect a pre when a stale device tries to receive a deleted CTC", async () => {
+  const { sessions, views } = await clients();
+  const next = structuredClone(views[0]!.state);
+  next.manifests = [];
+  sessions[0]!.change(next);
   await vi.waitFor(() => expect(views[0]!.pending).toBe(false));
-  sessions[1]!.change(receive(views[1]!.state, 0)); sessions[2]!.change(receive(views[2]!.state, 1));
-  await settle(sessions, views); expect(views.filter(v => v.conflict)).toHaveLength(2);
-  expect((await rpc(1, 'get_conference_team')).data.data.manifests).toEqual([]);
+  sessions[1]!.change(receive(views[1]!.state, 0));
+  sessions[2]!.change(receive(views[2]!.state, 1));
+  await settle(sessions, views);
+  expect(views.filter((v) => v.conflict)).toHaveLength(2);
+  expect((await rpc(1, "get_conference_team")).data.data.manifests).toEqual([]);
 });
-it('retries a lost response after commit without duplicate audit or undoing another devices receipt', async () => {
-  const { sessions, views } = await clients(); loseResponseFor = 1;
-  sessions[0]!.change(receive(views[0]!.state, 0)); sessions[1]!.change(receive(views[1]!.state, 1));
-  await vi.waitFor(() => expect(views[0]!.error).toContain('Não foi possível sincronizar'));
-  await vi.waitFor(() => expect(views[1]!.pending).toBe(false)); sessions[0]!.retry();
-  await settle(sessions, views); expect(views.every(v => !v.error && !v.pending && v.state.manifests[0]!.documents.filter(d => d.received).length === 2)).toBe(true);
-  expect((await audit()).filter(e => e.action === 'ctc_received')).toHaveLength(2);
+it("retries a lost response after commit without duplicate audit or undoing another devices receipt", async () => {
+  const { sessions, views } = await clients();
+  loseResponseFor = 1;
+  sessions[0]!.change(receive(views[0]!.state, 0));
+  sessions[1]!.change(receive(views[1]!.state, 1));
+  await vi.waitFor(() => expect(views[0]!.error).toContain("Não foi possível sincronizar"));
+  await vi.waitFor(() => expect(views[1]!.pending).toBe(false));
+  sessions[0]!.retry();
+  await settle(sessions, views);
+  expect(
+    views.every(
+      (v) =>
+        !v.error &&
+        !v.pending &&
+        v.state.manifests[0]!.documents.filter((d) => d.received).length === 2,
+    ),
+  ).toBe(true);
+  expect((await audit()).filter((e) => e.action === "ctc_received")).toHaveLength(2);
 });
 
-it('persists a fifty-manifest five-day spreadsheet while another client receives an existing CTC', async () => {
-  const {sessions,views}=await clients();
-  const headers=['Manifesto','Motivo','Filial','Dataemissao','Placa','Motorista','CTRC','Remet Nome','Dest Nome','NF','Serie','Volumes'];
-  const rows=Array.from({length:50},(_,i)=>[String(60000000+i),'DIS','06',`${10+Math.floor(i/10)}/10/2026`,'ABC1D23','ANA',String(1000000000+i),'LAB','CLIENTE',String(100+i),'1',2]);
-  const parsed=parseLuft108([{name:'108',rows:[headers,...rows]}]);
-  const added=applyImports(views[0]!.state.manifests,parsed.drafts,'2026-10-15T00:00:00Z');
-  expect(added.ok).toBe(true);if(!added.ok)return;
-  sessions[0]!.change({...views[0]!.state,manifests:added.manifests});
-  sessions[1]!.change(receive(views[1]!.state,0));
-  await settle(sessions,views);
-  expect(views.every(v=>!v.error&&!v.pending&&v.state.manifests.length===51)).toBe(true);
-  const stored=views[2]!.state.manifests.filter(m=>/^\d{8}$/.test(m.id));
+it("persists a fifty-manifest five-day spreadsheet while another client receives an existing CTC", async () => {
+  const { sessions, views } = await clients();
+  const headers = [
+    "Manifesto",
+    "Motivo",
+    "Filial",
+    "Dataemissao",
+    "Placa",
+    "Motorista",
+    "CTRC",
+    "Remet Nome",
+    "Dest Nome",
+    "NF",
+    "Serie",
+    "Volumes",
+  ];
+  const rows = Array.from({ length: 50 }, (_, i) => [
+    String(60000000 + i),
+    "DIS",
+    "06",
+    `${10 + Math.floor(i / 10)}/10/2026`,
+    "ABC1D23",
+    "ANA",
+    String(1000000000 + i),
+    "LAB",
+    "CLIENTE",
+    String(100 + i),
+    "1",
+    2,
+  ]);
+  const parsed = parseLuft108([{ name: "108", rows: [headers, ...rows] }]);
+  const added = applyImports(views[0]!.state.manifests, parsed.drafts, "2026-10-15T00:00:00Z");
+  expect(added.ok).toBe(true);
+  if (!added.ok) return;
+  sessions[0]!.change({ ...views[0]!.state, manifests: added.manifests });
+  sessions[1]!.change(receive(views[1]!.state, 0));
+  await settle(sessions, views);
+  expect(views.every((v) => !v.error && !v.pending && v.state.manifests.length === 51)).toBe(true);
+  const stored = views[2]!.state.manifests.filter((m) => /^\d{8}$/.test(m.id));
   expect(stored).toHaveLength(50);
-  for(let day=10;day<=14;day++)expect(stored.filter(m=>m.issueDate===`2026-10-${day}`)).toHaveLength(10);
-  expect(views[2]!.state.manifests.find(m=>m.id===pre().id)!.documents[0]!.received).toBe(true);
-  const count=await db.query<{total:number}>("select count(*)::int total from public.conference_audit where action='pre_added'");
+  for (let day = 10; day <= 14; day++)
+    expect(stored.filter((m) => m.issueDate === `2026-10-${day}`)).toHaveLength(10);
+  expect(views[2]!.state.manifests.find((m) => m.id === pre().id)!.documents[0]!.received).toBe(
+    true,
+  );
+  const count = await db.query<{ total: number }>(
+    "select count(*)::int total from public.conference_audit where action='pre_added'",
+  );
   expect(count.rows[0]!.total).toBe(50);
 });

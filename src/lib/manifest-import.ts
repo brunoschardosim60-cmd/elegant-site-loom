@@ -1,18 +1,38 @@
-import { manifestIdPattern, manifestNoun } from './manifest-id';
-import { parseReading, type Manifest, type DocumentItem } from './conference';
-import { reviewManifestTotals, type ManifestTotals } from './manifest-review';
-import { normalizeIssueDate } from './manifest-date';
-import type { ManifestDraftRow } from '../components/manifest-documents-editor';
-export type ImportDraft = { id: string; plate: string; driver: string; issueDate?: string | undefined; sourcePhotoHash?: string | undefined; rows: ManifestDraftRow[]; targetId?: string } & ManifestTotals;
-export type ImportOutcome = { ok: true; manifests: Manifest[] } | { ok: false; error: string; index: number; row?: number | undefined };
-export type ImportConflict = { kind: 'manifest' | 'ctc'; index: number; row?: number; message: string; manifestId?: string };
+import { manifestIdPattern, manifestNoun } from "./manifest-id";
+import { parseReading, type Manifest, type DocumentItem } from "./conference";
+import { reviewManifestTotals, type ManifestTotals } from "./manifest-review";
+import { normalizeIssueDate } from "./manifest-date";
+import type { ManifestDraftRow } from "../components/manifest-documents-editor";
+export type ImportDraft = {
+  id: string;
+  plate: string;
+  driver: string;
+  issueDate?: string | undefined;
+  sourcePhotoHash?: string | undefined;
+  rows: ManifestDraftRow[];
+  targetId?: string;
+} & ManifestTotals;
+export type ImportOutcome =
+  | { ok: true; manifests: Manifest[] }
+  | { ok: false; error: string; index: number; row?: number | undefined };
+export type ImportConflict = {
+  kind: "manifest" | "ctc";
+  index: number;
+  row?: number;
+  message: string;
+  manifestId?: string;
+};
 
 type Owner = { id: string; driver: string };
 type DraftOwner = Owner & { index: number; row?: number };
 const normalizedId = (id: string) => id.trim().toUpperCase();
-const normalizedHash = (hash: string | undefined) => hash && /^[a-f0-9]{64}$/i.test(hash) ? hash.toLowerCase() : undefined;
-const ownerLabel = (owner: Owner) => `${manifestNoun(owner.id)} ${owner.id || 'sem número'} · motorista ${owner.driver.trim() || 'não informado'}`;
-const addOwner = <T,>(map: Map<string, T[]>, key: string, owner: T) => { map.set(key, [...(map.get(key) ?? []), owner]); };
+const normalizedHash = (hash: string | undefined) =>
+  hash && /^[a-f0-9]{64}$/i.test(hash) ? hash.toLowerCase() : undefined;
+const ownerLabel = (owner: Owner) =>
+  `${manifestNoun(owner.id)} ${owner.id || "sem número"} · motorista ${owner.driver.trim() || "não informado"}`;
+const addOwner = <T>(map: Map<string, T[]>, key: string, owner: T) => {
+  map.set(key, [...(map.get(key) ?? []), owner]);
+};
 
 /** Report every affected draft/row, without rejecting duplicate legacy snapshots. */
 export function findImportConflicts(existing: Manifest[], drafts: ImportDraft[]): ImportConflict[] {
@@ -24,7 +44,7 @@ export function findImportConflicts(existing: Manifest[], drafts: ImportDraft[])
     addOwner(savedIds, owner.id, owner);
     for (const document of manifest.documents) {
       const reading = parseReading(document.ctc);
-      if (reading.kind === 'ctc') addOwner(savedCtcs, reading.number, owner);
+      if (reading.kind === "ctc") addOwner(savedCtcs, reading.number, owner);
     }
     for (const raw of manifest.sourcePhotoHashes ?? []) {
       const hash = normalizedHash(raw);
@@ -36,83 +56,152 @@ export function findImportConflicts(existing: Manifest[], drafts: ImportDraft[])
   const hashes = new Map<string, DraftOwner[]>();
   for (const [index, draft] of drafts.entries()) {
     const id = normalizedId(draft.targetId || draft.id);
-    const target = draft.targetId ? existing.find(manifest => normalizedId(manifest.id) === id) ?? drafts.find(item => !item.targetId && normalizedId(item.id) === id) : undefined;
+    const target = draft.targetId
+      ? (existing.find((manifest) => normalizedId(manifest.id) === id) ??
+        drafts.find((item) => !item.targetId && normalizedId(item.id) === id))
+      : undefined;
     const owner: DraftOwner = { id, driver: target?.driver ?? draft.driver, index };
     if (!draft.targetId && manifestIdPattern.test(id)) addOwner(ids, id, owner);
     const hash = normalizedHash(draft.sourcePhotoHash);
     if (hash) addOwner(hashes, hash, owner);
     for (const [row, item] of draft.rows.entries()) {
       const reading = parseReading(item.ctc);
-      if (reading.kind === 'ctc') addOwner(ctcs, reading.number, { ...owner, row });
+      if (reading.kind === "ctc") addOwner(ctcs, reading.number, { ...owner, row });
     }
   }
   const conflicts: ImportConflict[] = [];
-  const push = (kind: ImportConflict['kind'], owner: DraftOwner, reference: Owner, message: string) => {
-    conflicts.push({ kind, index: owner.index, ...(owner.row !== undefined ? { row: owner.row } : {}), message, manifestId: reference.id });
+  const push = (
+    kind: ImportConflict["kind"],
+    owner: DraftOwner,
+    reference: Owner,
+    message: string,
+  ) => {
+    conflicts.push({
+      kind,
+      index: owner.index,
+      ...(owner.row !== undefined ? { row: owner.row } : {}),
+      message,
+      manifestId: reference.id,
+    });
   };
-  for (const [id, owners] of ids) for (const owner of owners) {
-    for (const reference of savedIds.get(id) ?? []) push('manifest', owner, reference, `Esse ${ownerLabel(reference)} já está cadastrado.`);
-    const other = owners.find(candidate => candidate !== owner);
-    if (other) push('manifest', owner, other, `Esse ${ownerLabel(other)} está repetido no lote.`);
-  }
-  for (const [hash, owners] of hashes) for (const owner of owners) {
-    for (const reference of savedHashes.get(hash) ?? []) push('manifest', owner, reference, `Esta foto já foi cadastrada no ${ownerLabel(reference)}.`);
-    const other = owners.find(candidate => candidate !== owner);
-    if (other) push('manifest', owner, other, `Esta foto está repetida no lote no ${ownerLabel(other)}.`);
-  }
-  for (const [ctc, owners] of ctcs) for (const owner of owners) {
-    // Multiple NF rows may legitimately share one CTC inside the same pre.
-    // Only report repeated CTCs when they belong to different manifests/drafts.
-    for (const reference of savedCtcs.get(ctc) ?? []) {
-      push('ctc', owner, reference, `CTC ${ctc} já está cadastrado no ${ownerLabel(reference)}.`);
+  for (const [id, owners] of ids)
+    for (const owner of owners) {
+      for (const reference of savedIds.get(id) ?? [])
+        push("manifest", owner, reference, `Esse ${ownerLabel(reference)} já está cadastrado.`);
+      const other = owners.find((candidate) => candidate !== owner);
+      if (other) push("manifest", owner, other, `Esse ${ownerLabel(other)} está repetido no lote.`);
     }
-    const repeatedNf = owners.find(candidate => candidate !== owner && candidate.index === owner.index && (drafts[candidate.index]?.rows[candidate.row!]?.nf.trim() || '') === (drafts[owner.index]?.rows[owner.row!]?.nf.trim() || ''));
-    if (repeatedNf) push('ctc', owner, repeatedNf, `CTC ${ctc} e NF repetidos no mesmo pré. Remova a linha duplicada para não somar volumes duas vezes.`);
-    const other = owners.find(candidate => candidate.index !== owner.index);
-    if (other) push('ctc', owner, other, `CTC ${ctc} repetido no ${ownerLabel(other)} do lote.`);
-  }
-  return [...new Map(conflicts.map(conflict => [JSON.stringify(conflict), conflict])).values()];
+  for (const [hash, owners] of hashes)
+    for (const owner of owners) {
+      for (const reference of savedHashes.get(hash) ?? [])
+        push(
+          "manifest",
+          owner,
+          reference,
+          `Esta foto já foi cadastrada no ${ownerLabel(reference)}.`,
+        );
+      const other = owners.find((candidate) => candidate !== owner);
+      if (other)
+        push("manifest", owner, other, `Esta foto está repetida no lote no ${ownerLabel(other)}.`);
+    }
+  for (const [ctc, owners] of ctcs)
+    for (const owner of owners) {
+      // Multiple NF rows may legitimately share one CTC inside the same pre.
+      // Only report repeated CTCs when they belong to different manifests/drafts.
+      for (const reference of savedCtcs.get(ctc) ?? []) {
+        push("ctc", owner, reference, `CTC ${ctc} já está cadastrado no ${ownerLabel(reference)}.`);
+      }
+      const repeatedNf = owners.find(
+        (candidate) =>
+          candidate !== owner &&
+          candidate.index === owner.index &&
+          (drafts[candidate.index]?.rows[candidate.row!]?.nf.trim() || "") ===
+            (drafts[owner.index]?.rows[owner.row!]?.nf.trim() || ""),
+      );
+      if (repeatedNf)
+        push(
+          "ctc",
+          owner,
+          repeatedNf,
+          `CTC ${ctc} e NF repetidos no mesmo pré. Remova a linha duplicada para não somar volumes duas vezes.`,
+        );
+      const other = owners.find((candidate) => candidate.index !== owner.index);
+      if (other) push("ctc", owner, other, `CTC ${ctc} repetido no ${ownerLabel(other)} do lote.`);
+    }
+  return [...new Map(conflicts.map((conflict) => [JSON.stringify(conflict), conflict])).values()];
 }
 
-export function applyImports(existing: Manifest[], drafts: ImportDraft[], now: string): ImportOutcome {
+export function applyImports(
+  existing: Manifest[],
+  drafts: ImportDraft[],
+  now: string,
+): ImportOutcome {
   let manifests = [...existing];
   const indexed = drafts.map((draft, index) => ({ draft, index }));
   // A DACTE may select a new pre anywhere in the photo queue. Register new
   // pres first while retaining original error indexes and their relative order.
-  const ordered = [...indexed.filter(item => !item.draft.targetId), ...indexed.filter(item => item.draft.targetId)];
+  const ordered = [
+    ...indexed.filter((item) => !item.draft.targetId),
+    ...indexed.filter((item) => item.draft.targetId),
+  ];
   for (const { index, draft } of ordered) {
     const id = (draft.targetId || draft.id).trim().toUpperCase();
-    const target = draft.targetId ? manifests.find(m => m.id === id) : undefined;
+    const target = draft.targetId ? manifests.find((m) => m.id === id) : undefined;
     const fail = (error: string, row?: number): ImportOutcome => ({ ok: false, error, index, row });
-    if (draft.targetId && !target) return fail('Selecione um pré-manifesto cadastrado.');
-    if (!manifestIdPattern.test(id)) return fail('Confira o número: DI seguido de 8 a 12 dígitos para pré, ou 8 a 12 dígitos para manifesto.');
-    if (!target && (!draft.driver.trim() || !draft.plate.trim())) return fail('Preencha motorista e placa.');
+    if (draft.targetId && !target) return fail("Selecione um pré-manifesto cadastrado.");
+    if (!manifestIdPattern.test(id))
+      return fail(
+        "Confira o número: DI seguido de 8 a 12 dígitos para pré, ou 8 a 12 dígitos para manifesto.",
+      );
+    if (!target && (!draft.driver.trim() || !draft.plate.trim()))
+      return fail("Preencha motorista e placa.");
     const sourcePhotoHash = normalizedHash(draft.sourcePhotoHash);
-    if (draft.sourcePhotoHash !== undefined && !sourcePhotoHash) return fail('Confira a identificação da foto antes de cadastrar novamente.');
+    if (draft.sourcePhotoHash !== undefined && !sourcePhotoHash)
+      return fail("Confira a identificação da foto antes de cadastrar novamente.");
     const conflicts = findImportConflicts(manifests, [draft]);
-    const manifestConflict = conflicts.find(conflict => conflict.kind === 'manifest');
+    const manifestConflict = conflicts.find((conflict) => conflict.kind === "manifest");
     if (manifestConflict) return fail(manifestConflict.message);
-    const ctcConflict = conflicts.find(conflict => conflict.kind === 'ctc');
+    const ctcConflict = conflicts.find((conflict) => conflict.kind === "ctc");
     if (ctcConflict) return fail(ctcConflict.message, ctcConflict.row);
-    const issueDate = !target ? normalizeIssueDate(draft.issueDate ?? '') : undefined;
-    if (!target && draft.issueDate?.trim() && !issueDate) return fail('Confira a data de emissão do pré.');
-    if (!draft.rows.length) return fail('Inclua pelo menos um CTC.');
+    const issueDate = !target ? normalizeIssueDate(draft.issueDate ?? "") : undefined;
+    if (!target && draft.issueDate?.trim() && !issueDate)
+      return fail("Confira a data de emissão do pré.");
+    if (!draft.rows.length) return fail("Inclua pelo menos um CTC.");
     const totals = reviewManifestTotals(draft.rows, draft);
-    if (totals.blocked) return fail(`${totals.messages.join(' ')} Corrija os campos ou confirme a revisão dos totais.`);
+    if (totals.blocked)
+      return fail(
+        `${totals.messages.join(" ")} Corrija os campos ou confirme a revisão dos totais.`,
+      );
     // Existing CTCs remain conflicts (including a selected target for a DACTE).
     // Repeated rows in this incoming draft are grouped below as multiple NFs for one CTC.
-    const registeredCtcs = new Set(manifests.flatMap(manifest => manifest.documents.map(document => document.ctc)));
+    const registeredCtcs = new Set(
+      manifests.flatMap((manifest) => manifest.documents.map((document) => document.ctc)),
+    );
     const grouped = new Map<string, { rows: ManifestDraftRow[]; firstRow: number }>();
     for (const [row, item] of draft.rows.entries()) {
       const reading = parseReading(item.ctc);
-      if (reading.kind !== 'ctc') return fail('Confira o CTC de 10 dígitos.', row);
+      if (reading.kind !== "ctc") return fail("Confira o CTC de 10 dígitos.", row);
       const nf = item.nf.trim();
-      if (nf && nf !== '—' && !nf.split(/[,;]/).every(value => /^\d{1,9}(?:-\d{1,3})?$/.test(value.trim()))) return fail('Confira a NF desta linha: informe o número e, quando houver, a série. Texto de outra coluna não pode ser cadastrado como NF.', row);
-      if (!Number.isSafeInteger(Number(item.volumes)) || Number(item.volumes) < 1) return fail('Confira a quantidade de volumes (inteiro maior que zero).', row);
+      if (
+        nf &&
+        nf !== "—" &&
+        !nf.split(/[,;]/).every((value) => /^\d{1,9}(?:-\d{1,3})?$/.test(value.trim()))
+      )
+        return fail(
+          "Confira a NF desta linha: informe o número e, quando houver, a série. Texto de outra coluna não pode ser cadastrado como NF.",
+          row,
+        );
+      if (!Number.isSafeInteger(Number(item.volumes)) || Number(item.volumes) < 1)
+        return fail("Confira a quantidade de volumes (inteiro maior que zero).", row);
       if (registeredCtcs.has(reading.number)) {
-        const registeredOwner = manifests.find(manifest => manifest.documents.some(document => document.ctc === reading.number));
-        const message = conflicts.find(conflict => conflict.kind === 'ctc' && conflict.row === row)?.message
-          ?? (registeredOwner ? `CTC ${reading.number} já está cadastrado no pré ${registeredOwner.id} · motorista ${registeredOwner.driver.trim() || 'não informado'}.` : `CTC ${reading.number} já está cadastrado em outro pré.`);
+        const registeredOwner = manifests.find((manifest) =>
+          manifest.documents.some((document) => document.ctc === reading.number),
+        );
+        const message =
+          conflicts.find((conflict) => conflict.kind === "ctc" && conflict.row === row)?.message ??
+          (registeredOwner
+            ? `CTC ${reading.number} já está cadastrado no pré ${registeredOwner.id} · motorista ${registeredOwner.driver.trim() || "não informado"}.`
+            : `CTC ${reading.number} já está cadastrado em outro pré.`);
         return fail(message, row);
       }
       const group = grouped.get(reading.number) ?? { rows: [], firstRow: row };
@@ -120,21 +209,55 @@ export function applyImports(existing: Manifest[], drafts: ImportDraft[], now: s
       grouped.set(reading.number, group);
     }
     const docs: DocumentItem[] = [...grouped.entries()].map(([ctc, group]) => {
-      const unique = (field: 'nf' | 'client' | 'recipient') => [...new Set(group.rows.map(item => item[field]?.trim() ?? '').filter(Boolean))];
+      const unique = (field: "nf" | "client" | "recipient") => [
+        ...new Set(group.rows.map((item) => item[field]?.trim() ?? "").filter(Boolean)),
+      ];
       return {
         id: `${id}-${ctc}`,
         ctc,
-        nf: unique('nf').join(', ') || '—',
-        client: unique('client').join(' / '),
-        recipient: unique('recipient').join(' / '),
+        nf: unique("nf").join(", ") || "—",
+        client: unique("client").join(" / "),
+        recipient: unique("recipient").join(" / "),
         volumes: group.rows.reduce((sum, item) => sum + Number(item.volumes), 0),
         received: false,
       };
     });
-    const invalidSum = docs.find(document => !Number.isSafeInteger(document.volumes));
-    if (invalidSum) return fail('Confira a soma de volumes deste CTC.', grouped.get(invalidSum.ctc)!.firstRow);
-    if (target) manifests = manifests.map(m => m.id === id ? { ...m, documents: [...m.documents, ...docs], ...(sourcePhotoHash ? { sourcePhotoHashes: [...new Set([...(m.sourcePhotoHashes ?? []).map(hash => hash.toLowerCase()), sourcePhotoHash])] } : {}), finishedAt: undefined } : m);
-    else manifests.push({ id, driver: draft.driver.trim(), plate: draft.plate.trim().toUpperCase(), date: now, ...(draft.expectedRows !== undefined ? { expectedRows: draft.expectedRows } : {}), ...(draft.totalVolumes !== undefined ? { totalVolumes: draft.totalVolumes } : {}), ...(draft.totalsReviewed ? { totalsReviewed: true } : {}), ...(issueDate ? { issueDate } : {}), ...(sourcePhotoHash ? { sourcePhotoHashes: [sourcePhotoHash] } : {}), documents: docs });
+    const invalidSum = docs.find((document) => !Number.isSafeInteger(document.volumes));
+    if (invalidSum)
+      return fail("Confira a soma de volumes deste CTC.", grouped.get(invalidSum.ctc)!.firstRow);
+    if (target)
+      manifests = manifests.map((m) =>
+        m.id === id
+          ? {
+              ...m,
+              documents: [...m.documents, ...docs],
+              ...(sourcePhotoHash
+                ? {
+                    sourcePhotoHashes: [
+                      ...new Set([
+                        ...(m.sourcePhotoHashes ?? []).map((hash) => hash.toLowerCase()),
+                        sourcePhotoHash,
+                      ]),
+                    ],
+                  }
+                : {}),
+              finishedAt: undefined,
+            }
+          : m,
+      );
+    else
+      manifests.push({
+        id,
+        driver: draft.driver.trim(),
+        plate: draft.plate.trim().toUpperCase(),
+        date: now,
+        ...(draft.expectedRows !== undefined ? { expectedRows: draft.expectedRows } : {}),
+        ...(draft.totalVolumes !== undefined ? { totalVolumes: draft.totalVolumes } : {}),
+        ...(draft.totalsReviewed ? { totalsReviewed: true } : {}),
+        ...(issueDate ? { issueDate } : {}),
+        ...(sourcePhotoHash ? { sourcePhotoHashes: [sourcePhotoHash] } : {}),
+        documents: docs,
+      });
   }
   return { ok: true, manifests };
 }

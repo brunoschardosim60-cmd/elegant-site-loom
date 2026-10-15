@@ -1,5 +1,5 @@
-import { createWorker, PSM, type Worker } from 'tesseract.js';
-import { prepareForOcr } from './image-prep';
+import { createWorker, PSM, type Worker } from "tesseract.js";
+import { prepareForOcr } from "./image-prep";
 
 export type PhotoAngle = 0 | 90 | 180 | 270;
 const orientationBudget = 6000;
@@ -27,10 +27,14 @@ export async function detectPhotoOrientations(
   const dispose = (value: Worker | undefined) => {
     if (!value || terminated.has(value)) return;
     terminated.add(value);
-    try { void value.terminate().catch(() => {}); } catch { /* Cleanup cannot delay photo reading. */ }
+    try {
+      void value.terminate().catch(() => {});
+    } catch {
+      /* Cleanup cannot delay photo reading. */
+    }
   };
   let stop = () => {};
-  const interrupted = new Promise<undefined>(resolve => {
+  const interrupted = new Promise<undefined>((resolve) => {
     stop = () => {
       if (stopped) return;
       stopped = true;
@@ -39,26 +43,41 @@ export async function detectPhotoOrientations(
       dispose(worker);
     };
   });
-  signal?.addEventListener('abort', stop, { once: true });
+  signal?.addEventListener("abort", stop, { once: true });
   const timer = setTimeout(stop, orientationBudget);
 
   // Every pending operation has a rejection handler through Promise.race.
   // A late language download must also release its worker after timeout/abort.
   const bounded = <T>(operation: Promise<T>) => Promise.race([operation, interrupted]);
   try {
-    if (signal?.aborted) { stop(); return angles; }
-    onProgress(0, 'Ajustando orientação das fotos…');
-    if (signal?.aborted) { stop(); return angles; }
-    const starting = createWorker('por');
-    void starting.then(value => { if (stopped) dispose(value); }).catch(() => {});
+    if (signal?.aborted) {
+      stop();
+      return angles;
+    }
+    onProgress(0, "Ajustando orientação das fotos…");
+    if (signal?.aborted) {
+      stop();
+      return angles;
+    }
+    const starting = createWorker("por");
+    void starting
+      .then((value) => {
+        if (stopped) dispose(value);
+      })
+      .catch(() => {});
     worker = await bounded(starting);
     if (!worker || stopped) return angles;
-    await bounded(worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT, tessedit_char_whitelist: '' }));
+    await bounded(
+      worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT, tessedit_char_whitelist: "" }),
+    );
     if (stopped) return angles;
     for (const [index, file] of files.entries()) {
       if (stopped) break;
-      if (index) onProgress(index, 'Ajustando orientação da foto…');
-      if (signal?.aborted) { stop(); break; }
+      if (index) onProgress(index, "Ajustando orientação da foto…");
+      if (signal?.aborted) {
+        stop();
+        break;
+      }
       for (const angle of directions) {
         if (stopped) break;
         try {
@@ -67,14 +86,21 @@ export async function detectPhotoOrientations(
           if (thumbnail === file) continue; // Decoder/canvas fallback is the full photo, not a thumbnail.
           const reading = await bounded(worker.recognize(thumbnail));
           if (stopped || !reading) break;
-          if (hasUprightPhotoHeading(reading.data.text)) { angles[index] = angle; onConfirmed?.(index, angle); break; }
-        } catch { /* Another thumbnail angle can still be readable. */ }
+          if (hasUprightPhotoHeading(reading.data.text)) {
+            angles[index] = angle;
+            onConfirmed?.(index, angle);
+            break;
+          }
+        } catch {
+          /* Another thumbnail angle can still be readable. */
+        }
       }
     }
-  } catch { /* Orientation is optional; preserve zero for unconfirmed photos. */ }
-  finally {
+  } catch {
+    /* Orientation is optional; preserve zero for unconfirmed photos. */
+  } finally {
     clearTimeout(timer);
-    signal?.removeEventListener('abort', stop);
+    signal?.removeEventListener("abort", stop);
     stopped = true;
     preparation.abort();
     dispose(worker);

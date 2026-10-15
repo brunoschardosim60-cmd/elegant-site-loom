@@ -1,73 +1,133 @@
-import { needsBandReading, photoBandPayload, applyBandRead } from './photo-bands';
-import { requestAiPhoto } from './photo-ai-request';
-import { photoRepairPlan, applyPhotoRepair } from './photo-repair';
-import { getSupabaseClient } from './supabase-client';
-import { needsPhotoVerification, reconcilePhotoRead } from './photo-verification';
-import { getPhotoProviderBlock, rememberPhotoProviderBlock } from './photo-provider-block';
-import type { PhotoAngle } from './photo-orientation';
-import type { PhotoFields } from './photo-fields';
-import { checkPhotoNumbers } from './photo-numeric-check';
-import type { NumericPhotoRead } from './photo-numeric-reader';
+import { needsBandReading, photoBandPayload, applyBandRead } from "./photo-bands";
+import { requestAiPhoto } from "./photo-ai-request";
+import { photoRepairPlan, applyPhotoRepair } from "./photo-repair";
+import { getSupabaseClient } from "./supabase-client";
+import { needsPhotoVerification, reconcilePhotoRead } from "./photo-verification";
+import { getPhotoProviderBlock, rememberPhotoProviderBlock } from "./photo-provider-block";
+import type { PhotoAngle } from "./photo-orientation";
+import type { PhotoFields } from "./photo-fields";
+import { checkPhotoNumbers } from "./photo-numeric-check";
+import type { NumericPhotoRead } from "./photo-numeric-reader";
 
 type ProviderFailure = Extract<Awaited<ReturnType<typeof requestAiPhoto>>, { ok: false }>;
-type ProviderStage = 'full' | 'lite' | 'verify';
-export type PhotoAiOptions = { orientations?: readonly PhotoAngle[]; singlePass?: boolean; quotaFallback?: boolean; preferredModel?: 'normal' | 'lite'; selective?: boolean; initialRead?: PhotoFields; numericCheck?: (file: File, angle: PhotoAngle, signal: AbortSignal, pre?: PhotoFields) => Promise<NumericPhotoRead>; onProvisional?: (index: number, pre: PhotoFields) => void };
+type ProviderStage = "full" | "lite" | "verify";
+export type PhotoAiOptions = {
+  orientations?: readonly PhotoAngle[];
+  singlePass?: boolean;
+  quotaFallback?: boolean;
+  preferredModel?: "normal" | "lite";
+  selective?: boolean;
+  initialRead?: PhotoFields;
+  numericCheck?: (
+    file: File,
+    angle: PhotoAngle,
+    signal: AbortSignal,
+    pre?: PhotoFields,
+  ) => Promise<NumericPhotoRead>;
+  onProvisional?: (index: number, pre: PhotoFields) => void;
+};
 const temporaryBlocks = new Map<string, { until: number; result: ProviderFailure }>();
 const providerCooldown = 2 * 60 * 1000;
 // Full reading and verification use different models and quota buckets.
 // This version also ignores quotas cached before Flash became the full reader
 // and Lite became the optional verifier; those stage buckets were reversed.
-const providerScope = (userId: string, stage: ProviderStage) => `${userId}:photo-model-stages-v4:${stage}`;
-const verificationQuotaMessage = 'A cota diária da conferência adicional esgotou. A leitura completa foi mantida; confira os campos sinalizados.';
-const verificationUnavailableMessage = 'A conferência adicional está temporariamente indisponível. A leitura completa foi mantida; confira os campos sinalizados.';
-const isQuotaFailure = (failure: ProviderFailure) => 'quota' in failure;
-const canUseLite = (failure: ProviderFailure) => !('fallback' in failure && failure.fallback === false) && (isQuotaFailure(failure) || ('tryLite' in failure && failure.tryLite === true));
-const fullFailureReason = (failure: ProviderFailure) => isQuotaFailure(failure) ? 'O Gemini normal atingiu a cota.' : 'O Gemini normal ficou indisponível.';
+const providerScope = (userId: string, stage: ProviderStage) =>
+  `${userId}:photo-model-stages-v4:${stage}`;
+const verificationQuotaMessage =
+  "A cota diária da conferência adicional esgotou. A leitura completa foi mantida; confira os campos sinalizados.";
+const verificationUnavailableMessage =
+  "A conferência adicional está temporariamente indisponível. A leitura completa foi mantida; confira os campos sinalizados.";
+const isQuotaFailure = (failure: ProviderFailure) => "quota" in failure;
+const canUseLite = (failure: ProviderFailure) =>
+  !("fallback" in failure && failure.fallback === false) &&
+  (isQuotaFailure(failure) || ("tryLite" in failure && failure.tryLite === true));
+const fullFailureReason = (failure: ProviderFailure) =>
+  isQuotaFailure(failure)
+    ? "O Gemini normal atingiu a cota."
+    : "O Gemini normal ficou indisponível.";
 
-async function numericWithinSignal(task: Promise<NumericPhotoRead>, signal: AbortSignal): Promise<NumericPhotoRead> {
+async function numericWithinSignal(
+  task: Promise<NumericPhotoRead>,
+  signal: AbortSignal,
+): Promise<NumericPhotoRead> {
   let stop!: () => void;
-  const aborted = new Promise<never>((_, reject) => { stop = () => reject(signal.reason ?? new Error('Leitura interrompida.')); signal.addEventListener('abort', stop, { once: true }); });
+  const aborted = new Promise<never>((_, reject) => {
+    stop = () => reject(signal.reason ?? new Error("Leitura interrompida."));
+    signal.addEventListener("abort", stop, { once: true });
+  });
   if (signal.aborted) stop();
-  try { return await Promise.race([task, aborted]); }
-  finally { signal.removeEventListener('abort', stop); }
+  try {
+    return await Promise.race([task, aborted]);
+  } finally {
+    signal.removeEventListener("abort", stop);
+  }
 }
 
 function stageFailure(stage: ProviderStage, failure: ProviderFailure): ProviderFailure {
-  if (stage !== 'verify') return failure;
-  if ('quota' in failure && failure.quota === 'daily') return { ...failure, error: verificationQuotaMessage };
-  if ('unavailable' in failure && failure.unavailable === true) return { ok: false, unavailable: true, retryable: false, error: verificationUnavailableMessage };
+  if (stage !== "verify") return failure;
+  if ("quota" in failure && failure.quota === "daily")
+    return { ...failure, error: verificationQuotaMessage };
+  if ("unavailable" in failure && failure.unavailable === true)
+    return {
+      ok: false,
+      unavailable: true,
+      retryable: false,
+      error: verificationUnavailableMessage,
+    };
   return failure;
 }
 
 /** Decode once; an optional second reading reuses the same source pixels. */
 function photoPayload(image: ImageBitmap, rotation = 0, detail = false, maxSize = 2600) {
   const scale = Math.min(1, maxSize / Math.max(image.width, image.height));
-  const canvas = document.createElement('canvas');
+  const canvas = document.createElement("canvas");
   const swap = rotation === 90 || rotation === 270;
   canvas.width = Math.round((swap ? image.height : image.width) * scale);
   canvas.height = Math.round((swap ? image.width : image.height) * scale);
-  const context = canvas.getContext('2d');
-  if (!context) throw new Error('Não foi possível abrir a imagem.');
-  context.translate(canvas.width / 2, canvas.height / 2); context.rotate(rotation * Math.PI / 180);
-  context.drawImage(image, -image.width * scale / 2, -image.height * scale / 2, image.width * scale, image.height * scale);
-  const data = canvas.toDataURL('image/jpeg', .92).split(',')[1]!;
-  if (data.length > 2800000) throw new Error('Foto muito grande. Recorte o documento e tente novamente.');
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Não foi possível abrir a imagem.");
+  context.translate(canvas.width / 2, canvas.height / 2);
+  context.rotate((rotation * Math.PI) / 180);
+  context.drawImage(
+    image,
+    (-image.width * scale) / 2,
+    (-image.height * scale) / 2,
+    image.width * scale,
+    image.height * scale,
+  );
+  const data = canvas.toDataURL("image/jpeg", 0.92).split(",")[1]!;
+  if (data.length > 2800000)
+    throw new Error("Foto muito grande. Recorte o documento e tente novamente.");
   if (detail) {
-    const crop = document.createElement('canvas'); crop.width = canvas.width; crop.height = Math.round(canvas.height * .65);
-    crop.getContext('2d')!.drawImage(canvas, 0, 0);
-    const zoom = crop.toDataURL('image/jpeg', .95).split(',')[1]!;
-    return { data, mimeType: 'image/jpeg' as const, ...(zoom.length <= 1000000 ? { detail: zoom } : {}) };
+    const crop = document.createElement("canvas");
+    crop.width = canvas.width;
+    crop.height = Math.round(canvas.height * 0.65);
+    crop.getContext("2d")!.drawImage(canvas, 0, 0);
+    const zoom = crop.toDataURL("image/jpeg", 0.95).split(",")[1]!;
+    return {
+      data,
+      mimeType: "image/jpeg" as const,
+      ...(zoom.length <= 1000000 ? { detail: zoom } : {}),
+    };
   }
-  return { data, mimeType: 'image/jpeg' as const };
+  return { data, mimeType: "image/jpeg" as const };
 }
 
-export async function readAiPhotos(files: File[], onResult: Parameters<typeof import('./photo-ocr').readPrePhotos>[1], onProgress: Parameters<typeof import('./photo-ocr').readPrePhotos>[2], signal?: AbortSignal, options: PhotoAiOptions = {}) {
+export async function readAiPhotos(
+  files: File[],
+  onResult: Parameters<typeof import("./photo-ocr").readPrePhotos>[1],
+  onProgress: Parameters<typeof import("./photo-ocr").readPrePhotos>[2],
+  signal?: AbortSignal,
+  options: PhotoAiOptions = {},
+) {
   if (signal?.aborted) return;
-  const preferLite = options.preferredModel === 'lite';
-  const sessionRequest = getSupabaseClient().then(client => client.auth.getSession());
+  const preferLite = options.preferredModel === "lite";
+  const sessionRequest = getSupabaseClient().then((client) => client.auth.getSession());
   let stopSessionWait = () => {};
-  const interruptedSession = new Promise<undefined>(resolve => { stopSessionWait = () => resolve(undefined); });
-  signal?.addEventListener('abort', stopSessionWait, { once: true });
+  const interruptedSession = new Promise<undefined>((resolve) => {
+    stopSessionWait = () => resolve(undefined);
+  });
+  signal?.addEventListener("abort", stopSessionWait, { once: true });
   if (signal?.aborted) stopSessionWait();
   let auth: Awaited<typeof sessionRequest> | undefined;
   try {
@@ -76,11 +136,13 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
     if (signal?.aborted) return;
     throw error;
   } finally {
-    signal?.removeEventListener('abort', stopSessionWait);
+    signal?.removeEventListener("abort", stopSessionWait);
   }
   if (signal?.aborted || !auth) return;
-  const { data: { session } } = auth;
-  if (!session) throw new Error('Entre na sua conta para ler fotos.');
+  const {
+    data: { session },
+  } = auth;
+  if (!session) throw new Error("Entre na sua conta para ler fotos.");
   const accessToken = session.access_token;
   const userId = session.user.id;
   const now = Date.now();
@@ -91,19 +153,30 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
     const result = getPhotoProviderBlock(scope) ?? temporaryBlocks.get(scope)?.result;
     return result && stageFailure(stage, result);
   };
-  const providerBlocks: Record<ProviderStage, ProviderFailure | undefined> = { full: stageBlock('full'), lite: stageBlock('lite'), verify: stageBlock('verify') };
+  const providerBlocks: Record<ProviderStage, ProviderFailure | undefined> = {
+    full: stageBlock("full"),
+    lite: stageBlock("lite"),
+    verify: stageBlock("verify"),
+  };
   const getBlockedError = () => {
     if (preferLite) return providerBlocks.lite;
     const full = providerBlocks.full;
     if (!full || !options.quotaFallback || !canUseLite(full)) return full;
     const lite = providerBlocks.lite;
-    return lite ? { ...lite, error: `${fullFailureReason(full)} Flash Lite: ${lite.error}` } : undefined;
+    return lite
+      ? { ...lite, error: `${fullFailureReason(full)} Flash Lite: ${lite.error}` }
+      : undefined;
   };
   const initialBlock = getBlockedError();
   if (initialBlock) {
     for (const index of files.keys()) {
       if (signal?.aborted) return;
-      onProgress?.(index, 'quota' in initialBlock && initialBlock.quota === 'daily' ? 'Cota diária esgotada · usando o leitor gratuito…' : 'Gemini temporariamente indisponível · usando o leitor gratuito…');
+      onProgress?.(
+        index,
+        "quota" in initialBlock && initialBlock.quota === "daily"
+          ? "Cota diária esgotada · usando o leitor gratuito…"
+          : "Gemini temporariamente indisponível · usando o leitor gratuito…",
+      );
       onResult(index, { error: initialBlock.error });
     }
     return;
@@ -112,16 +185,29 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
   let orientations: readonly PhotoAngle[] = options.orientations ?? [];
   if (!options.orientations) {
     try {
-      const { detectPhotoOrientations } = await import('./photo-orientation');
+      const { detectPhotoOrientations } = await import("./photo-orientation");
       if (signal?.aborted) return;
-      orientations = await detectPhotoOrientations(files, (index, message) => { if (!signal?.aborted) onProgress?.(index, message); }, signal);
-    } catch { /* An unavailable orientation worker must not prevent AI reading. */ }
+      orientations = await detectPhotoOrientations(
+        files,
+        (index, message) => {
+          if (!signal?.aborted) onProgress?.(index, message);
+        },
+        signal,
+      );
+    } catch {
+      /* An unavailable orientation worker must not prevent AI reading. */
+    }
   }
   if (signal?.aborted) return;
   const preparationMilliseconds = performance.now() - preparationStarted;
   const providerAwareRequest = async (input: Parameters<typeof requestAiPhoto>[0]) => {
     input.signal?.throwIfAborted();
-    const stage: ProviderStage = input.data.mode === 'verify' || input.data.mode === 'repair' ? 'verify' : input.data.mode === 'full-lite' ? 'lite' : 'full';
+    const stage: ProviderStage =
+      input.data.mode === "verify" || input.data.mode === "repair"
+        ? "verify"
+        : input.data.mode === "full-lite"
+          ? "lite"
+          : "full";
     const scope = providerScope(userId, stage);
     // A failure in one model must never block the other model's quota bucket.
     // Keep valid full data even when its optional verification is unavailable.
@@ -129,15 +215,32 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
     const result = await requestAiPhoto(input);
     input.signal?.throwIfAborted();
     if (!result.ok) rememberPhotoProviderBlock(scope, result);
-    if (!result.ok && isQuotaFailure(result) && options.quotaFallback && stage !== 'verify') {
+    if (!result.ok && isQuotaFailure(result) && options.quotaFallback && stage !== "verify") {
       // A known normal quota selects Lite without another normal request. A
       // Lite quota selects local OCR. Minute/unknown limits get a short pause;
       // daily metadata already expires at the provider's midnight.
-      if (!('quota' in result && result.quota === 'daily')) temporaryBlocks.set(scope, { until: Date.now() + 60000, result });
-      return providerBlocks[stage] = result;
+      if (!("quota" in result && result.quota === "daily"))
+        temporaryBlocks.set(scope, { until: Date.now() + 60000, result });
+      return (providerBlocks[stage] = result);
     }
-    if (!result.ok && 'unavailable' in result && result.unavailable === true) temporaryBlocks.set(scope, { until: Date.now() + providerCooldown, result: stageFailure(stage, { ok: false, unavailable: true, ...('tryLite' in result && result.tryLite ? { tryLite: true } : {}), retryable: false, error: 'Gemini temporariamente indisponível. A leitura local permanece disponível enquanto o serviço se recupera.' }) });
-    if (!result.ok && (('quota' in result && result.quota === 'daily') || ('unavailable' in result && result.unavailable === true))) return providerBlocks[stage] = stageFailure(stage, result);
+    if (!result.ok && "unavailable" in result && result.unavailable === true)
+      temporaryBlocks.set(scope, {
+        until: Date.now() + providerCooldown,
+        result: stageFailure(stage, {
+          ok: false,
+          unavailable: true,
+          ...("tryLite" in result && result.tryLite ? { tryLite: true } : {}),
+          retryable: false,
+          error:
+            "Gemini temporariamente indisponível. A leitura local permanece disponível enquanto o serviço se recupera.",
+        }),
+      });
+    if (
+      !result.ok &&
+      (("quota" in result && result.quota === "daily") ||
+        ("unavailable" in result && result.unavailable === true))
+    )
+      return (providerBlocks[stage] = stageFailure(stage, result));
     return result;
   };
   const worker = async () => {
@@ -151,74 +254,184 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
       let image: ImageBitmap | undefined;
       let checkImage: ImageBitmap | undefined;
       let completedPhoto: PhotoFields | undefined;
-      const progress = (message: string) => { if (!photoSignal.aborted) onProgress?.(index, message); };
+      const progress = (message: string) => {
+        if (!photoSignal.aborted) onProgress?.(index, message);
+      };
       try {
-        progress('Lendo todas as linhas e laboratórios…');
+        progress("Lendo todas as linhas e laboratórios…");
         image = await createImageBitmap(file);
-        if (photoSignal.aborted) throw new Error('Leitura interrompida.');
+        if (photoSignal.aborted) throw new Error("Leitura interrompida.");
         const payload = photoPayload(image, orientation);
-        let full = options.initialRead ? { ok: true as const, pre: options.initialRead, rotation: options.initialRead.imageRotation ?? 0, check: null, repair: null, text: '' } : await providerAwareRequest({ data: { ...payload, accessToken, mode: preferLite ? 'full-lite' : 'full' }, signal: photoSignal });
+        let full = options.initialRead
+          ? {
+              ok: true as const,
+              pre: options.initialRead,
+              rotation: options.initialRead.imageRotation ?? 0,
+              check: null,
+              repair: null,
+              text: "",
+            }
+          : await providerAwareRequest({
+              data: { ...payload, accessToken, mode: preferLite ? "full-lite" : "full" },
+              signal: photoSignal,
+            });
         let usedLite = preferLite;
-        let normalFailure = '';
-        if (!preferLite && options.quotaFallback && !full.ok && canUseLite(full) && !photoSignal.aborted) {
-          usedLite = true; normalFailure = fullFailureReason(full);
-          progress(isQuotaFailure(full) ? 'Cota do Gemini normal atingida · conferindo pelo Flash Lite…' : 'Gemini normal indisponível · conferindo pelo Flash Lite…');
-          full = await providerAwareRequest({ data: { ...payload, accessToken, mode: 'full-lite' }, signal: photoSignal });
+        let normalFailure = "";
+        if (
+          !preferLite &&
+          options.quotaFallback &&
+          !full.ok &&
+          canUseLite(full) &&
+          !photoSignal.aborted
+        ) {
+          usedLite = true;
+          normalFailure = fullFailureReason(full);
+          progress(
+            isQuotaFailure(full)
+              ? "Cota do Gemini normal atingida · conferindo pelo Flash Lite…"
+              : "Gemini normal indisponível · conferindo pelo Flash Lite…",
+          );
+          full = await providerAwareRequest({
+            data: { ...payload, accessToken, mode: "full-lite" },
+            signal: photoSignal,
+          });
         }
-        if (full.ok) completedPhoto = { ...full.pre, imageRotation: ((orientation + full.rotation) % 360) as PhotoAngle, aiReader: full.pre.aiReader ?? (usedLite ? 'lite' : 'normal'), verification: { status: 'single', checkedFields: 0, conflicts: 0 } };
-        if (photoSignal.aborted) throw new Error('Leitura interrompida.');
-        if (!full.ok) { if (!signal?.aborted) onResult(index, { error: normalFailure ? `${normalFailure} Flash Lite: ${full.error}` : full.error, ...('fallback' in full && full.fallback === false ? { fallback: false } : {}) }); continue; }
+        if (full.ok)
+          completedPhoto = {
+            ...full.pre,
+            imageRotation: ((orientation + full.rotation) % 360) as PhotoAngle,
+            aiReader: full.pre.aiReader ?? (usedLite ? "lite" : "normal"),
+            verification: { status: "single", checkedFields: 0, conflicts: 0 },
+          };
+        if (photoSignal.aborted) throw new Error("Leitura interrompida.");
+        if (!full.ok) {
+          if (!signal?.aborted)
+            onResult(index, {
+              error: normalFailure ? `${normalFailure} Flash Lite: ${full.error}` : full.error,
+              ...("fallback" in full && full.fallback === false ? { fallback: false } : {}),
+            });
+          continue;
+        }
         let pre = completedPhoto!;
         let numbers: NumericPhotoRead | undefined;
-        const bandsRequested = !options.singlePass && needsBandReading(pre) && (!options.initialRead || options.initialRead.imageRotation !== undefined);
+        const bandsRequested =
+          !options.singlePass &&
+          needsBandReading(pre) &&
+          (!options.initialRead || options.initialRead.imageRotation !== undefined);
         if (bandsRequested) {
           options.onProvisional?.(index, pre);
-          progress('Confirmando a posição da tabela antes de separar as faixas…');
+          progress("Confirmando a posição da tabela antes de separar as faixas…");
           // Model rotation can be 90/270 reversed. Confirm only the printed
           // heading on small local thumbnails, without a full local table read.
           let confirmedAngle: PhotoAngle | undefined;
-          const { detectPhotoOrientations } = await import('./photo-orientation');
-          await detectPhotoOrientations([file], (_index, message) => progress(message), photoSignal, (_index, angle) => { confirmedAngle = angle; });
+          const { detectPhotoOrientations } = await import("./photo-orientation");
+          await detectPhotoOrientations(
+            [file],
+            (_index, message) => progress(message),
+            photoSignal,
+            (_index, angle) => {
+              confirmedAngle = angle;
+            },
+          );
           photoSignal.throwIfAborted();
           if (confirmedAngle !== undefined) pre = { ...pre, imageRotation: confirmedAngle };
-          progress('Relendo a tabela em faixas ampliadas, sem misturar as linhas…');
-          const bandRead = await providerAwareRequest({ data: { ...photoBandPayload(image, pre.imageRotation ?? 0, photoSignal), accessToken, mode: 'full-lite' }, signal: photoSignal });
+          progress("Relendo a tabela em faixas ampliadas, sem misturar as linhas…");
+          const bandRead = await providerAwareRequest({
+            data: {
+              ...photoBandPayload(image, pre.imageRotation ?? 0, photoSignal),
+              accessToken,
+              mode: "full-lite",
+            },
+            signal: photoSignal,
+          });
           photoSignal.throwIfAborted();
           if (bandRead.ok) pre = applyBandRead(pre, bandRead.pre);
-          else pre = { ...pre, headerReview: [...(pre.headerReview ?? []), `Leitura por faixas indisponível: ${bandRead.error}`] };
+          else
+            pre = {
+              ...pre,
+              headerReview: [
+                ...(pre.headerReview ?? []),
+                `Leitura por faixas indisponível: ${bandRead.error}`,
+              ],
+            };
           completedPhoto = pre;
         }
-        if (!bandsRequested && options.numericCheck && pre.kind === 'pre') {
+        if (!bandsRequested && options.numericCheck && pre.kind === "pre") {
           options.onProvisional?.(index, pre);
-          progress('Conferindo CTC, NF e volumes diretamente na tabela…');
+          progress("Conferindo CTC, NF e volumes diretamente na tabela…");
           const numericSignal = AbortSignal.any([photoSignal, AbortSignal.timeout(9000)]);
           try {
-            numbers = await numericWithinSignal(options.numericCheck(file, ((orientation + full.rotation) % 360) as PhotoAngle, numericSignal, pre), numericSignal);
+            numbers = await numericWithinSignal(
+              options.numericCheck(
+                file,
+                ((orientation + full.rotation) % 360) as PhotoAngle,
+                numericSignal,
+                pre,
+              ),
+              numericSignal,
+            );
             numericSignal.throwIfAborted();
             pre = checkPhotoNumbers(pre, numbers);
           } catch (error) {
-            console.warn(`numeric_ocr_failed ${error instanceof Error ? error.name : 'unknown'} timeout=${numericSignal.aborted}`);
+            console.warn(
+              `numeric_ocr_failed ${error instanceof Error ? error.name : "unknown"} timeout=${numericSignal.aborted}`,
+            );
             photoSignal.throwIfAborted();
-            pre = { ...pre, headerReview: [...(pre.headerReview ?? []), 'A conferência local dos números não terminou. Confira CTCs, NFs e volumes na foto.'] };
+            pre = {
+              ...pre,
+              headerReview: [
+                ...(pre.headerReview ?? []),
+                "A conferência local dos números não terminou. Confira CTCs, NFs e volumes na foto.",
+              ],
+            };
           }
           completedPhoto = pre;
         }
         if (!bandsRequested && !options.singlePass && needsPhotoVerification(pre)) {
-          if (!providerBlocks.verify) progress('Conferindo campos sinalizados em uma segunda leitura…');
+          if (!providerBlocks.verify)
+            progress("Conferindo campos sinalizados em uma segunda leitura…");
           // An unread local cell is a review notice, not evidence that the AI
           // is wrong. Reserve automatic extra requests for actual differences;
           // manual rereading still includes every selected uncertainty.
-          const selection = options.initialRead ? pre : { ...pre,
-            headerReview: (pre.headerReview ?? []).filter(note => !/não confirmou todas as linhas|recuperado do código de barras/.test(note)),
-            documents: pre.documents.map(row => ({ ...row, review: (row.review ?? []).filter(note => !/sem confirmação local|corrigido por duas leituras locais/.test(note)) })),
-          };
+          const selection = options.initialRead
+            ? pre
+            : {
+                ...pre,
+                headerReview: (pre.headerReview ?? []).filter(
+                  (note) =>
+                    !/não confirmou todas as linhas|recuperado do código de barras/.test(note),
+                ),
+                documents: pre.documents.map((row) => ({
+                  ...row,
+                  review: (row.review ?? []).filter(
+                    (note) =>
+                      !/sem confirmação local|corrigido por duas leituras locais/.test(note),
+                  ),
+                })),
+              };
           const plan = options.selective ? photoRepairPlan(selection) : null;
           if (plan === null || plan.headers.length || plan.rows.length) {
             options.onProvisional?.(index, pre);
             if (numbers?.uprightImage) checkImage = await createImageBitmap(numbers.uprightImage);
-            const check = providerBlocks.verify ?? await providerAwareRequest({ data: { ...photoPayload(checkImage ?? image, checkImage ? 0 : numbers?.angle ?? (orientation + full.rotation) % 360, full.pre.kind === 'pre'), accessToken, mode: plan ? 'repair' : 'verify', ...(plan ? { repairPlan: plan } : {}) }, signal: photoSignal });
-            if (photoSignal.aborted) throw new Error('Leitura interrompida.');
-            pre = plan ? applyPhotoRepair(pre, plan, check.ok ? check.repair : null, numbers?.pre) : reconcilePhotoRead(pre, check.ok ? check.check : null);
+            const check =
+              providerBlocks.verify ??
+              (await providerAwareRequest({
+                data: {
+                  ...photoPayload(
+                    checkImage ?? image,
+                    checkImage ? 0 : (numbers?.angle ?? (orientation + full.rotation) % 360),
+                    full.pre.kind === "pre",
+                  ),
+                  accessToken,
+                  mode: plan ? "repair" : "verify",
+                  ...(plan ? { repairPlan: plan } : {}),
+                },
+                signal: photoSignal,
+              }));
+            if (photoSignal.aborted) throw new Error("Leitura interrompida.");
+            pre = plan
+              ? applyPhotoRepair(pre, plan, check.ok ? check.repair : null, numbers?.pre)
+              : reconcilePhotoRead(pre, check.ok ? check.check : null);
             if (check.ok && check.pre.aiReader) pre.aiReader = check.pre.aiReader;
             // A later model answer cannot undo the independent numeric evidence.
             if (numbers) pre = checkPhotoNumbers(pre, numbers);
@@ -226,13 +439,44 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
             if (!check.ok) pre.headerReview = [...(pre.headerReview ?? []), check.error];
           }
         }
-        if (!signal?.aborted) onResult(index, { pre, text: JSON.stringify(pre, null, 2), milliseconds: performance.now() - start });
+        if (!signal?.aborted)
+          onResult(index, {
+            pre,
+            text: JSON.stringify(pre, null, 2),
+            milliseconds: performance.now() - start,
+          });
       } catch (error) {
         if (!signal?.aborted) {
           if (completedPhoto) {
-            const pre: PhotoFields = { ...completedPhoto, headerReview: [...(completedPhoto.headerReview ?? []), 'A conferência adicional não terminou. Confira os campos sinalizados antes de cadastrar.'], verification: { status: 'review', checkedFields: completedPhoto.verification?.checkedFields ?? 0, conflicts: completedPhoto.verification?.conflicts ?? 0 } };
-            onResult(index, { pre, text: JSON.stringify(pre, null, 2), milliseconds: performance.now() - start });
-          } else onResult(index, { error: deadline.aborted ? 'Esta foto excedeu o tempo de leitura. Tente novamente só ela ou envie um recorte mais próximo.' : error instanceof Error && ['Não foi possível abrir a imagem.', 'Foto muito grande. Recorte o documento e tente novamente.'].includes(error.message) ? error.message : 'Não foi possível concluir a leitura por IA desta foto. A leitura local pode ser usada.' });
+            const pre: PhotoFields = {
+              ...completedPhoto,
+              headerReview: [
+                ...(completedPhoto.headerReview ?? []),
+                "A conferência adicional não terminou. Confira os campos sinalizados antes de cadastrar.",
+              ],
+              verification: {
+                status: "review",
+                checkedFields: completedPhoto.verification?.checkedFields ?? 0,
+                conflicts: completedPhoto.verification?.conflicts ?? 0,
+              },
+            };
+            onResult(index, {
+              pre,
+              text: JSON.stringify(pre, null, 2),
+              milliseconds: performance.now() - start,
+            });
+          } else
+            onResult(index, {
+              error: deadline.aborted
+                ? "Esta foto excedeu o tempo de leitura. Tente novamente só ela ou envie um recorte mais próximo."
+                : error instanceof Error &&
+                    [
+                      "Não foi possível abrir a imagem.",
+                      "Foto muito grande. Recorte o documento e tente novamente.",
+                    ].includes(error.message)
+                  ? error.message
+                  : "Não foi possível concluir a leitura por IA desta foto. A leitura local pode ser usada.",
+            });
         }
       } finally {
         checkImage?.close();
@@ -240,7 +484,11 @@ export async function readAiPhotos(files: File[], onResult: Parameters<typeof im
         // Resolve every waiting slot once, with its original index. Already
         // running workers retain their own result and can finish normally.
         const blocked = getBlockedError();
-        while (blocked && next < files.length && !signal?.aborted) onResult(next++, { error: blocked.error, ...('fallback' in blocked && blocked.fallback === false ? { fallback: false } : {}) });
+        while (blocked && next < files.length && !signal?.aborted)
+          onResult(next++, {
+            error: blocked.error,
+            ...("fallback" in blocked && blocked.fallback === false ? { fallback: false } : {}),
+          });
       }
     }
   };

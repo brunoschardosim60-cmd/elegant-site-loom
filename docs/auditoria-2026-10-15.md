@@ -1,5 +1,7 @@
 # Auditoria do confere. — 15/10/2026
 
+**Atualização posterior:** a dívida de lint registrada nesta auditoria foi resolvida. Veja a seção 8 para o resultado mais recente.
+
 Base examinada: `f5409b6`, branch `codex/ocr-image-reading`. O Git estava limpo no início. Na conclusão inicial, as correções ficaram **locais, sem commit, push, deploy ou migração remota**. A publicação foi autorizada posteriormente pelo usuário, incluindo os ajustes complementares abaixo. Nenhum cadastro real foi criado, editado ou excluído.
 
 ## 1. Arquitetura e funcionamento
@@ -108,3 +110,13 @@ As estimativas são indicativas e não incluem espera por acesso externo. Não f
 - Reproduzido no navegador: exclusão movia a página de y=2000 para y=482. Após a correção, ficou em y=1811, com ajuste natural pelo conteúdo removido; cancelamento preservou exatamente a posição. No computador, o painel manteve scrollTop=837. Salvar edição na prévia manteve a página em y=1890 e o scanner fora da área visível.
 - Validação final do pacote: **751 testes em 55 arquivos aprovados**, tipos sem erros, build de produção aprovado e `git diff --check` sem erros. A dívida de lint registrada acima permanece.
 - A publicação foi autorizada explicitamente pelo usuário; o resultado da implantação e a conferência do site publicado são informados na conversa. Nenhum registro de teste será cadastrado em produção.
+
+## 8. Encerramento da dívida de lint
+
+- `npm run lint` aprovado com **zero erros e zero avisos**. O comando agora usa `--max-warnings 0`, preservando as regras existentes e exigindo que os avisos também sejam corrigidos.
+- Formatação padronizada e quebras de linha LF protegidas por `.gitattributes` e Prettier. Arquivos gerados e prévias locais não versionadas ficam fora da verificação da aplicação.
+- Helpers de estilos e contextos separados dos componentes React. Os módulos públicos continuam nos mesmos caminhos, reexportando os componentes, hooks, tipos e variantes para preservar os imports existentes.
+- Removidos `any` dos testes afetados com tipos de RPC e eventos de auditoria. Regex simplificadas; limpeza dos caracteres de controle do PDF mantém o comportamento anterior.
+- Avisos de hooks resolvidos sem desativar regras. O pré inicialmente informado seleciona o novo rascunho pelo índice correto e preserva os anteriores; um novo teste cobre esse fluxo.
+- Regressão: **754 testes em 56 arquivos aprovados**, TypeScript sem erros, build de produção aprovado e `git diff --check` sem erros. Novos testes cobrem também os contextos públicos de formulário e menu após a separação dos módulos.
+- As limitações externas da auditoria (e-mails reais, IA, aparelhos físicos e exportação real de vários dias) continuam separadas desta limpeza técnica.

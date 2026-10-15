@@ -1,30 +1,186 @@
-import { useState } from 'react';
-import { CheckCheck, ChevronLeft, ChevronRight, Clock3, History, Search } from 'lucide-react';
-import { Button } from './ui/button';
-import { conferenceTimestamp, type TrackingRow, type TrackingStatus } from '@/lib/ctc-tracking';
-import { formatManifestDate, manifestAgeLabel, manifestReferenceDate, normalizeIssueDate } from '@/lib/manifest-date';
+import { useState } from "react";
+import { CheckCheck, ChevronLeft, ChevronRight, Clock3, History, Search } from "lucide-react";
+import { Button } from "./ui/button";
+import { conferenceTimestamp, type TrackingRow, type TrackingStatus } from "@/lib/ctc-tracking";
+import {
+  formatManifestDate,
+  manifestAgeLabel,
+  manifestReferenceDate,
+  normalizeIssueDate,
+} from "@/lib/manifest-date";
 
 const pageSize = 50;
-export function CtcTracking({ rows, status, onStatusChange, scope, now, onAuditManifest }: {
-  rows: TrackingRow[]; status: TrackingStatus; onStatusChange: (value: TrackingStatus) => void; scope: string; now: string; onAuditManifest?: ((id: string) => void) | undefined;
+export function CtcTracking({
+  rows,
+  status,
+  onStatusChange,
+  scope,
+  now,
+  onAuditManifest,
+}: {
+  rows: TrackingRow[];
+  status: TrackingStatus;
+  onStatusChange: (value: TrackingStatus) => void;
+  scope: string;
+  now: string;
+  onAuditManifest?: ((id: string) => void) | undefined;
 }) {
   const [pagination, setPagination] = useState({ scope, page: 0 });
   const pages = Math.max(1, Math.ceil(rows.length / pageSize));
   const page = pagination.scope === scope ? Math.min(pagination.page, pages - 1) : 0;
   const visible = rows.slice(page * pageSize, (page + 1) * pageSize);
-  return <section className="ctc-tracking" aria-label="Consulta de CTCs">
-    <div className="tracking-tools"><label>Status do CTC<select className="filter-select" aria-label="Status do CTC" value={status} onChange={event => onStatusChange(event.target.value as TrackingStatus)}><option value="all">Todos os status</option><option value="pending">Pendentes</option><option value="received">Conferidos</option></select></label><p role="status">{rows.length} CTC{rows.length === 1 ? '' : 's'} encontrado{rows.length === 1 ? '' : 's'}<span>Horários de Brasília · consulta dos cadastros da equipe</span></p></div>
-    {visible.length ? <div className="manifest-card tracking-table-wrap"><table className="document-table tracking-table" aria-label="Rastreamento de CTCs"><thead><tr><th>CTC / Nota fiscal</th><th>Pré / Motorista</th><th>Vols.</th><th>Status</th><th>Conferência</th>{onAuditManifest && <th><span className="sr-only">Histórico</span></th>}</tr></thead><tbody>{visible.map(({ manifest, doc }) => {
-      const timestamp = doc.received ? conferenceTimestamp(doc.receivedAt) : undefined;
-      return <tr key={`${manifest.id}:${doc.id}`} className={doc.received ? 'received-row' : ''}>
-        <td data-label="CTC / Nota fiscal" className="ctc-number"><strong>{doc.ctc}</strong><span className="tracking-detail">NF {doc.nf || 'não informada'}</span>{doc.client && <span className="tracking-detail">{doc.client}</span>}{doc.recipient && <span className="tracking-detail">Para: {doc.recipient}</span>}</td>
-        <td data-label="Pré / Motorista"><strong>{manifest.id}</strong><span className="tracking-detail">{manifest.driver} · <span className="plate">{manifest.plate}</span></span><span className="tracking-detail">{normalizeIssueDate(manifest.issueDate ?? '') ? /^\d{8,12}$/.test(manifest.id) ? 'Manifestado em' : 'Emissão' : 'Cadastro'} {formatManifestDate(manifestReferenceDate(manifest))}</span></td>
-        <td data-label="Volumes">{doc.volumes}</td>
-        <td data-label="Status"><span className={`status-badge ${doc.received ? 'badge-success' : 'badge-pending'}`}>{doc.received ? <CheckCheck size={12} /> : <Clock3 size={12} />}{doc.received ? 'Conferido' : 'Pendente'}</span>{!doc.received && <span className="tracking-detail">{manifestAgeLabel(manifest, now)}</span>}</td>
-        <td data-label="Conferência">{doc.received ? timestamp ? <time dateTime={doc.receivedAt}>{timestamp}</time> : <span className="tracking-detail">Horário não registrado</span> : <span className="tracking-detail">Aguardando conferência</span>}</td>
-        {onAuditManifest && <td data-label="Histórico"><Button type="button" variant="ghost" size="icon" className="document-action" aria-label={`Histórico do CTC ${doc.ctc}`} title="Consultar histórico do pré" onClick={() => onAuditManifest(manifest.id)}><History size={15} /></Button></td>}
-      </tr>;
-    })}</tbody></table></div> : <div className="empty-state"><Search /><h3>Nenhum CTC encontrado</h3><p className="text-xs mt-2">Confira a busca e os filtros. A consulta inclui prés abertos e finalizados.</p></div>}
-    {rows.length > pageSize && <nav className="tracking-pagination" aria-label="Páginas do rastreamento"><span>{page * pageSize + 1}–{Math.min((page + 1) * pageSize, rows.length)} de {rows.length} CTCs</span><Button type="button" variant="outline" size="sm" disabled={page === 0} onClick={() => setPagination({ scope, page: page - 1 })}><ChevronLeft size={14} />Anterior</Button><span>Página {page + 1} de {pages}</span><Button type="button" variant="outline" size="sm" disabled={page + 1 >= pages} onClick={() => setPagination({ scope, page: page + 1 })}>Próxima<ChevronRight size={14} /></Button></nav>}
-  </section>;
+  return (
+    <section className="ctc-tracking" aria-label="Consulta de CTCs">
+      <div className="tracking-tools">
+        <label>
+          Status do CTC
+          <select
+            className="filter-select"
+            aria-label="Status do CTC"
+            value={status}
+            onChange={(event) => onStatusChange(event.target.value as TrackingStatus)}
+          >
+            <option value="all">Todos os status</option>
+            <option value="pending">Pendentes</option>
+            <option value="received">Conferidos</option>
+          </select>
+        </label>
+        <p role="status">
+          {rows.length} CTC{rows.length === 1 ? "" : "s"} encontrado{rows.length === 1 ? "" : "s"}
+          <span>Horários de Brasília · consulta dos cadastros da equipe</span>
+        </p>
+      </div>
+      {visible.length ? (
+        <div className="manifest-card tracking-table-wrap">
+          <table className="document-table tracking-table" aria-label="Rastreamento de CTCs">
+            <thead>
+              <tr>
+                <th>CTC / Nota fiscal</th>
+                <th>Pré / Motorista</th>
+                <th>Vols.</th>
+                <th>Status</th>
+                <th>Conferência</th>
+                {onAuditManifest && (
+                  <th>
+                    <span className="sr-only">Histórico</span>
+                  </th>
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map(({ manifest, doc }) => {
+                const timestamp = doc.received ? conferenceTimestamp(doc.receivedAt) : undefined;
+                return (
+                  <tr
+                    key={`${manifest.id}:${doc.id}`}
+                    className={doc.received ? "received-row" : ""}
+                  >
+                    <td data-label="CTC / Nota fiscal" className="ctc-number">
+                      <strong>{doc.ctc}</strong>
+                      <span className="tracking-detail">NF {doc.nf || "não informada"}</span>
+                      {doc.client && <span className="tracking-detail">{doc.client}</span>}
+                      {doc.recipient && (
+                        <span className="tracking-detail">Para: {doc.recipient}</span>
+                      )}
+                    </td>
+                    <td data-label="Pré / Motorista">
+                      <strong>{manifest.id}</strong>
+                      <span className="tracking-detail">
+                        {manifest.driver} · <span className="plate">{manifest.plate}</span>
+                      </span>
+                      <span className="tracking-detail">
+                        {normalizeIssueDate(manifest.issueDate ?? "")
+                          ? /^\d{8,12}$/.test(manifest.id)
+                            ? "Manifestado em"
+                            : "Emissão"
+                          : "Cadastro"}{" "}
+                        {formatManifestDate(manifestReferenceDate(manifest))}
+                      </span>
+                    </td>
+                    <td data-label="Volumes">{doc.volumes}</td>
+                    <td data-label="Status">
+                      <span
+                        className={`status-badge ${doc.received ? "badge-success" : "badge-pending"}`}
+                      >
+                        {doc.received ? <CheckCheck size={12} /> : <Clock3 size={12} />}
+                        {doc.received ? "Conferido" : "Pendente"}
+                      </span>
+                      {!doc.received && (
+                        <span className="tracking-detail">{manifestAgeLabel(manifest, now)}</span>
+                      )}
+                    </td>
+                    <td data-label="Conferência">
+                      {doc.received ? (
+                        timestamp ? (
+                          <time dateTime={doc.receivedAt}>{timestamp}</time>
+                        ) : (
+                          <span className="tracking-detail">Horário não registrado</span>
+                        )
+                      ) : (
+                        <span className="tracking-detail">Aguardando conferência</span>
+                      )}
+                    </td>
+                    {onAuditManifest && (
+                      <td data-label="Histórico">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="document-action"
+                          aria-label={`Histórico do CTC ${doc.ctc}`}
+                          title="Consultar histórico do pré"
+                          onClick={() => onAuditManifest(manifest.id)}
+                        >
+                          <History size={15} />
+                        </Button>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="empty-state">
+          <Search />
+          <h3>Nenhum CTC encontrado</h3>
+          <p className="text-xs mt-2">
+            Confira a busca e os filtros. A consulta inclui prés abertos e finalizados.
+          </p>
+        </div>
+      )}
+      {rows.length > pageSize && (
+        <nav className="tracking-pagination" aria-label="Páginas do rastreamento">
+          <span>
+            {page * pageSize + 1}–{Math.min((page + 1) * pageSize, rows.length)} de {rows.length}{" "}
+            CTCs
+          </span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={page === 0}
+            onClick={() => setPagination({ scope, page: page - 1 })}
+          >
+            <ChevronLeft size={14} />
+            Anterior
+          </Button>
+          <span>
+            Página {page + 1} de {pages}
+          </span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={page + 1 >= pages}
+            onClick={() => setPagination({ scope, page: page + 1 })}
+          >
+            Próxima
+            <ChevronRight size={14} />
+          </Button>
+        </nav>
+      )}
+    </section>
+  );
 }
