@@ -67,6 +67,7 @@ beforeAll(async () => {
     "20261014010000_manifest_corrections.sql",
     "20261014020000_ctc_identity_conflicts.sql",
     "20261014030000_export_manifest_ids.sql",
+    "20261015090000_remanifested_routes.sql",
   ])
     await db.exec(await readFile(`supabase/migrations/${migration}`, "utf8"));
   server = createServer(async (request, response) => {
@@ -338,4 +339,47 @@ it("persists a fifty-manifest five-day spreadsheet while another client receives
     "select count(*)::int total from public.conference_audit where action='pre_added'",
   );
   expect(count.rows[0]!.total).toBe(50);
+});
+
+it("three clients converge when a route is remanifested while two unrelated CTCs are scanned", async () => {
+  const original = { ...pre(9), id: "06059990", issueDate: "2026-10-13" };
+  const setup = (await rpc(1, "get_conference_team")).data.data as ConferenceState;
+  expect(
+    (
+      await rpc(1, "save_team_conference", {
+        base_data: setup,
+        next_data: { ...setup, manifests: [...setup.manifests, original] },
+      })
+    ).error,
+  ).toBeNull();
+  const { sessions, views } = await clients();
+  const next = structuredClone(views[0]!.state);
+  next.manifests.push({
+    ...pre(9),
+    id: "06059991",
+    issueDate: "2026-10-15",
+    driver: "OUTRO MOTORISTA",
+    documents: pre(9).documents.map((doc) => ({ ...doc, id: `new-${doc.id}` })),
+  });
+  sessions[0]!.change(next);
+  sessions[1]!.change(receive(views[1]!.state, 0));
+  sessions[2]!.change(receive(views[2]!.state, 1));
+  await settle(sessions, views);
+  expect(peak).toBe(3);
+  expect(
+    views.every((view) => !view.error && !view.pending && view.state.manifests.length === 3),
+  ).toBe(true);
+  expect(views[0]!.state).toEqual(views[2]!.state);
+  expect(
+    views[0]!.state.manifests
+      .filter((m) => m.id.startsWith("060599"))
+      .every((m) => m.documents.every((doc) => !doc.received)),
+  ).toBe(true);
+  const stale = structuredClone(setup);
+  stale.manifests.push(original);
+  const bad = structuredClone(stale);
+  bad.manifests[1]!.documents[0]!.received = true;
+  expect(
+    (await rpc(3, "save_team_conference", { base_data: stale, next_data: bad })).error?.message,
+  ).toContain("CONFERENCE_CONFLICT");
 });

@@ -1,5 +1,10 @@
 import { expect, it } from "vitest";
-import { parseLuft108, validateSpreadsheetZip, type SheetCell } from "@/lib/luft-spreadsheet";
+import {
+  findLuftCtcOverlaps,
+  parseLuft108,
+  validateSpreadsheetZip,
+  type SheetCell,
+} from "@/lib/luft-spreadsheet";
 import { applyImports } from "@/lib/manifest-import";
 
 const headers = [
@@ -76,10 +81,31 @@ it("treats MDF-e fanout as repetition only when all operational values match", (
   });
   expect(parse(row(), row({ Volumes: 3 })).errors[0]).toContain("dados diferentes");
 });
-it("rejects the same CTC across manifests rather than creating two receipt targets", () => {
-  expect(parse(row(), row({ Manifesto: "06052234" })).errors[0]).toContain(
-    "aparece nos manifestos",
+it("preserves both complete dated route attempts for one CTC", () => {
+  const result = parse(
+    row(),
+    row({ Manifesto: "06052234", Dataemissao: "15/10/2026", NF: "456", Volumes: 8 }),
+    row({
+      Manifesto: "06052234",
+      Dataemissao: "15/10/2026",
+      CTRC: "0000000002",
+      NF: "789",
+      Volumes: 3,
+    }),
   );
+  expect(result.errors).toEqual([]);
+  expect(result.drafts.map((draft) => draft.totalVolumes)).toEqual([2, 11]);
+  expect(findLuftCtcOverlaps(result.drafts)).toEqual([]);
+  expect(applyImports([], result.drafts, "2026-10-15T12:00:00Z").ok).toBe(true);
+  expect(applyImports([], [result.drafts[1]!], "2026-10-15T12:00:00Z").ok).toBe(true);
+  expect(findLuftCtcOverlaps(parse(row(), row({ NF: "456" })).drafts)).toEqual([]);
+});
+it("still requires resolving two manifests for the same CTC on the same day", () => {
+  const result = parse(row(), row({ Manifesto: "06052234" }));
+  expect(findLuftCtcOverlaps(result.drafts)).toEqual([
+    { ctc: "0000000001", manifestIds: ["06052233", "06052234"] },
+  ]);
+  expect(applyImports([], result.drafts, "now").ok).toBe(false);
 });
 it.each([
   ["CTRC", 1],

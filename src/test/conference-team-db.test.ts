@@ -68,6 +68,13 @@ beforeAll(async () => {
   await db.exec(
     await readFile("supabase/migrations/20261014030000_export_manifest_ids.sql", "utf8"),
   );
+  await db.exec(
+    await readFile("supabase/migrations/20261015090000_remanifested_routes.sql", "utf8"),
+  );
+  // Reapplying the deployment must not duplicate the concurrency guard.
+  await db.exec(
+    await readFile("supabase/migrations/20261015090000_remanifested_routes.sql", "utf8"),
+  );
 }, 30000);
 afterAll(async () => {
   await db?.close();
@@ -355,4 +362,38 @@ it("saves literal exported manifest IDs and rejects simultaneous duplicates with
   const bad = structuredClone(saved.data);
   bad.manifests.push(make("MANIFESTO-ERRADO", "0088888803"));
   await expect(save(saved.data, bad)).rejects.toThrow("CONFERENCE_INVALID");
+});
+
+it("preserves remanifestations across drivers and rejects a stale receipt on the previous route", async () => {
+  await as(1);
+  const base = (await call("get_conference_team")).data;
+  const first = { ...make("DI006059991", "0077777701"), issueDate: "2026-10-13" };
+  const old = await save(base, { ...base, manifests: [...base.manifests, first] });
+  const later = {
+    ...make("06059992", "0077777701"),
+    issueDate: "2026-10-15",
+    driver: "Outro motorista",
+    plate: "XYZ1A23",
+  };
+  await as(2);
+  const next = await save(old.data, { ...old.data, manifests: [...old.data.manifests, later] });
+  expect(
+    next.data.manifests.filter((m) => m.documents.some((d) => d.ctc === "0077777701")),
+  ).toHaveLength(2);
+  const stale = structuredClone(old.data);
+  stale.manifests.find((m) => m.id === first.id)!.documents[0]!.received = true;
+  await as(3);
+  await expect(save(old.data, stale)).rejects.toThrow("CONFERENCE_CONFLICT");
+  const receipt = structuredClone(next.data);
+  receipt.manifests.find((m) => m.id === later.id)!.documents[0]!.received = true;
+  const confirmed = await save(next.data, receipt);
+  expect(confirmed.data.manifests.find((m) => m.id === first.id)!.documents[0]!.received).toBe(
+    false,
+  );
+  expect(
+    confirmed.data.manifests.find((m) => m.id === later.id)!.documents[0]!.receivedAt,
+  ).toBeTruthy();
+  const duplicate = structuredClone(confirmed.data);
+  duplicate.manifests.push({ ...make("06059993", "0077777701"), issueDate: "2026-10-15" });
+  await expect(save(confirmed.data, duplicate)).rejects.toThrow("CONFERENCE_DUPLICATE");
 });

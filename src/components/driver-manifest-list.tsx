@@ -13,11 +13,13 @@ import {
   Truck,
   Undo2,
   UserRound,
+  ArrowRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { reviewManifestTotals } from "@/lib/manifest-review";
 import type { Manifest } from "@/lib/conference";
+import { isPendingDocument } from "@/lib/conference-routes";
 import {
   formatManifestDate,
   manifestAgeLabel,
@@ -51,7 +53,7 @@ const countVolumes = (manifests: Manifest[], pendingOnly = false) =>
     (total, manifest) =>
       total +
       manifest.documents.reduce(
-        (sum, doc) => sum + (!pendingOnly || !doc.received ? doc.volumes : 0),
+        (sum, doc) => sum + (!pendingOnly || isPendingDocument(doc) ? doc.volumes : 0),
         0,
       ),
     0,
@@ -122,7 +124,7 @@ export function DriverManifestList({
       </div>
       {[...groups.entries()].map(([key, group]) => {
         const pendingCount = group.manifests.reduce(
-          (sum, manifest) => sum + manifest.documents.filter((doc) => !doc.received).length,
+          (sum, manifest) => sum + manifest.documents.filter(isPendingDocument).length,
           0,
         );
         const documentCount = group.manifests.reduce(
@@ -162,15 +164,15 @@ export function DriverManifestList({
                       ? "CTC pendente"
                       : "CTCs pendentes"
                     : documentCount === 1
-                      ? "CTC conferido"
-                      : "CTCs conferidos"}
+                      ? "CTC encerrado"
+                      : "CTCs encerrados"}
                 </span>
                 <span>
                   <Package size={13} />
                   <strong>
                     {pendingCount ? pendingVolumes : countVolumes(group.manifests)}
                   </strong>{" "}
-                  {pendingCount ? "vols. a conferir" : "vols. conferidos"}
+                  {pendingCount ? "vols. a conferir" : "vols. encerrados"}
                 </span>
               </div>
               <Button
@@ -215,7 +217,10 @@ export function DriverManifestList({
                     manifest,
                   );
                   const count = manifest.documents.filter((doc) => doc.received).length;
-                  const remaining = manifest.documents.length - count;
+                  const rerouted = manifest.documents.filter(
+                    (doc) => !doc.received && doc.reroutedTo,
+                  ).length;
+                  const remaining = manifest.documents.filter(isPendingDocument).length;
                   const pendingVols = countVolumes([manifest], true);
                   const days = age(manifest);
                   const noun = manifestNoun(manifest.id);
@@ -227,7 +232,7 @@ export function DriverManifestList({
                   const open = expanded === manifest.id;
                   const tableId = `driver-documents-${manifest.id}`;
                   const percent = manifest.documents.length
-                    ? Math.round((count / manifest.documents.length) * 100)
+                    ? Math.round(((count + rerouted) / manifest.documents.length) * 100)
                     : 0;
                   return (
                     <article
@@ -256,10 +261,18 @@ export function DriverManifestList({
                         </div>
                         <div className="driver-manifest-summary">
                           <span
-                            className={`status-badge ${manifest.finishedAt ? "badge-success" : days >= 2 ? "badge-warning" : "badge-pending"}`}
+                            className={`status-badge ${manifest.finishedAt || manifest.routeResolved ? "badge-success" : days >= 2 ? "badge-warning" : "badge-pending"}`}
                           >
-                            {manifest.finishedAt ? <Check size={11} /> : <Clock3 size={11} />}
-                            {manifest.finishedAt ? "Finalizado" : manifestAgeLabel(manifest, now)}
+                            {manifest.finishedAt || manifest.routeResolved ? (
+                              <Check size={11} />
+                            ) : (
+                              <Clock3 size={11} />
+                            )}
+                            {manifest.finishedAt
+                              ? "Finalizado"
+                              : manifest.routeResolved
+                                ? "Rota encerrada"
+                                : manifestAgeLabel(manifest, now)}
                           </span>
                           <span className="driver-manifest-missing">
                             {remaining ? (
@@ -270,6 +283,7 @@ export function DriverManifestList({
                             ) : (
                               <>
                                 {count} {count === 1 ? "CTC conferido" : "CTCs conferidos"}
+                                {rerouted > 0 && ` · ${rerouted} remanifestado(s)`}
                               </>
                             )}
                           </span>
@@ -410,6 +424,7 @@ export function DriverManifestList({
                         <div className="driver-manifest-progress-label">
                           <span>
                             {count} de {manifest.documents.length} CTCs conferidos
+                            {rerouted > 0 && ` · ${rerouted} remanifestado(s)`}
                           </span>
                           <strong>{percent}%</strong>
                         </div>
@@ -417,7 +432,7 @@ export function DriverManifestList({
                           className="driver-manifest-progress-track"
                           role="progressbar"
                           aria-label={`Conferência de ${group.driver} · ${manifest.id}`}
-                          aria-valuenow={count}
+                          aria-valuenow={count + rerouted}
                           aria-valuemin={0}
                           aria-valuemax={manifest.documents.length}
                         >
@@ -458,21 +473,33 @@ export function DriverManifestList({
                                     <td data-label="Volumes">{doc.volumes}</td>
                                     <td data-label="Status">
                                       <span
-                                        className={`status-badge ${doc.received ? "badge-success" : "badge-pending"}`}
+                                        className={`status-badge ${doc.received ? "badge-success" : doc.reroutedTo ? "badge-warning" : "badge-pending"}`}
                                       >
                                         {doc.received ? (
                                           <Check size={12} aria-hidden="true" />
+                                        ) : doc.reroutedTo ? (
+                                          <ArrowRight size={12} aria-hidden="true" />
                                         ) : (
                                           <Clock3 size={12} aria-hidden="true" />
                                         )}
-                                        {doc.received ? "Conferido" : "Pendente"}
+                                        {doc.received
+                                          ? "Conferido"
+                                          : doc.reroutedTo
+                                            ? "Remanifestado"
+                                            : "Pendente"}
                                       </span>
+                                      {doc.reroutedTo && (
+                                        <span className="block mt-1 text-xs text-muted-foreground">
+                                          Nova rota: {doc.reroutedTo}
+                                        </span>
+                                      )}
                                     </td>
                                     <td>
                                       <Button
                                         variant="ghost"
                                         size="icon"
                                         className="document-action text-muted-foreground"
+                                        disabled={!!doc.reroutedTo}
                                         title={
                                           doc.received
                                             ? `Desfazer CTC ${doc.ctc}`

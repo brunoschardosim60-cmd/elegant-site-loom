@@ -2,6 +2,7 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { activityTimestamp, matchesConferenceSearch } from "./conference-display";
 import type { Manifest } from "./conference";
+import { isPendingDocument, presentRoutes } from "./conference-routes";
 import {
   compareManifestDates,
   formatManifestDate,
@@ -81,15 +82,17 @@ export function selectConferenceReport(input: ConferencePdfInput) {
   const manifests =
     input.view === "issues"
       ? []
-      : input.manifests
+      : presentRoutes(input.manifests)
           .filter((manifest) =>
-            input.view === "finished" ? Boolean(manifest.finishedAt) : !manifest.finishedAt,
+            input.view === "finished"
+              ? Boolean(manifest.finishedAt || manifest.routeResolved)
+              : !manifest.finishedAt && !manifest.routeResolved,
           )
           .filter((manifest) => input.filter !== "old" || manifestAgeDays(manifest, now) >= 2)
           .flatMap((manifest) => {
             if (input.view === "missing") {
               const documents = manifest.documents.filter(
-                (doc) => !doc.received && matchesConferenceSearch(manifest, query, doc),
+                (doc) => isPendingDocument(doc) && matchesConferenceSearch(manifest, query, doc),
               );
               return documents.length ? [{ ...manifest, documents }] : [];
             }
@@ -152,7 +155,7 @@ export function createConferencePdf(input: ConferencePdfInput) {
       : [
           ["MANIFESTOS", String(selected.manifests.length)],
           ["CTCs", String(documents.length)],
-          ["PENDENTES", String(documents.filter((doc) => !doc.received).length)],
+          ["PENDENTES", String(documents.filter(isPendingDocument).length)],
           ["CONFERIDOS", String(documents.filter((doc) => doc.received).length)],
           ["VOLUMES", String(documents.reduce((sum, doc) => sum + doc.volumes, 0))],
         ];
@@ -171,7 +174,7 @@ export function createConferencePdf(input: ConferencePdfInput) {
       ? "Há 2 dias ou mais pela emissão; sem emissão, pelo cadastro"
       : "",
     input.view === "tracking" && input.trackingStatus && input.trackingStatus !== "all"
-      ? `Status: ${input.trackingStatus === "received" ? "Conferidos" : "Pendentes"}`
+      ? `Status: ${input.trackingStatus === "received" ? "Conferidos" : input.trackingStatus === "rerouted" ? "Remanifestados" : "Pendentes"}`
       : "",
   ]
     .filter(Boolean)
@@ -263,9 +266,9 @@ export function createConferencePdf(input: ConferencePdfInput) {
           pdf.setFont("helvetica", "bold");
           pdf.setFontSize(9);
           pdf.setTextColor(...blue);
-          const pending = manifest.documents.filter((doc) => !doc.received).length;
+          const pending = manifest.documents.filter(isPendingDocument).length;
           pdf.text(
-            `${manifest.documents.length} CTCs | ${manifest.documents.reduce((sum, doc) => sum + doc.volumes, 0)} volumes | ${pending ? `${pending} pendente(s)` : "Todos conferidos"}`,
+            `${manifest.documents.length} CTCs | ${manifest.documents.reduce((sum, doc) => sum + doc.volumes, 0)} volumes | ${pending ? `${pending} pendente(s)` : manifest.documents.some((doc) => !doc.received && doc.reroutedTo) ? "Rota encerrada com remanifestação" : "Todos conferidos"}`,
             width - margin - 3,
             cursor + 5,
             { align: "right" },
@@ -308,7 +311,9 @@ export function createConferencePdf(input: ConferencePdfInput) {
             field(doc.recipient),
             doc.received
               ? `Conferido${doc.receivedAt ? `\n${date(doc.receivedAt, true)}` : ""}`
-              : "Pendente",
+              : doc.reroutedTo
+                ? `Remanifestado\n${doc.reroutedTo}`
+                : "Pendente",
           ]),
           styles: {
             font: "helvetica",

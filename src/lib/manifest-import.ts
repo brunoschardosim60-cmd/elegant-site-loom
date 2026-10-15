@@ -2,6 +2,7 @@ import { manifestIdPattern, manifestNoun } from "./manifest-id";
 import { parseReading, type Manifest, type DocumentItem } from "./conference";
 import { reviewManifestTotals, type ManifestTotals } from "./manifest-review";
 import { normalizeIssueDate } from "./manifest-date";
+import { isAnotherRoute } from "./conference-routes";
 import type { ManifestDraftRow } from "../components/manifest-documents-editor";
 export type ImportDraft = {
   id: string;
@@ -23,7 +24,7 @@ export type ImportConflict = {
   manifestId?: string;
 };
 
-type Owner = { id: string; driver: string };
+type Owner = { id: string; driver: string; issueDate?: string | undefined };
 type DraftOwner = Owner & { index: number; row?: number };
 const normalizedId = (id: string) => id.trim().toUpperCase();
 const normalizedHash = (hash: string | undefined) =>
@@ -40,7 +41,11 @@ export function findImportConflicts(existing: Manifest[], drafts: ImportDraft[])
   const savedCtcs = new Map<string, Owner[]>();
   const savedHashes = new Map<string, Owner[]>();
   for (const manifest of existing) {
-    const owner = { id: normalizedId(manifest.id), driver: manifest.driver };
+    const owner = {
+      id: normalizedId(manifest.id),
+      driver: manifest.driver,
+      issueDate: manifest.issueDate,
+    };
     addOwner(savedIds, owner.id, owner);
     for (const document of manifest.documents) {
       const reading = parseReading(document.ctc);
@@ -60,7 +65,12 @@ export function findImportConflicts(existing: Manifest[], drafts: ImportDraft[])
       ? (existing.find((manifest) => normalizedId(manifest.id) === id) ??
         drafts.find((item) => !item.targetId && normalizedId(item.id) === id))
       : undefined;
-    const owner: DraftOwner = { id, driver: target?.driver ?? draft.driver, index };
+    const owner: DraftOwner = {
+      id,
+      driver: target?.driver ?? draft.driver,
+      issueDate: target?.issueDate ?? draft.issueDate,
+      index,
+    };
     if (!draft.targetId && manifestIdPattern.test(id)) addOwner(ids, id, owner);
     const hash = normalizedHash(draft.sourcePhotoHash);
     if (hash) addOwner(hashes, hash, owner);
@@ -109,6 +119,7 @@ export function findImportConflicts(existing: Manifest[], drafts: ImportDraft[])
       // Multiple NF rows may legitimately share one CTC inside the same pre.
       // Only report repeated CTCs when they belong to different manifests/drafts.
       for (const reference of savedCtcs.get(ctc) ?? []) {
+        if (isAnotherRoute(owner, reference)) continue;
         push("ctc", owner, reference, `CTC ${ctc} já está cadastrado no ${ownerLabel(reference)}.`);
       }
       const repeatedNf = owners.find(
@@ -125,7 +136,9 @@ export function findImportConflicts(existing: Manifest[], drafts: ImportDraft[])
           repeatedNf,
           `CTC ${ctc} e NF repetidos no mesmo pré. Remova a linha duplicada para não somar volumes duas vezes.`,
         );
-      const other = owners.find((candidate) => candidate.index !== owner.index);
+      const other = owners.find(
+        (candidate) => candidate.index !== owner.index && !isAnotherRoute(owner, candidate),
+      );
       if (other) push("ctc", owner, other, `CTC ${ctc} repetido no ${ownerLabel(other)} do lote.`);
     }
   return [...new Map(conflicts.map((conflict) => [JSON.stringify(conflict), conflict])).values()];
@@ -175,7 +188,9 @@ export function applyImports(
     // Existing CTCs remain conflicts (including a selected target for a DACTE).
     // Repeated rows in this incoming draft are grouped below as multiple NFs for one CTC.
     const registeredCtcs = new Set(
-      manifests.flatMap((manifest) => manifest.documents.map((document) => document.ctc)),
+      manifests
+        .filter((manifest) => !isAnotherRoute({ id, issueDate }, manifest))
+        .flatMap((manifest) => manifest.documents.map((document) => document.ctc)),
     );
     const grouped = new Map<string, { rows: ManifestDraftRow[]; firstRow: number }>();
     for (const [row, item] of draft.rows.entries()) {

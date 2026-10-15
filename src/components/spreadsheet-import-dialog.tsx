@@ -11,8 +11,9 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Button } from "./ui/button";
 import type { Manifest } from "@/lib/conference";
 import { findImportConflicts, type ImportDraft, type ImportOutcome } from "@/lib/manifest-import";
-import { luftManifestDays, type LuftExport } from "@/lib/luft-spreadsheet";
+import { findLuftCtcOverlaps, luftManifestDays, type LuftExport } from "@/lib/luft-spreadsheet";
 import { formatManifestDate } from "@/lib/manifest-date";
+import { isAnotherRoute } from "@/lib/conference-routes";
 
 export function SpreadsheetImportDialog({
   manifests,
@@ -104,11 +105,17 @@ export function SpreadsheetImportDialog({
       if (abort.signal.aborted || controller.current !== abort) return;
       setResult(parsed);
       setSeconds((performance.now() - start) / 1000);
-      const conflicts = new Set(
-        findImportConflicts(manifests, parsed.drafts).map((conflict) => conflict.index),
+      const overlaps = new Set(
+        findLuftCtcOverlaps(parsed.drafts).flatMap((item) => item.manifestIds),
       );
       setSelected(
-        new Set(parsed.drafts.filter((_, index) => !conflicts.has(index)).map((draft) => draft.id)),
+        new Set(
+          parsed.drafts
+            .filter(
+              (draft) => !overlaps.has(draft.id) && !findImportConflicts(manifests, [draft]).length,
+            )
+            .map((draft) => draft.id),
+        ),
       );
       setActive(parsed.drafts[0]?.id ?? "");
     } catch (cause) {
@@ -122,7 +129,23 @@ export function SpreadsheetImportDialog({
     }
   }
   const drafts = useMemo(() => result?.drafts ?? [], [result]);
-  const conflicts = useMemo(() => findImportConflicts(manifests, drafts), [manifests, drafts]);
+  const conflicts = useMemo(
+    () =>
+      drafts.flatMap((draft, index) =>
+        findImportConflicts(manifests, [draft]).map((conflict) => ({ ...conflict, index })),
+      ),
+    [manifests, drafts],
+  );
+  const overlaps = useMemo(() => findLuftCtcOverlaps(drafts), [drafts]);
+  const remanifestations = useMemo(() => {
+    const owners = new Map<string, ImportDraft[]>();
+    for (const draft of drafts)
+      for (const ctc of new Set(draft.rows.map((row) => row.ctc)))
+        owners.set(ctc, [...(owners.get(ctc) ?? []), draft]);
+    return [...owners].filter(([, routes]) =>
+      routes.some((route) => routes.some((other) => isAnotherRoute(route, other))),
+    );
+  }, [drafts]);
   const blocked = new Set(conflicts.map((conflict) => drafts[conflict.index]?.id));
   const normalized = (text: string) =>
     text
@@ -136,16 +159,33 @@ export function SpreadsheetImportDialog({
       normalized(`${draft.driver} ${draft.plate} ${draft.id}`).includes(normalized(query.trim())),
   );
   const chosen = drafts.filter((draft) => selected.has(draft.id));
+  const selectionOverlaps = findLuftCtcOverlaps(chosen);
   const selectedBlocked = chosen.filter((draft) => blocked.has(draft.id)).length;
   const current = drafts.find((draft) => draft.id === active);
   const ctcs = chosen.reduce((sum, draft) => sum + (draft.expectedRows ?? 0), 0);
+  const uniqueCtcs = new Set(chosen.flatMap((draft) => draft.rows.map((row) => row.ctc))).size;
+  const allUniqueCtcs = new Set(drafts.flatMap((draft) => draft.rows.map((row) => row.ctc))).size;
   const nfs = chosen.reduce((sum, draft) => sum + draft.rows.length, 0);
   const volumes = chosen.reduce((sum, draft) => sum + (draft.totalVolumes ?? 0), 0);
   const canSave =
     !busy &&
     chosen.length > 0 &&
     !result?.errors.length &&
+    !selectionOverlaps.length &&
     chosen.every((draft) => !blocked.has(draft.id));
+  function chooseManifest(id: string) {
+    if (blocked.has(id)) return;
+    const others = new Set(
+      overlaps
+        .filter((item) => item.manifestIds.includes(id))
+        .flatMap((item) => item.manifestIds)
+        .filter((other) => other !== id),
+    );
+    setSelected(
+      (previous) => new Set([...previous].filter((other) => !others.has(other)).concat(id)),
+    );
+    setActive(id);
+  }
   function save() {
     if (!canSave) return;
     const outcome = onCreate(chosen);
@@ -273,6 +313,94 @@ export function SpreadsheetImportDialog({
               </ul>
             </div>
           )}
+          {!!overlaps.length && (
+            <div
+              role="alert"
+              className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900"
+            >
+              <strong>CTC presente em mais de um manifesto</strong>
+              <p className="mt-1">
+                Escolha qual manifesto cadastrar. Os envolvidos começam desmarcados; os demais
+                continuam selecionados. Cada opção mantém o manifesto inteiro, com todas as suas NFs
+                e volumes. Nenhum CTC será retirado ou transferido automaticamente.
+              </p>
+              <div className="mt-3 max-h-64 overflow-auto space-y-3">
+                {overlaps.map((item) => (
+                  <div
+                    key={item.ctc}
+                    className="rounded border border-amber-200 bg-background/70 p-3"
+                  >
+                    <p className="font-semibold">CTC {item.ctc}</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {item.manifestIds.map((id) => {
+                        const draft = drafts.find((candidate) => candidate.id === id)!;
+                        return (
+                          <Button
+                            key={id}
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-auto max-w-full whitespace-normal text-left"
+                            aria-pressed={selected.has(id)}
+                            disabled={blocked.has(id)}
+                            onClick={() => chooseManifest(id)}
+                          >
+                            <span>
+                              <strong className="block">
+                                {selected.has(id) ? "Selecionado" : "Selecionar"} {id} ·{" "}
+                                {formatManifestDate(draft.issueDate)}
+                              </strong>
+                              <span className="block text-xs">
+                                {draft.driver} · {draft.plate} · {draft.expectedRows} CTCs ·{" "}
+                                {draft.totalVolumes} vol.
+                              </span>
+                            </span>
+                          </Button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {!!selectionOverlaps.length && (
+                <p className="mt-2 font-semibold">
+                  A seleção ainda contém CTCs repetidos. Escolha apenas um manifesto para cada
+                  conflito antes de cadastrar.
+                </p>
+              )}
+            </div>
+          )}
+          {!!remanifestations.length && (
+            <div
+              role="status"
+              className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm"
+            >
+              <strong>{remanifestations.length} CTC(s) em novas tentativas de rota</strong>
+              <p className="mt-1">
+                É normal o mesmo CTC aparecer em dias e motoristas diferentes. Todas as linhas serão
+                mantidas; a bipagem confere apenas a rota mais recente cadastrada. As anteriores
+                aparecem no rastreamento como remanifestadas.
+              </p>
+              <details className="mt-2">
+                <summary className="cursor-pointer font-medium">
+                  Ver rotas anteriores e novas
+                </summary>
+                <ul className="mt-2 max-h-32 overflow-auto space-y-2">
+                  {remanifestations.map(([ctc, routes]) => (
+                    <li key={ctc}>
+                      <strong>CTC {ctc}</strong>
+                      {routes.map((route) => (
+                        <span className="block text-xs" key={route.id}>
+                          {formatManifestDate(route.issueDate)} · {route.id} · {route.driver} ·{" "}
+                          {route.plate}
+                        </span>
+                      ))}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            </div>
+          )}
           {result && (
             <>
               <div
@@ -288,6 +416,9 @@ export function SpreadsheetImportDialog({
                   <strong>Período:</strong> {formatManifestDate(days[0]?.date)} a{" "}
                   {formatManifestDate(days.at(-1)?.date)} ·{" "}
                   <strong>{drafts.reduce((s, d) => s + (d.expectedRows ?? 0), 0)}</strong> CTCs ·{" "}
+                  {allUniqueCtcs < drafts.reduce((s, d) => s + (d.expectedRows ?? 0), 0) && (
+                    <span>({allUniqueCtcs} únicos entre as rotas) · </span>
+                  )}
                   <strong>{drafts.reduce((s, d) => s + d.rows.length, 0)}</strong> NFs ·{" "}
                   <strong>{drafts.reduce((s, d) => s + (d.totalVolumes ?? 0), 0)}</strong> volumes
                 </p>
@@ -483,6 +614,11 @@ export function SpreadsheetImportDialog({
                                 .slice(0, 1)
                                 .map((conflict) => conflict.message)}
                             </span>
+                          ) : overlaps.some((item) => item.manifestIds.includes(draft.id)) ? (
+                            <span className="text-amber-800">
+                              CTC em outro manifesto ·{" "}
+                              {selected.has(draft.id) ? "selecionado" : "aguarda escolha"}
+                            </span>
                           ) : (
                             <span className="text-emerald-700">Pronto para cadastrar</span>
                           )}
@@ -547,6 +683,11 @@ export function SpreadsheetImportDialog({
             {chosen.length} manifestos em {luftManifestDays(chosen).length}{" "}
             {luftManifestDays(chosen).length === 1 ? "dia" : "dias"} · {ctcs} CTCs · {nfs} NFs ·{" "}
             {volumes} volumes
+            {uniqueCtcs < ctcs && (
+              <span className="block text-xs text-muted-foreground">
+                {uniqueCtcs} CTCs únicos · totais acima incluem cada tentativa de rota
+              </span>
+            )}
           </p>
           <div className="flex gap-2">
             <Button type="button" variant="outline" onClick={close}>

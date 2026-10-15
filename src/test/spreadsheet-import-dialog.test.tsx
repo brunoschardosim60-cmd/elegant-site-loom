@@ -132,6 +132,76 @@ it("blocks registered CTCs and invalid source rows without mutating saved data",
   expect(screen.getByRole("button", { name: "Cadastrar 2 manifestos" })).toBeDisabled();
   expect(save).not.toHaveBeenCalled();
 });
+it("requires a choice for conflicting same-day CTCs, preserves unrelated selection and cannot register both", async () => {
+  const result = data();
+  result.drafts.push({
+    ...result.drafts[0]!,
+    id: "06052235",
+    issueDate: "2026-10-14",
+    rows: result.drafts[0]!.rows.map((row) => ({ ...row })),
+  });
+  mock.read.mockResolvedValueOnce(result);
+  const save = vi.fn(() => ({ ok: true as const, manifests: [] }));
+  render(<SpreadsheetImportDialog manifests={[]} onClose={vi.fn()} onCreate={save} />);
+  upload();
+  await screen.findByText("CTC presente em mais de um manifesto");
+  expect(screen.getByLabelText("Selecionar manifesto 06052233")).not.toBeChecked();
+  expect(screen.getByLabelText("Selecionar manifesto 06052235")).not.toBeChecked();
+  expect(screen.getByLabelText("Selecionar manifesto 06052234")).toBeChecked();
+  fireEvent.click(screen.getByRole("button", { name: /Selecionar 06052235 · 14\/10\/2026/ }));
+  expect(screen.getByLabelText("Selecionar manifesto 06052235")).toBeChecked();
+  expect(screen.getByRole("button", { name: "Cadastrar 2 manifestos" })).toBeEnabled();
+  fireEvent.click(screen.getByLabelText("Selecionar manifesto 06052233"));
+  expect(screen.getByRole("button", { name: "Cadastrar 3 manifestos" })).toBeDisabled();
+  expect(save).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: /Selecionado 06052233 · 14\/10\/2026/ }));
+  expect(screen.getByLabelText("Selecionar manifesto 06052235")).not.toBeChecked();
+  fireEvent.click(screen.getByRole("button", { name: "Cadastrar 2 manifestos" }));
+  expect(save).toHaveBeenCalledWith([result.drafts[0], result.drafts[1]]);
+});
+it("selects both route attempts on different dates even when the driver changes", async () => {
+  const result = data();
+  result.drafts.push({
+    ...result.drafts[0]!,
+    id: "06052235",
+    issueDate: "2026-10-15",
+    driver: "OUTRO MOTORISTA",
+    plate: "XYZ1A23",
+  });
+  mock.read.mockResolvedValueOnce(result);
+  const save = vi.fn(() => ({ ok: true as const, manifests: [] }));
+  render(<SpreadsheetImportDialog manifests={[]} onClose={vi.fn()} onCreate={save} />);
+  upload();
+  await screen.findByLabelText("Selecionar manifesto 06052235");
+  expect(screen.queryByText("CTC presente em mais de um manifesto")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Cadastrar 3 manifestos" })).toBeEnabled();
+  fireEvent.click(screen.getByRole("button", { name: "Cadastrar 3 manifestos" }));
+  expect(save).toHaveBeenCalledWith(result.drafts);
+});
+it("does not let the conflict chooser overwrite a CTC already saved by the team", async () => {
+  const result = data();
+  result.drafts.push({ ...result.drafts[0]!, id: "06052235" });
+  mock.read.mockResolvedValueOnce(result);
+  render(
+    <SpreadsheetImportDialog
+      manifests={[
+        {
+          id: "06050000",
+          driver: "ANTIGO",
+          plate: "ABC1D23",
+          date: "2026-10-10",
+          documents: [{ id: "saved", ctc: "0000000001", nf: "123-1", volumes: 2, received: true }],
+        },
+      ]}
+      onClose={vi.fn()}
+      onCreate={vi.fn()}
+    />,
+  );
+  upload();
+  await screen.findByText("CTC presente em mais de um manifesto");
+  expect(screen.getByRole("button", { name: /Selecionar 06052233 ·/ })).toBeDisabled();
+  expect(screen.getByRole("button", { name: /Selecionar 06052235 ·/ })).toBeDisabled();
+});
 it("leaves existing CTC conflicts unselected and cannot silently overwrite them", async () => {
   const save = vi.fn();
   render(

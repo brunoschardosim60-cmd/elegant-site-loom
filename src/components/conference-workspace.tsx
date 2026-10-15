@@ -30,7 +30,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { findMatches, parseScan, setReceived, type Manifest } from "@/lib/conference";
+import { parseScan, setReceived, type Manifest } from "@/lib/conference";
+import {
+  findCurrentMatches,
+  isAnotherRoute,
+  isPendingDocument,
+  presentRoutes,
+} from "@/lib/conference-routes";
 
 import { SpreadsheetImportDialog } from "./spreadsheet-import-dialog";
 import { isExportManifest } from "@/lib/manifest-id";
@@ -243,7 +249,7 @@ export function ConferenceWorkspace({
       notify("Código inválido. Confira e bipe o CTC novamente.", true);
       return;
     }
-    const matches = findMatches(current.current, reading);
+    const matches = findCurrentMatches(current.current, reading.number);
     if (!matches.length) {
       setBlocked(`O CTC ${reading.number} não está em nenhum pré-manifesto cadastrado.`);
       log("CTC sem pré-manifesto", `CTC ${reading.number}`, true);
@@ -284,6 +290,13 @@ export function ConferenceWorkspace({
     const latest = current.current.find((item) => item.id === manifest.id);
     const doc = latest?.documents.find((item) => item.id === id);
     if (!latest || !doc || doc.received === received) return;
+    if (
+      received &&
+      !findCurrentMatches(current.current, doc.ctc).some((match) => match.doc.id === id)
+    ) {
+      notify("Este CTC foi remanifestado. Confira na rota mais recente.", true);
+      return;
+    }
     const changed = setReceived(latest, id, received, new Date().toISOString());
     update(current.current.map((item) => (item.id === latest.id ? changed : item)));
     log(received ? "Documento conferido manualmente" : "Conferência desfeita", latest.driver);
@@ -297,6 +310,21 @@ export function ConferenceWorkspace({
     }
     const manifest = current.current.find((item) => item.id === manifestId);
     if (!manifest || manifest.issueDate === issueDate) return;
+    const candidate = { ...manifest, issueDate };
+    if (
+      current.current.some(
+        (other) =>
+          other.id !== manifest.id &&
+          !isAnotherRoute(candidate, other) &&
+          other.documents.some((doc) => manifest.documents.some((own) => own.ctc === doc.ctc)),
+      )
+    ) {
+      notify(
+        "Essa data deixa o mesmo CTC em rotas conflitantes. Preserve a data original de cada tentativa.",
+        true,
+      );
+      return;
+    }
     update(
       current.current.map((item) => {
         if (item.id !== manifestId) return item;
@@ -345,19 +373,20 @@ export function ConferenceWorkspace({
       onSnapshot ? "Pré excluído. Confira o status de salvamento." : "Pré-manifesto excluído.",
     );
   }
-  const pending = manifests.filter((item) => !item.finishedAt);
-  const finished = manifests.filter((item) => item.finishedAt);
+  const presented = presentRoutes(manifests);
+  const pending = presented.filter((item) => !item.finishedAt && !item.routeResolved);
+  const finished = presented.filter((item) => item.finishedAt || item.routeResolved);
   const documents = manifests.flatMap((item) => item.documents);
   const trackingRows =
     view === "tracking"
       ? selectTrackingRows(manifests, { query, filter, status: trackingStatus, now })
       : [];
-  const missing = pending.flatMap((item) => item.documents).filter((doc) => !doc.received);
+  const missing = pending.flatMap((item) => item.documents).filter(isPendingDocument);
   const age = (manifest: Manifest) => manifestAgeDays(manifest, now);
   const missingRows = pending
     .flatMap((manifest) =>
       manifest.documents
-        .filter((doc) => !doc.received)
+        .filter(isPendingDocument)
         .map((doc) => ({ manifest, doc, days: age(manifest) })),
     )
     .filter(({ manifest, doc }) => matchesConferenceSearch(manifest, query, doc))
@@ -594,7 +623,7 @@ export function ConferenceWorkspace({
                 {
                   label: "Manifestos finalizados",
                   value: finished.length,
-                  caption: "Todos os documentos recebidos",
+                  caption: "Conferidos ou encaminhados em nova rota",
                   icon: CheckCheck,
                   color: "text-primary",
                 },
@@ -806,7 +835,7 @@ export function ConferenceWorkspace({
                           {query.trim() || filter === "old"
                             ? "Nenhum resultado para essa busca ou filtro."
                             : manifests.length
-                              ? "Todos os CTCs cadastrados já foram conferidos."
+                              ? "Não há CTCs pendentes nas rotas atuais. Consulte as tentativas anteriores no rastreamento."
                               : "Importe uma planilha 108 ou cadastre um manifesto para começar."}
                         </p>
                       </div>
@@ -845,7 +874,11 @@ export function ConferenceWorkspace({
                       onIssueDateChange={changeIssueDate}
                       onDeleteManifest={requestDelete}
                       onAuditManifest={onAuditManifest}
-                      onEditManifest={setEditingManifest}
+                      onEditManifest={(manifest) =>
+                        setEditingManifest(
+                          current.current.find((item) => item.id === manifest.id) ?? null,
+                        )
+                      }
                     />
                   ) : (
                     <div className="empty-state">
@@ -857,7 +890,7 @@ export function ConferenceWorkspace({
                         {query.trim() || filter === "old"
                           ? "Nenhum resultado para essa busca ou filtro."
                           : view === "finished"
-                            ? "Os manifestos aparecem aqui quando todos os CTCs forem conferidos."
+                            ? "As rotas aparecem aqui quando todos os CTCs forem conferidos ou encaminhados em nova rota."
                             : manifests.length
                               ? "Todos os manifestos cadastrados foram finalizados."
                               : "Importe uma planilha 108 ou cadastre um manifesto para começar."}

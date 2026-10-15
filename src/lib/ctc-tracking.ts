@@ -1,9 +1,10 @@
 import type { DocumentItem, Manifest } from "./conference";
 import { compareManifestDates, manifestAgeDays } from "./manifest-date";
 import { matchesConferenceSearch } from "./conference-display";
+import { isPendingDocument, presentRoutes } from "./conference-routes";
 export { conferenceTimestamp } from "./conference-display";
 
-export type TrackingStatus = "all" | "pending" | "received";
+export type TrackingStatus = "all" | "pending" | "received" | "rerouted";
 export type TrackingRow = { manifest: Manifest; doc: DocumentItem };
 export type TrackingFilters = {
   query?: string;
@@ -17,7 +18,7 @@ export function selectTrackingRows(
   manifests: Manifest[],
   { query = "", filter = "all", status = "all", now = Date.now() }: TrackingFilters = {},
 ): TrackingRow[] {
-  return manifests
+  return presentRoutes(manifests)
     .filter((manifest) => filter !== "old" || manifestAgeDays(manifest, now) >= 2)
     .slice()
     .sort((a, b) => (filter === "new" ? compareManifestDates(b, a) : compareManifestDates(a, b)))
@@ -25,7 +26,12 @@ export function selectTrackingRows(
       manifest.documents
         .filter(
           (doc) =>
-            (status === "all" || (status === "received" ? doc.received : !doc.received)) &&
+            (status === "all" ||
+              (status === "received"
+                ? doc.received
+                : status === "rerouted"
+                  ? !!doc.reroutedTo
+                  : isPendingDocument(doc))) &&
             matchesConferenceSearch(manifest, query, doc),
         )
         .map((doc) => ({ manifest, doc })),

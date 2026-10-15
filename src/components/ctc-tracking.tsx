@@ -1,5 +1,13 @@
 import { useState } from "react";
-import { CheckCheck, ChevronLeft, ChevronRight, Clock3, History, Search } from "lucide-react";
+import {
+  ArrowRight,
+  CheckCheck,
+  ChevronLeft,
+  ChevronRight,
+  Clock3,
+  History,
+  Search,
+} from "lucide-react";
 import { Button } from "./ui/button";
 import { conferenceTimestamp, type TrackingRow, type TrackingStatus } from "@/lib/ctc-tracking";
 import {
@@ -43,6 +51,7 @@ export function CtcTracking({
             <option value="all">Todos os status</option>
             <option value="pending">Pendentes</option>
             <option value="received">Conferidos</option>
+            <option value="rerouted">Remanifestados</option>
           </select>
         </label>
         <p role="status">
@@ -100,12 +109,18 @@ export function CtcTracking({
                     <td data-label="Volumes">{doc.volumes}</td>
                     <td data-label="Status">
                       <span
-                        className={`status-badge ${doc.received ? "badge-success" : "badge-pending"}`}
+                        className={`status-badge ${doc.received ? "badge-success" : doc.reroutedTo ? "badge-warning" : "badge-pending"}`}
                       >
-                        {doc.received ? <CheckCheck size={12} /> : <Clock3 size={12} />}
-                        {doc.received ? "Conferido" : "Pendente"}
+                        {doc.received ? (
+                          <CheckCheck size={12} />
+                        ) : doc.reroutedTo ? (
+                          <ArrowRight size={12} />
+                        ) : (
+                          <Clock3 size={12} />
+                        )}
+                        {doc.received ? "Conferido" : doc.reroutedTo ? "Remanifestado" : "Pendente"}
                       </span>
-                      {!doc.received && (
+                      {!doc.received && !doc.reroutedTo && (
                         <span className="tracking-detail">{manifestAgeLabel(manifest, now)}</span>
                       )}
                     </td>
@@ -117,7 +132,11 @@ export function CtcTracking({
                           <span className="tracking-detail">Horário não registrado</span>
                         )
                       ) : (
-                        <span className="tracking-detail">Aguardando conferência</span>
+                        <span className="tracking-detail">
+                          {doc.reroutedTo
+                            ? `Nova rota: ${doc.reroutedTo}`
+                            : "Aguardando conferência"}
+                        </span>
                       )}
                     </td>
                     {onAuditManifest && (

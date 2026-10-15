@@ -1,5 +1,6 @@
 import type { ImportDraft } from "./manifest-import";
 import { normalizeIssueDate } from "./manifest-date";
+import { isAnotherRoute } from "./conference-routes";
 
 export type SheetCell = string | number | boolean | null;
 export type LuftSheet = { name: string; rows: SheetCell[][] };
@@ -69,7 +70,6 @@ export function parseLuft108(sheets: LuftSheet[]): LuftExport {
     );
   const groups = new Map<string, ImportDraft>();
   const seen = new Map<string, string>();
-  const owners = new Map<string, string>();
   const errors: string[] = [];
   let ignored = 0,
     repeated = 0,
@@ -137,12 +137,6 @@ export function parseLuft108(sheets: LuftSheet[]): LuftExport {
       continue;
     }
     seen.set(identity, content);
-    const owner = owners.get(ctc);
-    if (owner && owner !== id) {
-      fail(`CTC ${ctc} aparece nos manifestos ${owner} e ${id}`);
-      continue;
-    }
-    owners.set(ctc, id);
     const draft = groups.get(id) ?? { id, plate, driver, issueDate, rows: [] };
     if (
       draft.plate !== plate ||
@@ -173,6 +167,33 @@ export function parseLuft108(sheets: LuftSheet[]): LuftExport {
       "Nenhuma linha da filial 06 com motivo DIS foi encontrada. TRA e outras filiais não são importados.",
     );
   return { drafts, ignored, repeated, selectedRows, errors };
+}
+
+/** Keep remanifested rows intact for an explicit selection, never two receipt targets. */
+export function findLuftCtcOverlaps(drafts: ImportDraft[]) {
+  const owners = new Map<string, Set<string>>();
+  for (const draft of drafts)
+    for (const row of draft.rows) {
+      const ids = owners.get(row.ctc) ?? new Set<string>();
+      ids.add(draft.id);
+      owners.set(row.ctc, ids);
+    }
+  return [...owners]
+    .filter(([, ids]) => ids.size > 1)
+    .map(([ctc, ids]) => ({
+      ctc,
+      manifestIds: [...ids].filter((id) =>
+        [...ids].some(
+          (other) =>
+            id !== other &&
+            !isAnotherRoute(
+              drafts.find((draft) => draft.id === id)!,
+              drafts.find((draft) => draft.id === other)!,
+            ),
+        ),
+      ),
+    }))
+    .filter((item) => item.manifestIds.length > 1);
 }
 
 export function luftManifestDays(drafts: ImportDraft[]) {

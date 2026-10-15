@@ -7,6 +7,8 @@ export type DocumentItem = {
   volumes: number;
   received: boolean;
   receivedAt?: string | undefined;
+  /** Derived for display only; never persisted. */
+  reroutedTo?: string | undefined;
 };
 export type Manifest = {
   id: string;
@@ -21,6 +23,8 @@ export type Manifest = {
   totalsReviewed?: boolean | undefined;
   documents: DocumentItem[];
   finishedAt?: string | undefined;
+  /** Derived for display only; never persisted. */
+  routeResolved?: boolean | undefined;
 };
 export type Reading = { kind: "ctc"; number: string } | { kind: "nfe" } | { kind: "invalid" };
 
