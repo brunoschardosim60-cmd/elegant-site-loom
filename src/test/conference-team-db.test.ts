@@ -81,6 +81,9 @@ beforeAll(async () => {
   await db.exec(
     await readFile("supabase/migrations/20261016010000_personal_team_demands.sql", "utf8"),
   );
+  await db.exec(
+    await readFile("supabase/migrations/20261016020000_visible_action_actors.sql", "utf8"),
+  );
 }, 30000);
 afterAll(async () => {
   await db?.close();
@@ -502,16 +505,100 @@ it("initializes a new team's personal records with the actual owner and ignores 
         ...make("06058881", "0066666602"),
         createdBy: uid(1),
         createdByEmail: "person1@example.com",
+        updatedByEmail: "person1@example.com",
+        updatedAt: "1900-01-01T00:00:00Z",
       },
     ],
   };
   await call("save_conference", [0, before]);
   const team = await call("get_conference_team");
   expect(team.data.manifests[0]).toEqual({
-    ...before.manifests[0],
+    ...make("06058881", "0066666602"),
     createdBy: uid(8),
     createdByEmail: "person8@example.com",
   });
   expect((await call("get_conference_team")).revision).toBe(team.revision);
   expect(await call("get_conference_audit")).toEqual([]);
+});
+
+it("attributes peer edits and receipts to actual users, preserves them on repeats and recovers visible actors from audit", async () => {
+  await as(2);
+  const base = (await call("get_conference_team")).data;
+  const added = structuredClone(base);
+  added.manifests.push({
+    ...make("06058882", "0066666603"),
+    updatedByEmail: "person1@example.com",
+    updatedAt: "1900-01-01T00:00:00Z",
+  });
+  const first = await save(base, added);
+  expect(first.data.manifests.at(-1)).toMatchObject({
+    createdByEmail: "person2@example.com",
+    updatedByEmail: "person2@example.com",
+  });
+  await as(3);
+  const receipt = structuredClone(first.data);
+  receipt.manifests.at(-1)!.documents[0]!.received = true;
+  receipt.manifests.at(-1)!.documents[0]!.receivedByEmail = "person1@example.com";
+  const second = await save(first.data, receipt);
+  const received = second.data.manifests.at(-1)!;
+  expect(received).toMatchObject({
+    createdByEmail: "person2@example.com",
+    updatedByEmail: "person3@example.com",
+    documents: [{ receivedBy: uid(3), receivedByEmail: "person3@example.com" }],
+  });
+  await as(1);
+  const forged = structuredClone(second.data);
+  forged.manifests.at(-1)!.updatedByEmail = "person1@example.com";
+  forged.manifests.at(-1)!.documents[0]!.receivedByEmail = "person1@example.com";
+  const repeat = await save(second.data, forged);
+  expect(repeat.data).toEqual(second.data);
+  expect(repeat.revision).toBe(second.revision);
+  const edited = structuredClone(repeat.data);
+  edited.manifests.at(-1)!.documents[0]!.nf = "456-1";
+  const third = await save(repeat.data, edited);
+  expect(third.data.manifests.at(-1)).toMatchObject({
+    createdByEmail: "person2@example.com",
+    updatedByEmail: "person1@example.com",
+    documents: [
+      { receivedByEmail: "person3@example.com", receivedAt: received.documents[0]!.receivedAt },
+    ],
+  });
+  const auditBefore = await call("get_conference_audit");
+  await db.exec("reset role");
+  const stripped = (
+    await db.query<{ result: ConferenceState }>(
+      "select public.conference_strip_action_actors($1) result",
+      [third.data],
+    )
+  ).rows[0]!.result;
+  await db.query("update public.conference_states set data=$1 where user_id=$2", [
+    stripped,
+    uid(1),
+  ]);
+  const migration = await readFile(
+    "supabase/migrations/20261016020000_visible_action_actors.sql",
+    "utf8",
+  );
+  await db.exec(migration);
+  await as(1);
+  const restored = (await call("get_conference_team")).data;
+  expect(restored.manifests.at(-1)).toMatchObject({
+    updatedByEmail: "person1@example.com",
+    documents: [
+      { receivedByEmail: "person3@example.com", receivedAt: received.documents[0]!.receivedAt },
+    ],
+  });
+  expect(await call("get_conference_audit")).toEqual(auditBefore);
+  await db.exec("reset role");
+  expect(
+    (
+      await db.query<{ result: ConferenceState }>(
+        "select public.conference_strip_action_actors($1) result",
+        [restored],
+      )
+    ).rows[0]!.result,
+  ).toEqual(stripped);
+  await db.exec(migration);
+  await as(1);
+  expect((await call("get_conference_team")).data).toEqual(restored);
 });

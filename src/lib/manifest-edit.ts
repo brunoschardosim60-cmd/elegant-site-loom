@@ -17,10 +17,15 @@ export function applyManifestEdit(
     JSON.stringify({
       ...manifest,
       finishedAt: undefined,
+      updatedBy: undefined,
+      updatedByEmail: undefined,
+      updatedAt: undefined,
       documents: manifest.documents.map((doc) => ({
         ...doc,
         received: undefined,
         receivedAt: undefined,
+        receivedBy: undefined,
+        receivedByEmail: undefined,
       })),
     });
   if (content(latest) !== content(base))

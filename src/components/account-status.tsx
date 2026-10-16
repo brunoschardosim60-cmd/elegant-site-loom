@@ -39,6 +39,7 @@ type Props = {
   error: string;
   conflict: boolean;
   invitation?: boolean;
+  teamView?: boolean;
   signingOut?: boolean;
   signOutError?: string;
   onTeam: () => void;
@@ -54,6 +55,7 @@ export function AccountStatusBar({
   error,
   conflict,
   invitation,
+  teamView = false,
   signingOut = false,
   signOutError = "",
   onTeam,
@@ -81,7 +83,7 @@ export function AccountStatusBar({
         </span>
       </div>
       <Button size="sm" variant="ghost" disabled={signingOut} onClick={onTeam}>
-        {invitation ? "Equipe · convite" : "Equipe"}
+        {teamView ? "Voltar à minha conta" : invitation ? "Equipe · convite" : "Equipe"}
       </Button>
       <Button size="sm" variant="ghost" disabled={pending || signingOut} onClick={onSignOut}>
         {signingOut ? "Saindo…" : "Sair da conta"}

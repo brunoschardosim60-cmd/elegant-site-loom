@@ -260,8 +260,9 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
         error={view.error}
         conflict={view.conflict}
         invitation={!!view.team.invitation}
+        teamView={scope === "team"}
         onTeam={() => {
-          setScope("team");
+          setScope((current) => (current === "team" ? "mine" : "team"));
           if (view.team.invitation) {
             setAuditPre("");
             setTeamOpen(true);
@@ -283,7 +284,6 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
           accountId={session.user.id}
           scope={scope}
           onScopeChange={setScope}
-          teamMembers={view.team.members}
           onManageTeam={() => {
             setAuditPre("");
             setTeamOpen(true);

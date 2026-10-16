@@ -51,7 +51,13 @@ it("preserves a receipt by a colleague while rejecting concurrent edits and dele
     ...base,
     documents: base.documents.map((doc) => ({ ...doc, received: false })),
   };
-  expect(applyManifestEdit([base], pending, draft()).ok).toBe(true);
+  const peerReceipt = {
+    ...base,
+    updatedByEmail: "gisele@example.test",
+    updatedAt: "2026-10-14T01:00:00Z",
+    documents: base.documents.map((doc) => ({ ...doc, receivedByEmail: "gisele@example.test" })),
+  };
+  expect(applyManifestEdit([peerReceipt], pending, draft()).ok).toBe(true);
   expect(applyManifestEdit([{ ...base, driver: "OUTRO" }], base, draft()).ok).toBe(false);
   expect(applyManifestEdit([], base, draft()).ok).toBe(false);
 });

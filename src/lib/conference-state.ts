@@ -19,6 +19,8 @@ const documentSchema = z.object({
   volumes: z.number().int().positive(),
   received: z.boolean(),
   receivedAt: z.string().optional(),
+  receivedBy: z.string().uuid().optional(),
+  receivedByEmail: z.string().email().optional(),
   deliveryDates: z
     .array(z.string().refine((value) => normalizeIssueDate(value) === value))
     .max(300)
@@ -30,6 +32,9 @@ export const conferenceStateSchema = z.object({
       id: z.string(),
       createdBy: z.string().uuid().optional(),
       createdByEmail: z.string().email().optional(),
+      updatedBy: z.string().uuid().optional(),
+      updatedByEmail: z.string().email().optional(),
+      updatedAt: z.string().optional(),
       driver: z.string(),
       plate: z.string(),
       date: z.string(),

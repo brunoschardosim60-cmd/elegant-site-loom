@@ -7,6 +7,8 @@ export type DocumentItem = {
   volumes: number;
   received: boolean;
   receivedAt?: string | undefined;
+  receivedBy?: string | undefined;
+  receivedByEmail?: string | undefined;
   deliveryDates?: string[] | undefined;
   /** Derived for display only; never persisted. */
   reroutedTo?: string | undefined;
@@ -16,6 +18,9 @@ export type Manifest = {
   /** Assigned by the authenticated server; edits and receipts keep the original creator. */
   createdBy?: string | undefined;
   createdByEmail?: string | undefined;
+  updatedBy?: string | undefined;
+  updatedByEmail?: string | undefined;
+  updatedAt?: string | undefined;
   driver: string;
   plate: string;
   date: string;

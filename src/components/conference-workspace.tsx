@@ -42,9 +42,13 @@ import { selectTrackingRows, type TrackingStatus } from "@/lib/ctc-tracking";
 import { ManifestEditDialog } from "./manifest-edit-dialog";
 import { applyManifestEdit } from "@/lib/manifest-edit";
 import { ManifestDeleteDialog } from "./manifest-delete-dialog";
-import { DemandScope } from "./demand-scope";
-import { belongsTo, selectOwnedRoutes, type WorkspaceScope } from "@/lib/conference-ownership";
-import type { ConferenceTeam } from "@/lib/conference-team";
+import {
+  belongsTo,
+  demandTotals,
+  selectOwnedRoutes,
+  type WorkspaceScope,
+} from "@/lib/conference-ownership";
+import { ActionActor } from "./action-actor";
 import { applyImports, type ImportDraft } from "@/lib/manifest-import";
 import type { ConferenceState } from "@/lib/conference-state";
 import {
@@ -95,7 +99,6 @@ export function ConferenceWorkspace({
   accountId,
   scope: controlledScope,
   onScopeChange,
-  teamMembers,
   onManageTeam,
 }: {
   initialState?: ConferenceState;
@@ -106,7 +109,6 @@ export function ConferenceWorkspace({
   accountId?: string | undefined;
   scope?: WorkspaceScope;
   onScopeChange?: ((scope: WorkspaceScope) => void) | undefined;
-  teamMembers?: ConferenceTeam["members"] | undefined;
   onManageTeam?: (() => void) | undefined;
 } = {}) {
   const [manifests, setManifests] = useState<Manifest[]>(initialState?.manifests ?? []);
@@ -114,14 +116,19 @@ export function ConferenceWorkspace({
   const [view, setView] = useState<View>("pending");
   const [localScope, setLocalScope] = useState<WorkspaceScope>(accountEmail ? "mine" : "team");
   const scope = controlledScope ?? localScope;
+  const scopeOrigin = useRef(scope);
+  const teamReadOnly = !!accountEmail && scope === "team";
   const demandOwner =
     scope === "mine" && accountEmail ? { email: accountEmail, userId: accountId } : undefined;
   function changeScope(next: WorkspaceScope) {
     if (newOpen || sheetOpen || editingManifest || deleteId) return;
     setLocalScope(next);
+    scopeOrigin.current = next;
     onScopeChange?.(next);
     setQuery("");
     setFocusedManifest(null);
+    setFilter("all");
+    setTrackingStatus("all");
   }
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [query, setQuery] = useState("");
@@ -159,6 +166,15 @@ export function ConferenceWorkspace({
   const [prefillId, setPrefillId] = useState("");
   const sequence = useRef(0);
   const [pdfBusy, setPdfBusy] = useState(false);
+  useEffect(() => {
+    if (scopeOrigin.current === scope) return;
+    scopeOrigin.current = scope;
+    setQuery("");
+    setFocusedManifest(null);
+    setFilter("all");
+    setTrackingStatus("all");
+    setCode("");
+  }, [scope]);
   async function exportPdf() {
     if (pdfBusy) return;
     setPdfBusy(true);
@@ -231,6 +247,7 @@ export function ConferenceWorkspace({
   }
   function scan(event: FormEvent) {
     event.preventDefault();
+    if (teamReadOnly) return;
     if (
       !code.trim() ||
       blocked ||
@@ -312,6 +329,7 @@ export function ConferenceWorkspace({
     );
   }
   function toggleDocument(manifest: Manifest, id: string, received: boolean) {
+    if (teamReadOnly) return;
     const latest = current.current.find((item) => item.id === manifest.id);
     const doc = latest?.documents.find((item) => item.id === id);
     if (!latest || !doc || doc.received === received) return;
@@ -399,6 +417,7 @@ export function ConferenceWorkspace({
     );
   }
   const presented = selectOwnedRoutes(manifests, demandOwner);
+  const scopeTotals = demandTotals(presented);
   const pending = presented.filter((item) => !item.finishedAt && !item.routeResolved);
   const finished = presented.filter((item) => item.finishedAt || item.routeResolved);
   const documents = presented.flatMap((item) => item.documents);
@@ -601,47 +620,49 @@ export function ConferenceWorkspace({
             </div>
           </header>
           <div className="page-content">
-            {accountEmail && (
-              <DemandScope
-                scope={scope}
-                onScopeChange={changeScope}
-                manifests={manifests}
-                members={teamMembers}
-                onManageTeam={onManageTeam}
-              />
-            )}
             <div className="page-heading">
               <div>
                 <h1>{titles[view]}</h1>
                 <p className="subtitle">
-                  {view === "pending"
-                    ? "Seus documentos separados por motorista. Confira os CTCs e acompanhe o que falta."
-                    : view === "missing"
-                      ? "Todos os CTCs que ainda faltam voltar, do mais antigo ao mais novo."
-                      : view === "finished"
-                        ? "Documentos recebidos. Conferência concluída."
-                        : view === "tracking"
-                          ? "Consulte cada CTC, a pendência e a data da conferência, incluindo manifestos finalizados."
-                          : "Ocorrências da equipe, compartilhadas entre todos os logins."}
+                  {teamReadOnly
+                    ? `Equipe · ${scopeTotals.manifests} manifestos · ${scopeTotals.nfs} NFs cadastradas · Somente consulta`
+                    : view === "pending"
+                      ? "Seus documentos separados por motorista. Confira os CTCs e acompanhe o que falta."
+                      : view === "missing"
+                        ? "Todos os CTCs que ainda faltam voltar, do mais antigo ao mais novo."
+                        : view === "finished"
+                          ? "Documentos recebidos. Conferência concluída."
+                          : view === "tracking"
+                            ? "Consulte cada CTC, a pendência e a data da conferência, incluindo manifestos finalizados."
+                            : "Ocorrências da equipe, compartilhadas entre todos os logins."}
                 </p>
               </div>
               <div className="flex shrink-0 flex-wrap gap-2">
-                <Button onClick={() => setSheetOpen(true)}>
-                  <UploadCloud size={15} />
-                  Importar planilha
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setPrefillId("");
-                    setNewOpen(true);
-                  }}
-                >
-                  <Plus size={15} />{" "}
-                  <span>
-                    Novo pré<span className="hidden sm:inline">-manifesto</span>
-                  </span>
-                </Button>
+                {teamReadOnly && onManageTeam && (
+                  <Button variant="outline" size="sm" onClick={onManageTeam}>
+                    Membros e histórico
+                  </Button>
+                )}
+                {!teamReadOnly && (
+                  <>
+                    <Button onClick={() => setSheetOpen(true)}>
+                      <UploadCloud size={15} />
+                      Importar planilha
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setPrefillId("");
+                        setNewOpen(true);
+                      }}
+                    >
+                      <Plus size={15} />{" "}
+                      <span>
+                        Novo pré<span className="hidden sm:inline">-manifesto</span>
+                      </span>
+                    </Button>
+                  </>
+                )}
               </div>
             </div>
             <div className="metric-grid">
@@ -687,45 +708,47 @@ export function ConferenceWorkspace({
                 </div>
               ))}
             </div>
-            <section className="scanner-band" aria-label="Leitor de CTC">
-              <div className="scanner-symbol">
-                <ScanLine size={29} strokeWidth={1.6} />
-              </div>
-              <div className="scanner-copy">
-                <h2>Pronto para a próxima leitura</h2>
-                <p>
-                  <span className="online-dot" />
-                  Aguardando CTC
-                </p>
-              </div>
-              <form className="scan-form" onSubmit={scan}>
-                <Barcode />
-                <input
-                  ref={scanner}
-                  aria-label="Código do CTC"
-                  className="scan-input"
-                  placeholder="Bipe ou digite o código do CTC…"
-                  value={code}
-                  onChange={(event) => setCode(event.target.value)}
-                  autoComplete="off"
-                  disabled={!!blocked || newOpen || sheetOpen || !!deleteId || !!editingManifest}
-                />
-                <Button
-                  type="submit"
-                  size="sm"
-                  disabled={
-                    !code.trim() ||
-                    !!blocked ||
-                    newOpen ||
-                    sheetOpen ||
-                    !!deleteId ||
-                    !!editingManifest
-                  }
-                >
-                  Conferir <ArrowRight size={13} />
-                </Button>
-              </form>
-            </section>
+            {!teamReadOnly && (
+              <section className="scanner-band" aria-label="Leitor de CTC">
+                <div className="scanner-symbol">
+                  <ScanLine size={29} strokeWidth={1.6} />
+                </div>
+                <div className="scanner-copy">
+                  <h2>Pronto para a próxima leitura</h2>
+                  <p>
+                    <span className="online-dot" />
+                    Aguardando CTC
+                  </p>
+                </div>
+                <form className="scan-form" onSubmit={scan}>
+                  <Barcode />
+                  <input
+                    ref={scanner}
+                    aria-label="Código do CTC"
+                    className="scan-input"
+                    placeholder="Bipe ou digite o código do CTC…"
+                    value={code}
+                    onChange={(event) => setCode(event.target.value)}
+                    autoComplete="off"
+                    disabled={!!blocked || newOpen || sheetOpen || !!deleteId || !!editingManifest}
+                  />
+                  <Button
+                    type="submit"
+                    size="sm"
+                    disabled={
+                      !code.trim() ||
+                      !!blocked ||
+                      newOpen ||
+                      sheetOpen ||
+                      !!deleteId ||
+                      !!editingManifest
+                    }
+                  >
+                    Conferir <ArrowRight size={13} />
+                  </Button>
+                </form>
+              </section>
+            )}
             <div className={`content-grid ${view === "tracking" ? "content-grid-tracking" : ""}`}>
               <section>
                 <div className="section-heading">
@@ -842,6 +865,11 @@ export function ConferenceWorkspace({
                                       : "Cadastro"}{" "}
                                     {formatManifestDate(manifestReferenceDate(manifest))}
                                   </span>
+                                  <ActionActor
+                                    label="Atualizado por"
+                                    email={manifest.updatedByEmail}
+                                    at={manifest.updatedAt}
+                                  />
                                 </td>
                                 <td className="text-muted-foreground" data-label="Nota fiscal">
                                   {doc.nf}
@@ -863,6 +891,7 @@ export function ConferenceWorkspace({
                                     variant="ghost"
                                     size="icon"
                                     className="document-action text-muted-foreground"
+                                    disabled={teamReadOnly}
                                     aria-label={`Marcar CTC ${doc.ctc} como recebido`}
                                     onClick={() => toggleDocument(manifest, doc.id, true)}
                                   >
@@ -912,6 +941,7 @@ export function ConferenceWorkspace({
                     )
                   ) : visible.length ? (
                     <DriverManifestList
+                      readOnly={teamReadOnly}
                       manifests={visible}
                       query={query}
                       focusedManifest={focusedManifest}

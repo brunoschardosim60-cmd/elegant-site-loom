@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ActionActor } from "./action-actor";
 import { reviewManifestTotals } from "@/lib/manifest-review";
 import type { Manifest } from "@/lib/conference";
 import { isPendingDocument } from "@/lib/conference-routes";
@@ -28,6 +29,7 @@ import {
 } from "@/lib/manifest-date";
 
 type Props = {
+  readOnly?: boolean;
   manifests: Manifest[];
   query: string;
   focusedManifest: { id: string } | null;
@@ -61,6 +63,7 @@ const countVolumes = (manifests: Manifest[], pendingOnly = false) =>
 
 /** Keeps every driver's manifests together while opening only the table being used. */
 export function DriverManifestList({
+  readOnly = false,
   manifests,
   query,
   focusedManifest,
@@ -295,12 +298,23 @@ export function DriverManifestList({
                           aria-hidden="true"
                         />
                       </button>
+                      <div className="px-3 pb-1">
+                        {readOnly && (
+                          <ActionActor label="Cadastrado por" email={manifest.createdByEmail} />
+                        )}
+                        <ActionActor
+                          label="Atualizado por"
+                          email={manifest.updatedByEmail}
+                          at={manifest.updatedAt}
+                        />
+                      </div>
                       {(onIssueDateChange ||
                         onDeleteManifest ||
                         onAuditManifest ||
                         onEditManifest) && (
                         <div className="driver-manifest-date-editor px-3 pb-1 flex flex-wrap items-center gap-x-1 gap-y-1">
-                          {onIssueDateChange &&
+                          {!readOnly &&
+                            onIssueDateChange &&
                             (editingDate?.id === manifest.id ? (
                               <form
                                 className="flex min-w-0 flex-wrap items-center gap-2"
@@ -378,7 +392,7 @@ export function DriverManifestList({
                                 <span>Data</span>
                               </button>
                             ))}
-                          {onEditManifest && (
+                          {!readOnly && onEditManifest && (
                             <button
                               type="button"
                               className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -389,7 +403,7 @@ export function DriverManifestList({
                               <span>Editar</span>
                             </button>
                           )}
-                          {onDeleteManifest && (
+                          {!readOnly && onDeleteManifest && (
                             <Button
                               type="button"
                               variant="ghost"
@@ -489,6 +503,13 @@ export function DriverManifestList({
                                             ? "Remanifestado"
                                             : "Pendente"}
                                       </span>
+                                      {doc.received && (
+                                        <ActionActor
+                                          label="Conferido por"
+                                          email={doc.receivedByEmail}
+                                          at={doc.receivedAt}
+                                        />
+                                      )}
                                       {doc.reroutedTo && (
                                         <span className="block mt-1 text-xs text-muted-foreground">
                                           Nova rota: {doc.reroutedTo}
@@ -496,27 +517,29 @@ export function DriverManifestList({
                                       )}
                                     </td>
                                     <td>
-                                      <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="document-action text-muted-foreground"
-                                        disabled={!!doc.reroutedTo}
-                                        title={
-                                          doc.received
-                                            ? `Desfazer CTC ${doc.ctc}`
-                                            : `Marcar CTC ${doc.ctc} como recebido`
-                                        }
-                                        aria-label={
-                                          doc.received
-                                            ? `Desfazer CTC ${doc.ctc}`
-                                            : `Marcar CTC ${doc.ctc} como recebido`
-                                        }
-                                        onClick={() =>
-                                          onToggleDocument(manifest, doc.id, !doc.received)
-                                        }
-                                      >
-                                        {doc.received ? <Undo2 /> : <Check />}
-                                      </Button>
+                                      {!readOnly && (
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          className="document-action text-muted-foreground"
+                                          disabled={!!doc.reroutedTo}
+                                          title={
+                                            doc.received
+                                              ? `Desfazer CTC ${doc.ctc}`
+                                              : `Marcar CTC ${doc.ctc} como recebido`
+                                          }
+                                          aria-label={
+                                            doc.received
+                                              ? `Desfazer CTC ${doc.ctc}`
+                                              : `Marcar CTC ${doc.ctc} como recebido`
+                                          }
+                                          onClick={() =>
+                                            onToggleDocument(manifest, doc.id, !doc.received)
+                                          }
+                                        >
+                                          {doc.received ? <Undo2 /> : <Check />}
+                                        </Button>
+                                      )}
                                     </td>
                                   </tr>
                                 ))}

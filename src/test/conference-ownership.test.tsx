@@ -4,10 +4,45 @@ import type { Manifest } from "@/lib/conference";
 import { belongsTo, demandTotals, selectOwnedRoutes } from "@/lib/conference-ownership";
 import { selectConferenceReport } from "@/lib/conference-pdf";
 import { ConferenceWorkspace } from "@/components/conference-workspace";
+import { AccountStatusBar } from "@/components/account-status";
+import { useState } from "react";
+import type { ConferenceState } from "@/lib/conference-state";
 vi.mock("@/lib/photo-reader.functions", () => ({
   photoReaderStatus: async () => ({ configured: false }),
 }));
 afterEach(cleanup);
+function TeamPreview({
+  items,
+  onSnapshot,
+}: {
+  items: Manifest[];
+  onSnapshot: (state: ConferenceState) => void;
+}) {
+  const [scope, setScope] = useState<"mine" | "team">("mine");
+  return (
+    <>
+      <AccountStatusBar
+        email="bruno@example.test"
+        status="Todos os dados salvos"
+        pending={false}
+        error=""
+        conflict={false}
+        teamView={scope === "team"}
+        onTeam={() => setScope((current) => (current === "team" ? "mine" : "team"))}
+        onSignOut={() => {}}
+        onRetry={() => {}}
+        onReload={() => {}}
+      />
+      <ConferenceWorkspace
+        scope={scope}
+        onScopeChange={setScope}
+        initialState={{ manifests: items, activity: [], issues: [] }}
+        accountEmail="bruno@example.test"
+        onSnapshot={onSnapshot}
+      />
+    </>
+  );
+}
 const manifest = (id: string, email: string, ctc: string): Manifest => ({
   id,
   driver: email === "bruno@example.test" ? "MOTORISTA BRUNO" : "MOTORISTA GISELE",
@@ -49,20 +84,19 @@ it("switches between personal and team demands without saving a filtered subset"
     manifest("06059990", "bruno@example.test", "0000000001"),
     manifest("06059991", "gisele@example.test", "0000000002"),
   ];
-  render(
-    <ConferenceWorkspace
-      initialState={{ manifests: items, activity: [], issues: [] }}
-      accountEmail="bruno@example.test"
-      onSnapshot={onSnapshot}
-    />,
-  );
+  render(<TeamPreview items={items} onSnapshot={onSnapshot} />);
   expect(screen.getByRole("heading", { name: "MOTORISTA BRUNO" })).toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "MOTORISTA GISELE" })).not.toBeInTheDocument();
   onSnapshot.mockClear();
   fireEvent.click(screen.getByRole("button", { name: "Equipe" }));
   expect(screen.getByRole("heading", { name: "MOTORISTA GISELE" })).toBeInTheDocument();
-  expect(screen.getByRole("region", { name: "Resumo por integrante" })).toHaveTextContent("gisele");
-  fireEvent.click(screen.getByRole("button", { name: "Minhas demandas" }));
+  expect(screen.queryByRole("region", { name: "Resumo por integrante" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Minhas demandas" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Importar planilha" })).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "Marcar CTC 0000000002 como recebido" }),
+  ).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Voltar à minha conta" }));
   expect(onSnapshot).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Marcar CTC 0000000001 como recebido" }));
   const saved = onSnapshot.mock.lastCall?.[0];
@@ -76,20 +110,39 @@ it("a teammate CTC scan uses the shared record and exposes the team view", () =>
     manifest("06059990", "bruno@example.test", "0000000001"),
     manifest("06059991", "gisele@example.test", "0000000002"),
   ];
-  render(
-    <ConferenceWorkspace
-      initialState={{ manifests: items, activity: [], issues: [] }}
-      accountEmail="bruno@example.test"
-      onSnapshot={onSnapshot}
-    />,
-  );
+  render(<TeamPreview items={items} onSnapshot={onSnapshot} />);
   fireEvent.change(screen.getByRole("textbox", { name: "Código do CTC" }), {
     target: { value: "0000000002" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Conferir" }));
-  expect(screen.getByRole("button", { name: "Equipe" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", { name: "Voltar à minha conta" })).toBeInTheDocument();
   expect(onSnapshot.mock.lastCall?.[0].manifests[1]).toMatchObject({
     createdByEmail: "gisele@example.test",
     documents: [{ received: true }],
   });
+});
+
+it("shows the last editor and receipt actor with Brasília time on actual manifest rows", () => {
+  const item = manifest("06059990", "bruno@example.test", "0000000001");
+  item.updatedByEmail = "gisele@example.test";
+  item.updatedAt = "2026-10-16T18:30:00Z";
+  item.documents[0] = {
+    ...item.documents[0]!,
+    received: true,
+    receivedByEmail: "alan@example.test",
+    receivedAt: "2026-10-16T17:00:00Z",
+  };
+  item.documents.push({ ...item.documents[0], id: "pending", ctc: "0000000002", received: false });
+  render(
+    <ConferenceWorkspace
+      initialState={{ manifests: [item], activity: [], issues: [] }}
+      accountEmail="bruno@example.test"
+    />,
+  );
+  expect(screen.getByText(/Atualizado por/)).toHaveTextContent(
+    "gisele@example.test · 16/10/2026, 15:30",
+  );
+  expect(screen.getByText(/Conferido por/)).toHaveTextContent(
+    "alan@example.test · 16/10/2026, 14:00",
+  );
 });

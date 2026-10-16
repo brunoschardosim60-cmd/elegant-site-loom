@@ -9,6 +9,7 @@ import {
   Search,
 } from "lucide-react";
 import { Button } from "./ui/button";
+import { ActionActor } from "./action-actor";
 import { conferenceTimestamp, type TrackingRow, type TrackingStatus } from "@/lib/ctc-tracking";
 import {
   formatManifestDate,
@@ -131,6 +132,9 @@ export function CtcTracking({
                       )}
                     </td>
                     <td data-label="Conferência">
+                      {doc.received && (
+                        <ActionActor label="Conferido por" email={doc.receivedByEmail} />
+                      )}
                       {doc.received ? (
                         timestamp ? (
                           <time dateTime={doc.receivedAt}>{timestamp}</time>
