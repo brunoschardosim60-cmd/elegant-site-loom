@@ -6,10 +6,28 @@ import { planOccurrenceUpdates } from "@/lib/nf-occurrences";
 import { conferenceStateSchema } from "@/lib/conference-state";
 import { applyManifestEdit } from "@/lib/manifest-edit";
 import { ConferenceWorkspace } from "@/components/conference-workspace";
+import { NfOccurrences } from "@/components/nf-occurrences";
 vi.mock("@/lib/photo-reader.functions", () => ({
   photoReaderStatus: async () => ({ configured: false }),
 }));
 afterEach(cleanup);
+it("renders each NF once, keeping notes without occurrences and ignoring associations for removed notes", () => {
+  const { container, rerender } = render(
+    <NfOccurrences
+      nf="21581-1, 21582-1"
+      values={[
+        { nf: "21581-1", code: "01", description: "ENTREGA REALIZADA NORMALMENTE" },
+        { nf: "99999-1", code: "91", description: "OUTRA NOTA" },
+      ]}
+    />,
+  );
+  expect(container.textContent?.match(/21581-1/g)).toHaveLength(1);
+  expect(container.textContent?.match(/21582-1/g)).toHaveLength(1);
+  expect(container).toHaveTextContent("NF 21581-1 · 01 — ENTREGA REALIZADA NORMALMENTE");
+  expect(container).not.toHaveTextContent("99999-1");
+  rerender(<NfOccurrences nf="21581-1" />);
+  expect(container).toHaveTextContent(/^21581-1$/);
+});
 
 const headers = [
   "Manifesto",

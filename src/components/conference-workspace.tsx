@@ -960,8 +960,7 @@ export function ConferenceWorkspace({
                                     )}
                                   </td>
                                   <td className="text-muted-foreground" data-label="Nota fiscal">
-                                    {doc.nf}
-                                    <NfOccurrences values={doc.nfOccurrences} />
+                                    <NfOccurrences nf={doc.nf} values={doc.nfOccurrences} />
                                   </td>
                                   <td data-label="Volumes">{doc.volumes}</td>
                                   <td data-label="Status">
