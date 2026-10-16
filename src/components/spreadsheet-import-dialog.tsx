@@ -477,7 +477,7 @@ export function SpreadsheetImportDialog({
                     ocorrências para atualizar.
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    Atualiza apenas código e descrição das NFs correspondentes deste arquivo, sem
+                    Mantém a ocorrência mais recente das NFs correspondentes deste arquivo, sem
                     duplicar cadastros nem alterar conferências. Os filtros e a seleção são usados
                     para cadastrar manifestos novos.
                   </p>
@@ -499,6 +499,18 @@ export function SpreadsheetImportDialog({
                     Atualizar ocorrências das NFs cadastradas
                   </Button>
                 </div>
+              )}
+              {!!occurrenceUpdates?.skippedOlder && (
+                <p role="status" className="text-xs text-muted-foreground">
+                  {occurrenceUpdates.skippedOlder} ocorrência(s) antiga(s) ignorada(s). As mais
+                  recentes já salvas foram mantidas.
+                </p>
+              )}
+              {!!occurrenceUpdates?.skippedUncertain && (
+                <p role="status" className="text-xs text-amber-700">
+                  {occurrenceUpdates.skippedUncertain} ocorrência(s) diferente(s) sem referência
+                  suficiente de data ou geração do relatório. Os dados salvos foram mantidos.
+                </p>
               )}
               {updateMessage && (
                 <p role="status" className="text-sm text-primary">

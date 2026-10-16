@@ -1,6 +1,7 @@
 import type { ImportDraft } from "./manifest-import";
 import { normalizeIssueDate, normalizeIssueTime } from "./manifest-date";
 import { isAnotherRoute } from "./conference-routes";
+import { lastOccurrenceDate } from "./nf-occurrence-date";
 
 export type SheetCell = string | number | boolean | null;
 export type LuftSheet = { name: string; rows: SheetCell[][] };
@@ -60,10 +61,17 @@ export function parseLuft108(sheets: LuftSheet[]): LuftExport {
   const occurrenceDescriptionIndex = headers.findIndex(
     (cell) => normalized(cell) === "DESCRICAO ULTIMA OCORRENCIA",
   );
+  const occurrenceHistoryIndex = headers.findIndex((cell) => normalized(cell) === "OCORRENCIAS");
+  const occurrenceDateIndex = headers.findIndex(
+    (cell) => normalized(cell) === "DATA ULTIMA OCORRENCIA",
+  );
   if (
-    ["CODIGO ULTIMA OCORRENCIA", "DESCRICAO ULTIMA OCORRENCIA"].some(
-      (field) => headers.filter((cell) => normalized(cell) === field).length > 1,
-    )
+    [
+      "CODIGO ULTIMA OCORRENCIA",
+      "DESCRICAO ULTIMA OCORRENCIA",
+      "OCORRENCIAS",
+      "DATA ULTIMA OCORRENCIA",
+    ].some((field) => headers.filter((cell) => normalized(cell) === field).length > 1)
   )
     throw new Error(
       "As colunas de última ocorrência estão repetidas. Gere novamente o relatório 108.",
@@ -125,6 +133,14 @@ export function parseLuft108(sheets: LuftSheet[]): LuftExport {
     const occurrenceCode = occurrenceCodeIndex >= 0 ? literal(cells[occurrenceCodeIndex]) : "";
     const occurrenceDescription =
       occurrenceDescriptionIndex >= 0 ? String(cells[occurrenceDescriptionIndex] ?? "").trim() : "";
+    const occurrenceDate =
+      (occurrenceDateIndex >= 0
+        ? normalizeIssueDate(literal(cells[occurrenceDateIndex]))
+        : undefined) ??
+      lastOccurrenceDate(
+        occurrenceCode,
+        occurrenceHistoryIndex >= 0 ? String(cells[occurrenceHistoryIndex] ?? "") : "",
+      );
     const volumes =
       typeof rawVolumes === "number"
         ? rawVolumes
@@ -169,6 +185,7 @@ export function parseLuft108(sheets: LuftSheet[]): LuftExport {
       deliveryDate,
       occurrenceCode,
       occurrenceDescription,
+      occurrenceDate,
     ]);
     if (seen.has(identity)) {
       if (seen.get(identity) === content) repeated++;
@@ -202,6 +219,7 @@ export function parseLuft108(sheets: LuftSheet[]): LuftExport {
       ...(deliveryDate ? { deliveryDate } : {}),
       ...(occurrenceCode ? { occurrenceCode } : {}),
       ...(occurrenceDescription ? { occurrenceDescription } : {}),
+      ...(occurrenceDate ? { occurrenceDate } : {}),
     });
     groups.set(id, draft);
   }

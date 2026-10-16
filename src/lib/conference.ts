@@ -1,4 +1,10 @@
-export type NfOccurrence = { nf: string; code: string; description: string };
+export type NfOccurrence = {
+  nf: string;
+  code: string;
+  description: string;
+  occurredOn?: string | undefined;
+  reportGeneratedAt?: string | undefined;
+};
 export type DocumentItem = {
   id: string;
   ctc: string;

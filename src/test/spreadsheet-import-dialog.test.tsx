@@ -35,6 +35,57 @@ beforeEach(() => {
   mock.read.mockReset().mockResolvedValue(data());
 });
 afterEach(cleanup);
+it("explains ignored older and undated occurrences without offering an unsafe refresh", async () => {
+  const source = data();
+  source.drafts[0]!.rows[0]!.occurrenceCode = "91";
+  source.drafts[0]!.rows[0]!.occurrenceDate = "2026-10-14";
+  source.drafts[1]!.rows[0]!.occurrenceCode = "91";
+  mock.read.mockResolvedValueOnce(source);
+  const save = vi.fn(),
+    refresh = vi.fn();
+  render(
+    <SpreadsheetImportDialog
+      manifests={source.drafts.map((draft) => ({
+        id: draft.id,
+        driver: draft.driver,
+        plate: draft.plate,
+        date: "2026-10-14",
+        documents: [
+          {
+            id: draft.id,
+            ctc: draft.rows[0]!.ctc,
+            nf: draft.rows[0]!.nf,
+            volumes: 2,
+            received: true,
+            nfOccurrences: [
+              {
+                nf: draft.rows[0]!.nf,
+                code: "01",
+                description: "ENTREGUE",
+                occurredOn: "2026-10-15",
+              },
+            ],
+          },
+        ],
+      }))}
+      onClose={vi.fn()}
+      onCreate={save}
+      onUpdateOccurrences={refresh}
+    />,
+  );
+  upload();
+  expect(
+    await screen.findByText(/1 ocorrência\(s\) antiga\(s\) ignorada\(s\)/),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText(/1 ocorrência\(s\) diferente\(s\) sem referência suficiente/),
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "Atualizar ocorrências das NFs cadastradas" }),
+  ).not.toBeInTheDocument();
+  expect(save).not.toHaveBeenCalled();
+  expect(refresh).not.toHaveBeenCalled();
+});
 it("previews NF occurrence codes and explicitly refreshes existing NFs without registering duplicates", async () => {
   const source = data();
   source.drafts[0]!.rows[0]!.occurrenceCode = "01";

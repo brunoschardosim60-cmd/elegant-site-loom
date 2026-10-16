@@ -88,6 +88,12 @@ beforeAll(async () => {
   await db.exec(
     await readFile("supabase/migrations/20261016020000_visible_action_actors.sql", "utf8"),
   );
+  const chronology = await readFile(
+    "supabase/migrations/20261016030000_latest_nf_occurrences.sql",
+    "utf8",
+  );
+  await db.exec(chronology);
+  await db.exec(chronology);
 }, 30000);
 afterAll(async () => {
   await db?.close();
@@ -634,6 +640,8 @@ it("persists each NF occurrence and merges a concurrent receipt without losing i
     nf: "456-1",
     code: "C3",
     description: "CLIENTE RETEVE CTC/NF",
+    occurredOn: "2026-10-16",
+    reportGeneratedAt: "2026-10-16T10:00:00",
   };
   await as(3);
   await save(first.data, refresh);
@@ -647,4 +655,48 @@ it("persists each NF occurrence and merges a concurrent receipt without losing i
   expect(
     (await call("get_conference_team")).data.manifests.at(-1)!.documents[0]!.nfOccurrences,
   ).toHaveLength(2);
+  // Even a client bypassing the import planner cannot regress the database.
+  const stale = structuredClone(combined.data);
+  stale.manifests.at(-1)!.documents[0]!.nfOccurrences![1] = {
+    nf: "456-1",
+    code: "91",
+    description: "ANTIGA",
+    occurredOn: "2026-10-15",
+    reportGeneratedAt: "2026-10-17T10:00:00",
+  };
+  const guarded = await save(combined.data, stale);
+  expect(guarded.data.manifests.at(-1)!.documents[0]!.nfOccurrences![1]).toEqual(
+    refresh.manifests.at(-1)!.documents[0]!.nfOccurrences![1],
+  );
+  const newer = structuredClone(guarded.data);
+  newer.manifests.at(-1)!.documents[0]!.nfOccurrences![1] = {
+    nf: "456-1",
+    code: "01",
+    description: "ENTREGA REALIZADA",
+    occurredOn: "2026-10-16",
+    reportGeneratedAt: "2026-10-16T11:00:00",
+  };
+  const latest = await save(guarded.data, newer);
+  expect(latest.data.manifests.at(-1)!.documents[0]!.nfOccurrences![1]!.code).toBe("01");
+  const unknown = structuredClone(latest.data);
+  unknown.manifests.at(-1)!.documents[0]!.nfOccurrences![1] = {
+    nf: "456-1",
+    code: "91",
+    description: "SEM DATA",
+  };
+  expect(
+    (await save(latest.data, unknown)).data.manifests.at(-1)!.documents[0]!.nfOccurrences![1]!.code,
+  ).toBe("01");
+  const missing = structuredClone(latest.data);
+  delete missing.manifests.at(-1)!.documents[0]!.nfOccurrences;
+  expect(
+    (await save(latest.data, missing)).data.manifests.at(-1)!.documents[0]!.nfOccurrences,
+  ).toEqual(latest.data.manifests.at(-1)!.documents[0]!.nfOccurrences);
+  const duplicate = structuredClone(latest.data);
+  duplicate.manifests
+    .at(-1)!
+    .documents[0]!.nfOccurrences!.push(
+      duplicate.manifests.at(-1)!.documents[0]!.nfOccurrences![0]!,
+    );
+  await expect(save(latest.data, duplicate)).rejects.toThrow("CONFERENCE_INVALID");
 });

@@ -1,20 +1,35 @@
 import type { Manifest, NfOccurrence } from "./conference";
 import type { ImportDraft } from "./manifest-import";
+import {
+  compareOccurrence,
+  mergeOccurrenceReference,
+  normalizeReportGeneratedAt,
+  sameOccurrenceValue,
+} from "./nf-occurrence-date";
+import { normalizeIssueDate } from "./manifest-date";
 
 type Row = {
   nf: string;
   occurrenceCode?: string | undefined;
   occurrenceDescription?: string | undefined;
+  occurrenceDate?: string | undefined;
+  reportGeneratedAt?: string | undefined;
 };
-const sameOccurrence = (a: NfOccurrence | undefined, b: NfOccurrence) =>
-  a?.nf === b.nf && a.code === b.code && a.description === b.description;
 
 export function occurrencesFromRows(rows: Row[]): NfOccurrence[] {
   return rows.flatMap((row) => {
     const code = row.occurrenceCode?.trim() ?? "";
     const description = row.occurrenceDescription?.trim() ?? "";
     if (!code && !description) return [];
-    return row.nf.split(/[,;]/).map((nf) => ({ nf: nf.trim(), code, description }));
+    const occurredOn = normalizeIssueDate(row.occurrenceDate ?? "");
+    const reportGeneratedAt = normalizeReportGeneratedAt(row.reportGeneratedAt ?? "");
+    return row.nf.split(/[,;]/).map((nf) => ({
+      nf: nf.trim(),
+      code,
+      description,
+      ...(occurredOn ? { occurredOn } : {}),
+      ...(reportGeneratedAt ? { reportGeneratedAt } : {}),
+    }));
   });
 }
 
@@ -27,11 +42,14 @@ export function planOccurrenceUpdates(manifests: Manifest[], drafts: ImportDraft
       for (const occurrence of occurrencesFromRows([row])) {
         const key = JSON.stringify([draft.id, row.ctc, occurrence.nf]);
         const previous = updates.get(key);
-        if (previous && !sameOccurrence(previous, occurrence))
+        if (previous && !sameOccurrenceValue(previous, occurrence))
           throw new Error(`Ocorrências conflitantes para o CTC ${row.ctc} / NF ${occurrence.nf}.`);
-        updates.set(key, occurrence);
+        if (!previous || compareOccurrence(previous, occurrence) === "newer")
+          updates.set(key, mergeOccurrenceReference(previous, occurrence));
       }
   let count = 0;
+  let skippedOlder = 0,
+    skippedUncertain = 0;
   const ids = new Set<string>();
   const next = manifests.map((manifest) => {
     let changed = false;
@@ -40,8 +58,18 @@ export function planOccurrenceUpdates(manifests: Manifest[], drafts: ImportDraft
       let docChanged = false;
       for (const nf of doc.nf.split(/[,;]/).map((value) => value.trim())) {
         const incoming = updates.get(JSON.stringify([manifest.id, doc.ctc, nf]));
-        if (!incoming || sameOccurrence(values.get(nf), incoming)) continue;
-        values.set(nf, incoming);
+        if (!incoming) continue;
+        const comparison = compareOccurrence(values.get(nf), incoming);
+        if (comparison === "older") {
+          skippedOlder++;
+          continue;
+        }
+        if (comparison === "uncertain") {
+          skippedUncertain++;
+          continue;
+        }
+        if (comparison === "equal") continue;
+        values.set(nf, mergeOccurrenceReference(values.get(nf), incoming));
         count++;
         changed = docChanged = true;
       }
@@ -51,5 +79,5 @@ export function planOccurrenceUpdates(manifests: Manifest[], drafts: ImportDraft
     ids.add(manifest.id);
     return { ...manifest, documents };
   });
-  return { manifests: next, count, manifestIds: [...ids] };
+  return { manifests: next, count, manifestIds: [...ids], skippedOlder, skippedUncertain };
 }

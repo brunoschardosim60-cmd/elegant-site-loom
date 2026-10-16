@@ -1,4 +1,5 @@
 import type { LuftExport } from "./luft-spreadsheet";
+import { reportGeneratedAt } from "./nf-occurrence-date";
 
 /** No file data leaves the browser. Termination cancels parsing and late results. */
 export async function readLuftSpreadsheet(file: File, signal: AbortSignal): Promise<LuftExport> {
@@ -34,8 +35,25 @@ export async function readLuftSpreadsheet(file: File, signal: AbortSignal): Prom
     ) => {
       cleanup();
       if (signal.aborted) reject(new DOMException("Importação cancelada.", "AbortError"));
-      else if (event.data.ok && event.data.result) resolve(event.data.result);
-      else reject(new Error(event.data.error || "Não foi possível ler a planilha."));
+      else if (event.data.ok && event.data.result) {
+        const stamp = reportGeneratedAt(file.name);
+        const result = event.data.result;
+        resolve(
+          stamp
+            ? {
+                ...result,
+                drafts: result.drafts.map((draft) => ({
+                  ...draft,
+                  rows: draft.rows.map((row) =>
+                    row.occurrenceCode || row.occurrenceDescription
+                      ? { ...row, reportGeneratedAt: stamp }
+                      : row,
+                  ),
+                })),
+              }
+            : result,
+        );
+      } else reject(new Error(event.data.error || "Não foi possível ler a planilha."));
     };
     if (signal.aborted) abort();
     else worker.postMessage(bytes, [bytes]);

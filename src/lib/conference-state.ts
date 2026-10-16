@@ -1,6 +1,7 @@
 import { manifestIdPattern } from "./manifest-id";
 import { z } from "zod";
 import { normalizeIssueDate, normalizeIssueTime } from "./manifest-date";
+import { normalizeReportGeneratedAt } from "./nf-occurrence-date";
 
 const activitySchema = z.object({
   id: z.union([z.number(), z.string().uuid()]),
@@ -28,6 +29,14 @@ const documentSchema = z.object({
           nf: z.string().regex(/^\d{1,9}-\d{1,3}$/),
           code: z.string().max(32),
           description: z.string().max(1000),
+          occurredOn: z
+            .string()
+            .refine((value) => normalizeIssueDate(value) === value)
+            .optional(),
+          reportGeneratedAt: z
+            .string()
+            .refine((value) => normalizeReportGeneratedAt(value) === value)
+            .optional(),
         })
         .refine((value) => !!(value.code || value.description)),
     )
