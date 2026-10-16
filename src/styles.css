@@ -901,3 +901,9 @@ h1 { font-size: 22px; }
 
 .action-actor { display:block; margin-top:4px; font-size:11px; line-height:1.6; color:var(--muted-foreground); overflow-wrap:anywhere; }
 .action-actor strong { font-weight:500; }
+.nf-occurrences { margin-top:6px; font-family:var(--font-sans); font-size:11px; font-weight:400; line-height:1.6; color:var(--muted-foreground); white-space:normal; overflow-wrap:anywhere; }
+.nf-occurrences-label { display:block; font-size:10px; margin-bottom:2px; }
+.nf-occurrences ul { display:grid; gap:4px; }
+.nf-occurrences strong, .nf-occurrence-invoice { font-weight:500; color:var(--foreground); }
+.sheet-import-dialog button { overflow-wrap:anywhere; }
+@media(max-width:760px) { .nf-occurrences { font-size:12px; } .sheet-import-dialog button { max-width:100%; white-space:normal; height:auto; min-height:32px; } }

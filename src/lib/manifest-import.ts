@@ -3,6 +3,7 @@ import { parseReading, type Manifest, type DocumentItem } from "./conference";
 import { reviewManifestTotals, type ManifestTotals } from "./manifest-review";
 import { normalizeIssueDate, normalizeIssueTime } from "./manifest-date";
 import { isAnotherRoute } from "./conference-routes";
+import { occurrencesFromRows } from "./nf-occurrences";
 import type { ManifestDraftRow } from "../components/manifest-documents-editor";
 export type ImportDraft = {
   id: string;
@@ -229,6 +230,7 @@ export function applyImports(
     }
     const docs: DocumentItem[] = [...grouped.entries()].map(([ctc, group]) => {
       const deliveryDates = group.rows.map((row) => normalizeIssueDate(row.deliveryDate ?? ""));
+      const nfOccurrences = occurrencesFromRows(group.rows);
       const unique = (field: "nf" | "client" | "recipient") => [
         ...new Set(group.rows.map((item) => item[field]?.trim() ?? "").filter(Boolean)),
       ];
@@ -240,6 +242,7 @@ export function applyImports(
         recipient: unique("recipient").join(" / "),
         volumes: group.rows.reduce((sum, item) => sum + Number(item.volumes), 0),
         received: false,
+        ...(nfOccurrences.length ? { nfOccurrences } : {}),
         ...(deliveryDates.every((day) => !!day)
           ? { deliveryDates: [...new Set(deliveryDates as string[])].sort() }
           : {}),

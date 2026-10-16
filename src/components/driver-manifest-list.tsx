@@ -18,6 +18,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ActionActor } from "./action-actor";
+import { NfOccurrences } from "./nf-occurrences";
 import { reviewManifestTotals } from "@/lib/manifest-review";
 import type { Manifest } from "@/lib/conference";
 import { isPendingDocument } from "@/lib/conference-routes";
@@ -484,7 +485,10 @@ export function DriverManifestList({
                                         </span>
                                       )}
                                     </td>
-                                    <td data-label="Nota fiscal">{doc.nf}</td>
+                                    <td data-label="Nota fiscal">
+                                      {doc.nf}
+                                      <NfOccurrences values={doc.nfOccurrences} />
+                                    </td>
                                     <td data-label="Volumes">{doc.volumes}</td>
                                     <td data-label="Status">
                                       <span

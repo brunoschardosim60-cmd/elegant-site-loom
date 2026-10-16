@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { ArrowRight, CheckCheck, Clock3, History, Search } from "lucide-react";
 import { Button } from "./ui/button";
 import { ActionActor } from "./action-actor";
+import { NfOccurrences } from "./nf-occurrences";
 import { DocumentPagination, documentPageSize as pageSize } from "./document-pagination";
 import { conferenceTimestamp, type TrackingRow, type TrackingStatus } from "@/lib/ctc-tracking";
 import {
@@ -90,6 +91,7 @@ export function CtcTracking({
                     <td data-label="CTC / Nota fiscal" className="ctc-number">
                       <strong>{doc.ctc}</strong>
                       <span className="tracking-detail">NF {doc.nf || "não informada"}</span>
+                      <NfOccurrences values={doc.nfOccurrences} />
                       {doc.client && <span className="tracking-detail">{doc.client}</span>}
                       {doc.recipient && (
                         <span className="tracking-detail">Para: {doc.recipient}</span>

@@ -11,6 +11,8 @@ export type ManifestDraftRow = {
   recipient?: string;
   review?: string[];
   deliveryDate?: string | undefined;
+  occurrenceCode?: string | undefined;
+  occurrenceDescription?: string | undefined;
 };
 type Field = "ctc" | "nf" | "volumes" | "client" | "recipient";
 const labels: Record<Field, string> = {

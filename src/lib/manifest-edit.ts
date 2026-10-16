@@ -60,6 +60,12 @@ export function applyManifestEdit(
       received: old.received,
       receivedAt: old.receivedAt,
       deliveryDates: doc.ctc === old.ctc && doc.nf === old.nf ? old.deliveryDates : undefined,
+      nfOccurrences:
+        doc.ctc === old.ctc
+          ? old.nfOccurrences?.filter((item) =>
+              doc.nf.split(/[,;]/).some((nf) => nf.trim() === item.nf),
+            )
+          : undefined,
     };
   });
   const edited: Manifest = {

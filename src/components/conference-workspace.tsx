@@ -50,8 +50,10 @@ import {
   type WorkspaceScope,
 } from "@/lib/conference-ownership";
 import { ActionActor } from "./action-actor";
+import { NfOccurrences } from "./nf-occurrences";
+import { planOccurrenceUpdates } from "@/lib/nf-occurrences";
 import { DocumentPagination, documentPageSize } from "./document-pagination";
-import { applyImports, type ImportDraft } from "@/lib/manifest-import";
+import { applyImports, type ImportDraft, type ImportOutcome } from "@/lib/manifest-import";
 import type { ConferenceState } from "@/lib/conference-state";
 import {
   activityTimestamp,
@@ -504,6 +506,37 @@ export function ConferenceWorkspace({
     }
     return result;
   }
+  function updateOccurrences(drafts: ImportDraft[]): ImportOutcome {
+    if (teamReadOnly)
+      return { ok: false, index: 0, error: "Volte à sua conta para importar a planilha." };
+    try {
+      const result = planOccurrenceUpdates(current.current, drafts);
+      if (!result.count)
+        return {
+          ok: false,
+          index: 0,
+          error: "Nenhuma ocorrência nova corresponde aos manifestos, CTCs e NFs cadastrados.",
+        };
+      update(result.manifests);
+      log(
+        "Ocorrências da Luft atualizadas",
+        `${result.count} NF(s) · ${result.manifestIds.length} manifesto(s) · conferências preservadas`,
+      );
+      notify(
+        onSnapshot
+          ? "Ocorrências atualizadas. Confira o status de salvamento."
+          : "Ocorrências atualizadas.",
+      );
+      return { ok: true, manifests: result.manifests };
+    } catch (error) {
+      return {
+        ok: false,
+        index: 0,
+        error:
+          error instanceof Error ? error.message : "Não foi possível atualizar as ocorrências.",
+      };
+    }
+  }
   const navigation = [
     { view: "pending" as const, label: "Conferência", count: pending.length, Icon: ScanLine },
     { view: "missing" as const, label: "Pendências", count: missing.length, Icon: Clock3 },
@@ -928,6 +961,7 @@ export function ConferenceWorkspace({
                                   </td>
                                   <td className="text-muted-foreground" data-label="Nota fiscal">
                                     {doc.nf}
+                                    <NfOccurrences values={doc.nfOccurrences} />
                                   </td>
                                   <td data-label="Volumes">{doc.volumes}</td>
                                   <td data-label="Status">
@@ -1157,6 +1191,7 @@ export function ConferenceWorkspace({
             manifests={manifests}
             onClose={() => setSheetOpen(false)}
             onCreate={importDrafts}
+            onUpdateOccurrences={updateOccurrences}
           />
         )}
         {newOpen && (

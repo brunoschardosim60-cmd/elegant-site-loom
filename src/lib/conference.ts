@@ -1,3 +1,4 @@
+export type NfOccurrence = { nf: string; code: string; description: string };
 export type DocumentItem = {
   id: string;
   ctc: string;
@@ -10,6 +11,8 @@ export type DocumentItem = {
   receivedBy?: string | undefined;
   receivedByEmail?: string | undefined;
   deliveryDates?: string[] | undefined;
+  /** Last reported Luft occurrence for each literal NF-series, independent of receipt. */
+  nfOccurrences?: NfOccurrence[] | undefined;
   /** Derived for display only; never persisted. */
   reroutedTo?: string | undefined;
 };

@@ -2,7 +2,11 @@
 import { PGlite } from "@electric-sql/pglite";
 import { readFile } from "node:fs/promises";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { emptyConference, type ConferenceState } from "@/lib/conference-state";
+import {
+  emptyConference,
+  conferenceStateSchema,
+  type ConferenceState,
+} from "@/lib/conference-state";
 import type { ConferenceTeam } from "@/lib/conference-team";
 type AuditEntry = { id: number; actor_email: string; manifest_id: string; action: string };
 type RpcResults = {
@@ -601,4 +605,46 @@ it("attributes peer edits and receipts to actual users, preserves them on repeat
   await db.exec(migration);
   await as(1);
   expect((await call("get_conference_team")).data).toEqual(restored);
+});
+it("persists each NF occurrence and merges a concurrent receipt without losing imported occurrence data", async () => {
+  await as(1);
+  const team = await call("get_conference_team");
+  const next = structuredClone(team.data);
+  next.manifests.push({
+    ...make("06057770", "0088888899"),
+    documents: [
+      {
+        id: "occurrence-doc",
+        ctc: "0088888899",
+        nf: "123-1, 456-1",
+        volumes: 2,
+        received: false,
+        nfOccurrences: [
+          { nf: "123-1", code: "01", description: "ENTREGA REALIZADA" },
+          { nf: "456-1", code: "91", description: "ENTREGA PROGRAMADA" },
+        ],
+      },
+    ],
+  });
+  const first = await save(team.data, next);
+  const receipt = structuredClone(first.data);
+  receipt.manifests.at(-1)!.documents[0]!.received = true;
+  const refresh = structuredClone(first.data);
+  refresh.manifests.at(-1)!.documents[0]!.nfOccurrences![1] = {
+    nf: "456-1",
+    code: "C3",
+    description: "CLIENTE RETEVE CTC/NF",
+  };
+  await as(3);
+  await save(first.data, refresh);
+  await as(2);
+  const combined = await save(first.data, receipt);
+  const decoded = conferenceStateSchema.parse(combined.data);
+  expect(decoded.manifests.at(-1)!.documents[0]).toMatchObject({
+    received: true,
+    nfOccurrences: refresh.manifests.at(-1)!.documents[0]!.nfOccurrences,
+  });
+  expect(
+    (await call("get_conference_team")).data.manifests.at(-1)!.documents[0]!.nfOccurrences,
+  ).toHaveLength(2);
 });

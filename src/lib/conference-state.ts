@@ -21,6 +21,18 @@ const documentSchema = z.object({
   receivedAt: z.string().optional(),
   receivedBy: z.string().uuid().optional(),
   receivedByEmail: z.string().email().optional(),
+  nfOccurrences: z
+    .array(
+      z
+        .object({
+          nf: z.string().regex(/^\d{1,9}-\d{1,3}$/),
+          code: z.string().max(32),
+          description: z.string().max(1000),
+        })
+        .refine((value) => !!(value.code || value.description)),
+    )
+    .max(3000)
+    .optional(),
   deliveryDates: z
     .array(z.string().refine((value) => normalizeIssueDate(value) === value))
     .max(300)

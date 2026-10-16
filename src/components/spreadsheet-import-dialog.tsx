@@ -14,15 +14,18 @@ import { findImportConflicts, type ImportDraft, type ImportOutcome } from "@/lib
 import { findLuftCtcOverlaps, luftManifestDays, type LuftExport } from "@/lib/luft-spreadsheet";
 import { formatManifestDate } from "@/lib/manifest-date";
 import { isAnotherRoute } from "@/lib/conference-routes";
+import { planOccurrenceUpdates } from "@/lib/nf-occurrences";
 
 export function SpreadsheetImportDialog({
   manifests,
   onClose,
   onCreate,
+  onUpdateOccurrences,
 }: {
   manifests: Manifest[];
   onClose: () => void;
   onCreate: (drafts: ImportDraft[]) => ImportOutcome;
+  onUpdateOccurrences?: (drafts: ImportDraft[]) => ImportOutcome;
 }) {
   const [result, setResult] = useState<LuftExport | null>(null);
   const [filename, setFilename] = useState("");
@@ -30,6 +33,7 @@ export function SpreadsheetImportDialog({
   const [busy, setBusy] = useState(false);
   const [stopped, setStopped] = useState(false);
   const [error, setError] = useState("");
+  const [updateMessage, setUpdateMessage] = useState("");
   const [query, setQuery] = useState("");
   const [dayFilter, setDayFilter] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -91,6 +95,7 @@ export function SpreadsheetImportDialog({
     setStopped(false);
     setBusy(true);
     setError("");
+    setUpdateMessage("");
     setResult(null);
     setSelected(new Set());
     setQuery("");
@@ -129,6 +134,14 @@ export function SpreadsheetImportDialog({
     }
   }
   const drafts = useMemo(() => result?.drafts ?? [], [result]);
+  const occurrenceUpdates = useMemo(() => {
+    if (!result || result.errors.length) return null;
+    try {
+      return planOccurrenceUpdates(manifests, drafts);
+    } catch {
+      return null;
+    }
+  }, [result, manifests, drafts]);
   const conflicts = useMemo(
     () =>
       drafts.flatMap((draft, index) =>
@@ -426,6 +439,15 @@ export function SpreadsheetImportDialog({
                   {result.ignored} linhas de outras filiais ou motivos ignoradas. {result.repeated}{" "}
                   repetições idênticas removidas. Nada foi cadastrado ainda.
                 </p>
+                <p className="mt-1 text-xs">
+                  {
+                    drafts
+                      .flatMap((draft) => draft.rows)
+                      .filter((row) => row.occurrenceCode || row.occurrenceDescription).length
+                  }{" "}
+                  NFs com última ocorrência informada. Esses dados não alteram a conferência do
+                  documento.
+                </p>
               </div>
               <div
                 className="flex gap-2 overflow-x-auto pb-1"
@@ -447,6 +469,42 @@ export function SpreadsheetImportDialog({
                   </button>
                 ))}
               </div>
+              {!!occurrenceUpdates?.count && onUpdateOccurrences && (
+                <div className="rounded-lg border bg-primary/5 p-3 text-sm space-y-2">
+                  <p>
+                    <strong>{occurrenceUpdates.count} NF(s)</strong> em{" "}
+                    {occurrenceUpdates.manifestIds.length} manifesto(s) já cadastrado(s) têm
+                    ocorrências para atualizar.
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Atualiza apenas código e descrição das NFs correspondentes deste arquivo, sem
+                    duplicar cadastros nem alterar conferências. Os filtros e a seleção são usados
+                    para cadastrar manifestos novos.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => {
+                      const outcome = onUpdateOccurrences(drafts);
+                      if (outcome.ok) {
+                        setError("");
+                        setUpdateMessage(
+                          "Ocorrências atualizadas. Confira o status de salvamento da conta.",
+                        );
+                      } else setError(outcome.error);
+                    }}
+                  >
+                    Atualizar ocorrências das NFs cadastradas
+                  </Button>
+                </div>
+              )}
+              {updateMessage && (
+                <p role="status" className="text-sm text-primary">
+                  {updateMessage}
+                </p>
+              )}
               <div className="flex flex-wrap items-center gap-2">
                 <label className="focus-within:ring-2 focus-within:ring-primary flex min-w-0 flex-[2_1_220px] items-center gap-2 rounded-lg border px-3 py-2">
                   <Search size={15} className="text-muted-foreground" />
@@ -663,13 +721,18 @@ export function SpreadsheetImportDialog({
                     <table className="w-full text-left text-xs">
                       <thead>
                         <tr>
-                          {["CTC", "NF-série", "Volumes", "Remetente", "Destinatário"].map(
-                            (label) => (
-                              <th key={label} className="pb-2 pr-4">
-                                {label}
-                              </th>
-                            ),
-                          )}
+                          {[
+                            "CTC",
+                            "NF-série",
+                            "Volumes",
+                            "Remetente",
+                            "Destinatário",
+                            "Última ocorrência",
+                          ].map((label) => (
+                            <th key={label} className="pb-2 pr-4">
+                              {label}
+                            </th>
+                          ))}
                         </tr>
                       </thead>
                       <tbody>
@@ -687,6 +750,19 @@ export function SpreadsheetImportDialog({
                             <td className="py-2 pr-4">{row.volumes}</td>
                             <td className="py-2 pr-4">{row.client}</td>
                             <td className="py-2">{row.recipient}</td>
+                            <td className="py-2 pl-4 min-w-48">
+                              {row.occurrenceCode || row.occurrenceDescription ? (
+                                <>
+                                  <strong>{row.occurrenceCode}</strong>
+                                  {row.occurrenceCode && row.occurrenceDescription && " — "}
+                                  {row.occurrenceDescription || "Descrição não informada"}
+                                </>
+                              ) : (
+                                <span className="text-muted-foreground">
+                                  Não informada na planilha
+                                </span>
+                              )}
+                            </td>
                           </tr>
                         ))}
                       </tbody>

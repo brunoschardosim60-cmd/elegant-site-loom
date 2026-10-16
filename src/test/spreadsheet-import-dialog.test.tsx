@@ -35,6 +35,42 @@ beforeEach(() => {
   mock.read.mockReset().mockResolvedValue(data());
 });
 afterEach(cleanup);
+it("previews NF occurrence codes and explicitly refreshes existing NFs without registering duplicates", async () => {
+  const source = data();
+  source.drafts[0]!.rows[0]!.occurrenceCode = "01";
+  source.drafts[0]!.rows[0]!.occurrenceDescription = "ENTREGA REALIZADA NORMALMENTE";
+  mock.read.mockResolvedValueOnce(source);
+  const save = vi.fn(),
+    refresh = vi.fn(() => ({ ok: true as const, manifests: [] }));
+  render(
+    <SpreadsheetImportDialog
+      manifests={[
+        {
+          id: "06052233",
+          driver: "ANA",
+          plate: "ABC1D23",
+          date: "2026-10-14",
+          documents: [{ id: "saved", ctc: "0000000001", nf: "123-1", volumes: 2, received: true }],
+        },
+      ]}
+      onClose={vi.fn()}
+      onCreate={save}
+      onUpdateOccurrences={refresh}
+    />,
+  );
+  upload();
+  const update = await screen.findByRole("button", {
+    name: "Atualizar ocorrências das NFs cadastradas",
+  });
+  expect(screen.getByText(/ENTREGA REALIZADA NORMALMENTE/)).toBeInTheDocument();
+  expect(refresh).not.toHaveBeenCalled();
+  expect(screen.getByLabelText("Selecionar manifesto 06052233")).toBeDisabled();
+  fireEvent.click(update);
+  expect(refresh).toHaveBeenCalledExactlyOnceWith(source.drafts);
+  expect(save).not.toHaveBeenCalled();
+  expect(screen.getByRole("dialog")).toBeInTheDocument();
+  expect(screen.getByLabelText("Selecionar manifesto 06052234")).toBeChecked();
+});
 it("lets the user remove a newly registered team duplicate while preserving the other selected manifests", async () => {
   const save = vi.fn(() => ({ ok: true as const, manifests: [] }));
   const view = render(<SpreadsheetImportDialog manifests={[]} onClose={vi.fn()} onCreate={save} />);

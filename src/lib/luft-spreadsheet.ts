@@ -54,6 +54,20 @@ export function parseLuft108(sheets: LuftSheet[]): LuftExport {
       "Envie o relatório 108 — Relação de Notas por Manifesto, em XLSX. Faltam colunas obrigatórias.",
     );
   const headers = sheet.rows[0]!;
+  const occurrenceCodeIndex = headers.findIndex(
+    (cell) => normalized(cell) === "CODIGO ULTIMA OCORRENCIA",
+  );
+  const occurrenceDescriptionIndex = headers.findIndex(
+    (cell) => normalized(cell) === "DESCRICAO ULTIMA OCORRENCIA",
+  );
+  if (
+    ["CODIGO ULTIMA OCORRENCIA", "DESCRICAO ULTIMA OCORRENCIA"].some(
+      (field) => headers.filter((cell) => normalized(cell) === field).length > 1,
+    )
+  )
+    throw new Error(
+      "As colunas de última ocorrência estão repetidas. Gere novamente o relatório 108.",
+    );
   const timeIndex = headers.findIndex((cell) => normalized(cell) === "HORAEMISSAO");
   const deliveryIndex = headers.findIndex((cell) => normalized(cell) === "PREV ENTREGA");
   if (
@@ -108,6 +122,9 @@ export function parseLuft108(sheets: LuftSheet[]): LuftExport {
     const deliveryDate =
       deliveryIndex >= 0 ? normalizeIssueDate(literal(cells[deliveryIndex])) : undefined;
     const rawVolumes = at("Volumes");
+    const occurrenceCode = occurrenceCodeIndex >= 0 ? literal(cells[occurrenceCodeIndex]) : "";
+    const occurrenceDescription =
+      occurrenceDescriptionIndex >= 0 ? String(cells[occurrenceDescriptionIndex] ?? "").trim() : "";
     const volumes =
       typeof rawVolumes === "number"
         ? rawVolumes
@@ -130,7 +147,9 @@ export function parseLuft108(sheets: LuftSheet[]): LuftExport {
                   ? "data de emissão do manifesto"
                   : rawTime && !issueTime
                     ? "horário de emissão"
-                    : "";
+                    : occurrenceCode.length > 32 || occurrenceDescription.length > 1000
+                      ? "código ou descrição da ocorrência"
+                      : "";
     const fail = (message: string) => {
       if (errors.length < 100) errors.push(`Linha ${index + 2}: ${message}.`);
     };
@@ -148,6 +167,8 @@ export function parseLuft108(sheets: LuftSheet[]): LuftExport {
       volumes,
       issueTime,
       deliveryDate,
+      occurrenceCode,
+      occurrenceDescription,
     ]);
     if (seen.has(identity)) {
       if (seen.get(identity) === content) repeated++;
@@ -179,6 +200,8 @@ export function parseLuft108(sheets: LuftSheet[]): LuftExport {
       client,
       recipient,
       ...(deliveryDate ? { deliveryDate } : {}),
+      ...(occurrenceCode ? { occurrenceCode } : {}),
+      ...(occurrenceDescription ? { occurrenceDescription } : {}),
     });
     groups.set(id, draft);
   }
