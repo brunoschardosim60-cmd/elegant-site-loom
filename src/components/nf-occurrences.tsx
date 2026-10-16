@@ -4,7 +4,6 @@ export function NfOccurrences({ values }: { values?: NfOccurrence[] | undefined 
   if (!values?.length) return null;
   return (
     <div className="nf-occurrences">
-      <span className="nf-occurrences-label">Última ocorrência · Luft</span>
       <ul>
         {values.map((item) => (
           <li key={item.nf}>
