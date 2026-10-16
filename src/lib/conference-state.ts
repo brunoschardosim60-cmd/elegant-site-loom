@@ -28,6 +28,8 @@ export const conferenceStateSchema = z.object({
   manifests: z.array(
     z.object({
       id: z.string(),
+      createdBy: z.string().uuid().optional(),
+      createdByEmail: z.string().email().optional(),
       driver: z.string(),
       plate: z.string(),
       date: z.string(),

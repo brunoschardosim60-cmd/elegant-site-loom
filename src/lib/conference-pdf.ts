@@ -12,6 +12,7 @@ import {
   normalizeIssueTime,
 } from "./manifest-date";
 import { selectTrackingRows, type TrackingStatus } from "./ctc-tracking";
+import { belongsTo, type DemandOwner } from "./conference-ownership";
 
 type ReportIssue = { title: string; description: string; time: string; at?: string | undefined };
 type ReportView = "pending" | "missing" | "finished" | "issues" | "tracking";
@@ -23,6 +24,7 @@ export type ConferencePdfInput = {
   filter?: string;
   trackingStatus?: TrackingStatus;
   generatedAt?: Date;
+  owner?: DemandOwner | undefined;
 };
 const labels: Record<ReportView, string> = {
   pending: "Manifestos em aberto",
@@ -74,6 +76,7 @@ export function selectConferenceReport(input: ConferencePdfInput) {
       status: input.trackingStatus ?? "all",
       now,
     })) {
+      if (input.owner && !belongsTo(manifest, input.owner)) continue;
       const group = groups.get(manifest.id) ?? { ...manifest, documents: [] };
       group.documents.push(doc);
       groups.set(manifest.id, group);
@@ -84,6 +87,7 @@ export function selectConferenceReport(input: ConferencePdfInput) {
     input.view === "issues"
       ? []
       : presentRoutes(input.manifests)
+          .filter((manifest) => !input.owner || belongsTo(manifest, input.owner))
           .filter((manifest) =>
             input.view === "finished"
               ? Boolean(manifest.finishedAt || manifest.routeResolved)
@@ -202,6 +206,7 @@ export function createConferencePdf(input: ConferencePdfInput) {
     cursor += 6;
   }
   const filters = [
+    input.owner ? `Cadastros de: ${clean(input.owner.email)}` : "",
     input.view !== "issues" && clean(input.query) ? `Busca: ${clean(input.query)}` : "",
     input.view !== "issues" && input.filter === "old"
       ? "Há 2 dias ou mais pela emissão; sem emissão, pelo cadastro"

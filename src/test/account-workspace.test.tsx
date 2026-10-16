@@ -21,6 +21,7 @@ const saved = {
   manifests: [
     {
       id: "DI00123456789",
+      createdByEmail: "account@example.com",
       driver: "Teste",
       plate: "ABC1234",
       date: "2026-10-11",

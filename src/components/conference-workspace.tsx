@@ -31,12 +31,7 @@ import {
 } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { parseScan, setReceived, type Manifest } from "@/lib/conference";
-import {
-  findCurrentMatches,
-  isAnotherRoute,
-  isPendingDocument,
-  presentRoutes,
-} from "@/lib/conference-routes";
+import { findCurrentMatches, isAnotherRoute, isPendingDocument } from "@/lib/conference-routes";
 
 import { SpreadsheetImportDialog } from "./spreadsheet-import-dialog";
 import { isExportManifest } from "@/lib/manifest-id";
@@ -47,6 +42,9 @@ import { selectTrackingRows, type TrackingStatus } from "@/lib/ctc-tracking";
 import { ManifestEditDialog } from "./manifest-edit-dialog";
 import { applyManifestEdit } from "@/lib/manifest-edit";
 import { ManifestDeleteDialog } from "./manifest-delete-dialog";
+import { DemandScope } from "./demand-scope";
+import { belongsTo, selectOwnedRoutes, type WorkspaceScope } from "@/lib/conference-ownership";
+import type { ConferenceTeam } from "@/lib/conference-team";
 import { applyImports, type ImportDraft } from "@/lib/manifest-import";
 import type { ConferenceState } from "@/lib/conference-state";
 import {
@@ -94,16 +92,37 @@ export function ConferenceWorkspace({
   onSnapshot,
   accountEmail,
   onAuditManifest,
+  accountId,
+  scope: controlledScope,
+  onScopeChange,
+  teamMembers,
+  onManageTeam,
 }: {
   initialState?: ConferenceState;
   externalState?: ConferenceState;
   onSnapshot?: (state: ConferenceState) => void;
   accountEmail?: string;
   onAuditManifest?: (id: string) => void;
+  accountId?: string | undefined;
+  scope?: WorkspaceScope;
+  onScopeChange?: ((scope: WorkspaceScope) => void) | undefined;
+  teamMembers?: ConferenceTeam["members"] | undefined;
+  onManageTeam?: (() => void) | undefined;
 } = {}) {
   const [manifests, setManifests] = useState<Manifest[]>(initialState?.manifests ?? []);
   const current = useRef(manifests);
   const [view, setView] = useState<View>("pending");
+  const [localScope, setLocalScope] = useState<WorkspaceScope>(accountEmail ? "mine" : "team");
+  const scope = controlledScope ?? localScope;
+  const demandOwner =
+    scope === "mine" && accountEmail ? { email: accountEmail, userId: accountId } : undefined;
+  function changeScope(next: WorkspaceScope) {
+    if (newOpen || sheetOpen || editingManifest || deleteId) return;
+    setLocalScope(next);
+    onScopeChange?.(next);
+    setQuery("");
+    setFocusedManifest(null);
+  }
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [query, setQuery] = useState("");
   const [focusedManifest, setFocusedManifest] = useState<{ id: string } | null>(null);
@@ -151,6 +170,7 @@ export function ConferenceWorkspace({
         view,
         query,
         filter,
+        owner: view === "issues" ? undefined : demandOwner,
         ...(view === "tracking" ? { trackingStatus } : {}),
       });
     } catch {
@@ -228,6 +248,7 @@ export function ConferenceWorkspace({
         (item) => item.id.toUpperCase() === input.toUpperCase(),
       );
       if (manifest) {
+        if (demandOwner && !belongsTo(manifest, demandOwner)) changeScope("team");
         setFocusedManifest({ id: manifest.id });
         setView(manifest.finishedAt ? "finished" : "pending");
         setFilter("all");
@@ -265,6 +286,10 @@ export function ConferenceWorkspace({
     const match = matches[0];
     if (!match) return;
     const { manifest, doc } = match;
+    if (demandOwner && !belongsTo(manifest, demandOwner)) {
+      changeScope("team");
+      notify("CTC localizado nos cadastros da equipe.");
+    }
     setFocusedManifest({ id: manifest.id });
     if (doc.received) {
       notify(
@@ -373,13 +398,15 @@ export function ConferenceWorkspace({
       onSnapshot ? "Pré excluído. Confira o status de salvamento." : "Pré-manifesto excluído.",
     );
   }
-  const presented = presentRoutes(manifests);
+  const presented = selectOwnedRoutes(manifests, demandOwner);
   const pending = presented.filter((item) => !item.finishedAt && !item.routeResolved);
   const finished = presented.filter((item) => item.finishedAt || item.routeResolved);
-  const documents = manifests.flatMap((item) => item.documents);
+  const documents = presented.flatMap((item) => item.documents);
   const trackingRows =
     view === "tracking"
-      ? selectTrackingRows(manifests, { query, filter, status: trackingStatus, now })
+      ? selectTrackingRows(manifests, { query, filter, status: trackingStatus, now }).filter(
+          ({ manifest }) => !demandOwner || belongsTo(manifest, demandOwner),
+        )
       : [];
   const missing = pending.flatMap((item) => item.documents).filter(isPendingDocument);
   const age = (manifest: Manifest) => manifestAgeDays(manifest, now);
@@ -404,7 +431,18 @@ export function ConferenceWorkspace({
   function importDrafts(drafts: ImportDraft[]) {
     const result = applyImports(current.current, drafts, new Date().toISOString());
     if (result.ok) {
-      update(result.manifests);
+      const existingIds = new Set(current.current.map((manifest) => manifest.id));
+      update(
+        result.manifests.map((manifest) =>
+          !existingIds.has(manifest.id) && accountEmail
+            ? {
+                ...manifest,
+                createdBy: accountId,
+                createdByEmail: accountEmail.toLowerCase(),
+              }
+            : manifest,
+        ),
+      );
       setView("pending");
       setQuery("");
       setFilter("all");
@@ -563,6 +601,15 @@ export function ConferenceWorkspace({
             </div>
           </header>
           <div className="page-content">
+            {accountEmail && (
+              <DemandScope
+                scope={scope}
+                onScopeChange={changeScope}
+                manifests={manifests}
+                members={teamMembers}
+                onManageTeam={onManageTeam}
+              />
+            )}
             <div className="page-heading">
               <div>
                 <h1>{titles[view]}</h1>
@@ -575,7 +622,7 @@ export function ConferenceWorkspace({
                         ? "Documentos recebidos. Conferência concluída."
                         : view === "tracking"
                           ? "Consulte cada CTC, a pendência e a data da conferência, incluindo manifestos finalizados."
-                          : "Documentos que precisam de atenção."}
+                          : "Ocorrências da equipe, compartilhadas entre todos os logins."}
                 </p>
               </div>
               <div className="flex shrink-0 flex-wrap gap-2">
@@ -615,7 +662,7 @@ export function ConferenceWorkspace({
                 },
                 {
                   label: "Documentos conferidos",
-                  value: documents.filter((doc) => doc.received).length,
+                  value: documents.filter((doc) => doc.received && !doc.reroutedTo).length,
                   caption: "Recebidos e identificados",
                   icon: CircleCheck,
                   color: "text-success",
@@ -907,7 +954,7 @@ export function ConferenceWorkspace({
                     Ao vivo
                   </span>
                 </div>
-                <div className="activity-date">Horários de Brasília</div>
+                <div className="activity-date">Equipe · Horários de Brasília</div>
                 <div className="activity-list">
                   {activity.slice(0, 5).map((item) => (
                     <div className="activity-item" key={item.id}>
@@ -934,14 +981,16 @@ export function ConferenceWorkspace({
                   <h3>Resumo dos cadastros</h3>
                   <div className="summary-line">
                     <span>Documentos recebidos</span>
-                    <strong>{documents.filter((doc) => doc.received).length}</strong>
+                    <strong>
+                      {documents.filter((doc) => doc.received && !doc.reroutedTo).length}
+                    </strong>
                   </div>
                   <div className="summary-line">
                     <span>Pré-manifestos concluídos</span>
                     <strong>{finished.length}</strong>
                   </div>
                   <div className="summary-line">
-                    <span>Ocorrências registradas</span>
+                    <span>Ocorrências da equipe</span>
                     <strong>{issues.length}</strong>
                   </div>
                   <div className="flex gap-2 text-success text-[10px] mt-5 items-center">

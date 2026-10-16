@@ -45,7 +45,7 @@ beforeAll(async () => {
   await db.exec(
     `create role anon; create role authenticated; create schema auth; create table auth.users(id uuid primary key,email text,email_confirmed_at timestamptz); create function auth.uid() returns uuid language sql as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$; grant usage on schema auth to authenticated,anon; grant execute on function auth.uid() to authenticated,anon;`,
   );
-  for (let i = 1; i <= 7; i++)
+  for (let i = 1; i <= 8; i++)
     await db.query("insert into auth.users values($1,$2,$3)", [
       uid(i),
       `person${i}@example.com`,
@@ -78,6 +78,9 @@ beforeAll(async () => {
   await db.exec(
     await readFile("supabase/migrations/20261015110000_manifest_schedule_metadata.sql", "utf8"),
   );
+  await db.exec(
+    await readFile("supabase/migrations/20261016010000_personal_team_demands.sql", "utf8"),
+  );
 }, 30000);
 afterAll(async () => {
   await db?.close();
@@ -93,7 +96,16 @@ it("preserves the owner records and shares only with invited confirmed accounts,
   await call("invite_conference_member", ["person3@example.com"]);
   await call("invite_conference_member", ["person6@example.com"]);
   await as(2);
-  const personal = { ...emptyConference, manifests: [make("DI00123456999", "0000000999")] };
+  const personal = {
+    ...emptyConference,
+    manifests: [
+      {
+        ...make("DI00123456999", "0000000999"),
+        createdBy: uid(2),
+        createdByEmail: "person2@example.com",
+      },
+    ],
+  };
   await call("save_conference", [0, personal]);
   const invited = await call("get_conference_team");
   expect(invited.teamId).not.toBe(teamId);
@@ -417,4 +429,89 @@ it("preserves issuance clock time and separate delivery dates with authenticated
   const invalid = structuredClone(saved.data);
   invalid.manifests[0]!.issueTime = "25:00";
   await expect(save(saved.data, invalid)).rejects.toThrow("CONFERENCE_INVALID");
+});
+it("assigns creators from authentication, preserves them on teammate edits and backfills from immutable audit", async () => {
+  await as(1);
+  await call("get_conference_team");
+  await as(2);
+  await call("get_conference_team");
+  const base = (await call("get_conference_team")).data;
+  const next = structuredClone(base);
+  next.manifests.push({
+    ...make("06058880", "0066666601"),
+    createdBy: uid(1),
+    createdByEmail: "person1@example.com",
+  });
+  const first = await save(base, next);
+  expect(first.data.manifests.find((m) => m.id === "06058880")).toMatchObject({
+    createdBy: uid(2),
+    createdByEmail: "person2@example.com",
+  });
+  await as(1);
+  const edit = structuredClone(first.data);
+  const own = edit.manifests.find((m) => m.id === "06058880")!;
+  own.createdBy = uid(1);
+  own.createdByEmail = "person1@example.com";
+  own.documents[0]!.received = true;
+  const second = await save(first.data, edit);
+  expect(second.data.manifests.find((m) => m.id === "06058880")).toMatchObject({
+    createdBy: uid(2),
+    createdByEmail: "person2@example.com",
+    documents: [{ received: true }],
+  });
+  const team = await call("get_conference_team");
+  expect(team.members.find((member) => member.email === "person2@example.com")?.userId).toBe(
+    uid(2),
+  );
+  const auditBefore = await call("get_conference_audit");
+  await expect(
+    db.query("select public.conference_manifest_creator($1,$2,$2,$3,$4)", [
+      team.teamId,
+      own,
+      uid(1),
+      "person1@example.com",
+    ]),
+  ).rejects.toThrow("permission denied");
+  await db.exec("reset role");
+  const missing = structuredClone(second.data);
+  for (const item of missing.manifests) {
+    delete item.createdBy;
+    delete item.createdByEmail;
+  }
+  await db.query("update public.conference_states set data=$1 where user_id=$2", [missing, uid(1)]);
+  const migration = await readFile(
+    "supabase/migrations/20261016010000_personal_team_demands.sql",
+    "utf8",
+  );
+  await db.exec(migration);
+  await as(1);
+  expect((await call("get_conference_team")).data).toEqual(second.data);
+  expect(await call("get_conference_audit")).toEqual(auditBefore);
+  await db.exec("reset role");
+  await db.exec(migration);
+  await as(1);
+  expect((await call("get_conference_team")).data).toEqual(second.data);
+});
+
+it("initializes a new team's personal records with the actual owner and ignores legacy creator forgery", async () => {
+  await as(8);
+  const before = {
+    ...emptyConference,
+    manifests: [
+      {
+        ...make("06058881", "0066666602"),
+        createdBy: uid(1),
+        createdByEmail: "person1@example.com",
+      },
+    ],
+  };
+  await call("save_conference", [0, before]);
+  const team = await call("get_conference_team");
+  expect(team.data.manifests[0]).toEqual({
+    ...before.manifests[0],
+    createdBy: uid(8),
+    createdByEmail: "person8@example.com",
+  });
+  expect((await call("get_conference_team")).revision).toBe(team.revision);
+  expect(await call("get_conference_audit")).toEqual([]);
 });

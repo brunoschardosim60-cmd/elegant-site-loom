@@ -7,6 +7,7 @@ import { TeamSync, teamSchema, type TeamSyncView } from "@/lib/conference-team";
 import { parseLuft108 } from "@/lib/luft-spreadsheet";
 import { applyImports } from "@/lib/manifest-import";
 import { emptyConference, type ConferenceState } from "@/lib/conference-state";
+import { selectOwnedRoutes } from "@/lib/conference-ownership";
 
 // Three independent clients send overlapping HTTP requests to the actual SQL
 // RPCs. PostgreSQL transactions serialize the commits. No production data,
@@ -69,6 +70,7 @@ beforeAll(async () => {
     "20261014030000_export_manifest_ids.sql",
     "20261015090000_remanifested_routes.sql",
     "20261015110000_manifest_schedule_metadata.sql",
+    "20261016010000_personal_team_demands.sql",
   ])
     await db.exec(await readFile(`supabase/migrations/${migration}`, "utf8"));
   server = createServer(async (request, response) => {
@@ -172,6 +174,37 @@ function receive(base: ConferenceState, doc: number) {
 }
 const audit = async () =>
   (await rpc(1, "get_conference_audit")).data as { action: string; actor_email: string }[];
+
+it("three people register their own demands concurrently while all sessions retain the whole team", async () => {
+  const { sessions, views } = await clients();
+  sessions.forEach((session, index) => {
+    const next = structuredClone(views[index]!.state);
+    next.manifests.push({
+      ...pre(20 + index),
+      createdBy: uid(4),
+      createdByEmail: "device4@example.invalid",
+    });
+    session.change(next);
+  });
+  await settle(sessions, views);
+  expect(peak).toBe(3);
+  expect(
+    views.every((view) => !view.pending && !view.error && view.state.manifests.length === 4),
+  ).toBe(true);
+  for (let index = 0; index < 3; index++) {
+    expect(views[0]!.state.manifests.find((item) => item.id === pre(20 + index).id)).toMatchObject({
+      createdBy: uid(index + 1),
+      createdByEmail: `device${index + 1}@example.invalid`,
+    });
+    expect(
+      selectOwnedRoutes(views[index]!.state.manifests, {
+        email: `device${index + 1}@example.invalid`,
+        userId: uid(index + 1),
+      }),
+    ).toHaveLength(index === 0 ? 2 : 1);
+    sessions[index]!.stop();
+  }
+});
 
 it("three simultaneous sessions receive different CTCs, converge and finish once with correct actors", async () => {
   const { sessions, views } = await clients();

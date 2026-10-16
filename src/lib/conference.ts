@@ -13,6 +13,9 @@ export type DocumentItem = {
 };
 export type Manifest = {
   id: string;
+  /** Assigned by the authenticated server; edits and receipts keep the original creator. */
+  createdBy?: string | undefined;
+  createdByEmail?: string | undefined;
   driver: string;
   plate: string;
   date: string;

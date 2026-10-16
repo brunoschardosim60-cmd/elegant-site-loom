@@ -9,6 +9,7 @@ import { passwordRecoveryLocation, setPasswordRecoveryMarker } from "@/lib/passw
 import { TeamSync, teamSchema, type TeamSyncView } from "@/lib/conference-team";
 import { TeamPanel } from "./team-panel";
 import { teamRequest } from "@/lib/team-request";
+import type { WorkspaceScope } from "@/lib/conference-ownership";
 
 export function AccountWorkspace() {
   const [client, setClient] = useState<SupabaseClient>();
@@ -155,6 +156,7 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
   const [view, setView] = useState<TeamSyncView>();
   const [loadError, setLoadError] = useState("");
   const [teamOpen, setTeamOpen] = useState(false);
+  const [scope, setScope] = useState<WorkspaceScope>("mine");
   const [auditPre, setAuditPre] = useState("");
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState("");
@@ -259,8 +261,11 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
         conflict={view.conflict}
         invitation={!!view.team.invitation}
         onTeam={() => {
-          setAuditPre("");
-          setTeamOpen(true);
+          setScope("team");
+          if (view.team.invitation) {
+            setAuditPre("");
+            setTeamOpen(true);
+          }
           void sync.current?.refresh(true);
         }}
         signingOut={signingOut}
@@ -275,6 +280,15 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
           externalState={view.state}
           onSnapshot={changed}
           accountEmail={session.user.email || ""}
+          accountId={session.user.id}
+          scope={scope}
+          onScopeChange={setScope}
+          teamMembers={view.team.members}
+          onManageTeam={() => {
+            setAuditPre("");
+            setTeamOpen(true);
+            void sync.current?.refresh(true);
+          }}
           onAuditManifest={(id) => {
             setAuditPre(id);
             setTeamOpen(true);

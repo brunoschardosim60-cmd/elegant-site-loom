@@ -7,7 +7,14 @@ export const teamSchema = z.object({
   owner: z.boolean(),
   revision: z.number().int().nonnegative(),
   data: conferenceStateSchema,
-  members: z.array(z.object({ email: z.string(), owner: z.boolean(), pending: z.boolean() })),
+  members: z.array(
+    z.object({
+      email: z.string(),
+      userId: z.string().uuid().optional(),
+      owner: z.boolean(),
+      pending: z.boolean(),
+    }),
+  ),
   invitation: z.object({ ownerEmail: z.string() }).nullable().optional(),
 });
 export type ConferenceTeam = z.infer<typeof teamSchema>;
