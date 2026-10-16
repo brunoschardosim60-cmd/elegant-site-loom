@@ -493,6 +493,19 @@ export function SpreadsheetImportDialog({
                 >
                   Limpar seleção
                 </Button>
+                {(query.trim() || dayFilter) && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setQuery("");
+                      setDayFilter("");
+                    }}
+                  >
+                    Limpar filtros
+                  </Button>
+                )}
               </div>
               <p className="text-xs text-muted-foreground">
                 Exibindo {visible.length} de {drafts.length} ·{" "}

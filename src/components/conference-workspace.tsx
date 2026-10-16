@@ -20,6 +20,7 @@ import {
   ShieldCheck,
   TriangleAlert,
   UploadCloud,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -49,6 +50,7 @@ import {
   type WorkspaceScope,
 } from "@/lib/conference-ownership";
 import { ActionActor } from "./action-actor";
+import { DocumentPagination, documentPageSize } from "./document-pagination";
 import { applyImports, type ImportDraft } from "@/lib/manifest-import";
 import type { ConferenceState } from "@/lib/conference-state";
 import {
@@ -135,6 +137,17 @@ export function ConferenceWorkspace({
   const [focusedManifest, setFocusedManifest] = useState<{ id: string } | null>(null);
   const [filter, setFilter] = useState("all");
   const [trackingStatus, setTrackingStatus] = useState<TrackingStatus>("all");
+  const [pendingPagination, setPendingPagination] = useState({ scope: "", page: 0 });
+  const searchInput = useRef<HTMLInputElement>(null);
+  const pendingTableRef = useRef<HTMLDivElement>(null);
+  const filtersActive =
+    !!query.trim() || filter === "old" || (view === "tracking" && trackingStatus !== "all");
+  function clearFilters() {
+    setQuery("");
+    setFilter("all");
+    setTrackingStatus("all");
+    searchInput.current?.focus({ preventScroll: true });
+  }
   const [code, setCode] = useState("");
   const scanner = useRef<HTMLInputElement>(null);
   const [activity, setActivity] = useState(initialState?.activity ?? initialActivity);
@@ -446,6 +459,18 @@ export function ConferenceWorkspace({
     .filter((item) => matchesConferenceSearch(item, query))
     .filter((item) => filter !== "old" || age(item) >= 2)
     .sort((a, b) => (filter === "new" ? compareManifestDates(b, a) : compareManifestDates(a, b)));
+  const pendingPageScope = JSON.stringify([scope, view, query, filter]);
+  const pendingPage =
+    pendingPagination.scope === pendingPageScope
+      ? Math.min(
+          pendingPagination.page,
+          Math.max(0, Math.ceil(missingRows.length / documentPageSize) - 1),
+        )
+      : 0;
+  const visibleMissingRows = missingRows.slice(
+    pendingPage * documentPageSize,
+    (pendingPage + 1) * documentPageSize,
+  );
 
   function importDrafts(drafts: ImportDraft[]) {
     const result = applyImports(current.current, drafts, new Date().toISOString());
@@ -789,9 +814,10 @@ export function ConferenceWorkspace({
                 </div>
                 {view !== "issues" && (
                   <div className="list-tools">
-                    <label className="search-wrap">
+                    <div className="search-wrap">
                       <Search />
                       <input
+                        ref={searchInput}
                         aria-label={
                           view === "tracking"
                             ? "Buscar CTC no rastreamento"
@@ -801,7 +827,20 @@ export function ConferenceWorkspace({
                         value={query}
                         onChange={(event) => setQuery(event.target.value)}
                       />
-                    </label>
+                      {!!query && (
+                        <button
+                          type="button"
+                          className="search-clear"
+                          aria-label="Limpar busca"
+                          onClick={() => {
+                            setQuery("");
+                            searchInput.current?.focus({ preventScroll: true });
+                          }}
+                        >
+                          <X size={16} aria-hidden="true" />
+                        </button>
+                      )}
+                    </div>
                     <select
                       aria-label="Filtrar pré-manifestos"
                       className="filter-select"
@@ -812,6 +851,11 @@ export function ConferenceWorkspace({
                       <option value="new">Mais recentes</option>
                       <option value="old">Há 2 dias ou mais</option>
                     </select>
+                    {filtersActive && (
+                      <Button type="button" variant="ghost" size="sm" onClick={clearFilters}>
+                        Limpar filtros
+                      </Button>
+                    )}
                   </div>
                 )}
                 <div className="manifest-list">
@@ -823,96 +867,117 @@ export function ConferenceWorkspace({
                       scope={JSON.stringify([query, filter, trackingStatus])}
                       now={now}
                       onAuditManifest={onAuditManifest}
+                      personal={!!demandOwner}
                     />
                   ) : view === "missing" ? (
                     missingRows.length ? (
-                      <div className="manifest-card pending-table-wrap">
-                        <table className="document-table pending-table" aria-label="CTCs pendentes">
-                          <thead>
-                            <tr>
-                              <th>CTC</th>
-                              <th>Pré / Motorista</th>
-                              <th>NF</th>
-                              <th>Vols.</th>
-                              <th>Status</th>
-                              <th>
-                                <span className="sr-only">Ações</span>
-                              </th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {missingRows.map(({ manifest, doc, days }) => (
-                              <tr key={doc.id}>
-                                <td className="ctc-number" data-label="CTC / Cliente">
-                                  {doc.ctc}
-                                  {doc.client && (
-                                    <span className="block text-muted-foreground text-[10px] font-sans mt-1">
-                                      {doc.client}
-                                    </span>
-                                  )}
-                                </td>
-                                <td data-label="Pré / Motorista">
-                                  <span className="block font-semibold">{manifest.id}</span>
-                                  <span className="text-muted-foreground">
-                                    {manifest.driver} ·{" "}
-                                    <span className="plate">{manifest.plate}</span>
-                                  </span>
-                                  <span className="block text-muted-foreground text-[10px] mt-1">
-                                    {normalizeIssueDate(manifest.issueDate ?? "")
-                                      ? /^\d{8,12}$/.test(manifest.id)
-                                        ? "Manifestado em"
-                                        : "Emissão"
-                                      : "Cadastro"}{" "}
-                                    {formatManifestDate(manifestReferenceDate(manifest))}
-                                  </span>
-                                  <ActionActor
-                                    label="Atualizado por"
-                                    email={manifest.updatedByEmail}
-                                    at={manifest.updatedAt}
-                                  />
-                                </td>
-                                <td className="text-muted-foreground" data-label="Nota fiscal">
-                                  {doc.nf}
-                                </td>
-                                <td data-label="Volumes">{doc.volumes}</td>
-                                <td data-label="Status">
-                                  <span
-                                    className={`status-badge ${days >= 2 ? "badge-warning" : "badge-pending"}`}
-                                  >
-                                    <Clock3 size={10} />
-                                    Pendente
-                                  </span>
-                                  <span className="tracking-detail">
-                                    {manifestAgeLabel(manifest, now)}
-                                  </span>
-                                </td>
-                                <td data-label="Ações">
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="document-action text-muted-foreground"
-                                    disabled={teamReadOnly}
-                                    aria-label={`Marcar CTC ${doc.ctc} como recebido`}
-                                    onClick={() => toggleDocument(manifest, doc.id, true)}
-                                  >
-                                    <Check />
-                                  </Button>
-                                </td>
+                      <>
+                        <div
+                          ref={pendingTableRef}
+                          tabIndex={-1}
+                          className="manifest-card pending-table-wrap paged-documents"
+                        >
+                          <table
+                            className="document-table pending-table"
+                            aria-label="CTCs pendentes"
+                          >
+                            <thead>
+                              <tr>
+                                <th>CTC</th>
+                                <th>Pré / Motorista</th>
+                                <th>NF</th>
+                                <th>Vols.</th>
+                                <th>Status</th>
+                                <th>
+                                  <span className="sr-only">Ações</span>
+                                </th>
                               </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
+                            </thead>
+                            <tbody>
+                              {visibleMissingRows.map(({ manifest, doc, days }) => (
+                                <tr key={`${manifest.id}:${doc.id}`}>
+                                  <td className="ctc-number" data-label="CTC / Cliente">
+                                    {doc.ctc}
+                                    {doc.client && (
+                                      <span className="block text-muted-foreground text-[10px] font-sans mt-1">
+                                        {doc.client}
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td data-label="Pré / Motorista">
+                                    <span className="block font-semibold">{manifest.id}</span>
+                                    <span className="text-muted-foreground">
+                                      {manifest.driver} ·{" "}
+                                      <span className="plate">{manifest.plate}</span>
+                                    </span>
+                                    <span className="block text-muted-foreground text-[10px] mt-1">
+                                      {normalizeIssueDate(manifest.issueDate ?? "")
+                                        ? /^\d{8,12}$/.test(manifest.id)
+                                          ? "Manifestado em"
+                                          : "Emissão"
+                                        : "Cadastro"}{" "}
+                                      {formatManifestDate(manifestReferenceDate(manifest))}
+                                    </span>
+                                    <ActionActor
+                                      label="Atualizado por"
+                                      email={manifest.updatedByEmail}
+                                      at={manifest.updatedAt}
+                                    />
+                                  </td>
+                                  <td className="text-muted-foreground" data-label="Nota fiscal">
+                                    {doc.nf}
+                                  </td>
+                                  <td data-label="Volumes">{doc.volumes}</td>
+                                  <td data-label="Status">
+                                    <span
+                                      className={`status-badge ${days >= 2 ? "badge-warning" : "badge-pending"}`}
+                                    >
+                                      <Clock3 size={10} />
+                                      Pendente
+                                    </span>
+                                    <span className="tracking-detail">
+                                      {manifestAgeLabel(manifest, now)}
+                                    </span>
+                                  </td>
+                                  <td data-label="Ações">
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="document-action text-muted-foreground"
+                                      disabled={teamReadOnly}
+                                      aria-label={`Marcar CTC ${doc.ctc} como recebido`}
+                                      onClick={() => toggleDocument(manifest, doc.id, true)}
+                                    >
+                                      <Check />
+                                    </Button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        <DocumentPagination
+                          total={missingRows.length}
+                          page={pendingPage}
+                          onPageChange={(page) =>
+                            setPendingPagination({ scope: pendingPageScope, page })
+                          }
+                          label="Páginas das pendências"
+                          targetRef={pendingTableRef}
+                        />
+                      </>
                     ) : (
                       <div className="empty-state">
                         <CheckCheck />
-                        <h3>Nada pendente</h3>
+                        <h3>{filtersActive ? "Nenhuma pendência encontrada" : "Nada pendente"}</h3>
                         <p className="text-xs mt-2">
                           {query.trim() || filter === "old"
                             ? "Nenhum resultado para essa busca ou filtro."
-                            : manifests.length
+                            : presented.length
                               ? "Não há CTCs pendentes nas rotas atuais. Consulte as tentativas anteriores no rastreamento."
-                              : "Importe uma planilha 108 ou cadastre um manifesto para começar."}
+                              : teamReadOnly
+                                ? "A equipe ainda não cadastrou manifestos."
+                                : "Importe uma planilha 108 ou cadastre um manifesto na sua conta para começar."}
                         </p>
                       </div>
                     )
@@ -961,16 +1026,24 @@ export function ConferenceWorkspace({
                     <div className="empty-state">
                       <Inbox />
                       <h3>
-                        {view === "finished" ? "Nenhum pré finalizado" : "Nenhum pré pendente"}
+                        {filtersActive
+                          ? "Nenhum manifesto encontrado"
+                          : view === "finished"
+                            ? "Nenhum pré finalizado"
+                            : presented.length
+                              ? "Nenhum pré pendente"
+                              : "Nenhum manifesto cadastrado"}
                       </h3>
                       <p className="text-xs mt-2">
                         {query.trim() || filter === "old"
                           ? "Nenhum resultado para essa busca ou filtro."
                           : view === "finished"
                             ? "As rotas aparecem aqui quando todos os CTCs forem conferidos ou encaminhados em nova rota."
-                            : manifests.length
+                            : presented.length
                               ? "Todos os manifestos cadastrados foram finalizados."
-                              : "Importe uma planilha 108 ou cadastre um manifesto para começar."}
+                              : teamReadOnly
+                                ? "A equipe ainda não cadastrou manifestos."
+                                : "Importe uma planilha 108 ou cadastre um manifesto na sua conta para começar."}
                       </p>
                     </div>
                   )}

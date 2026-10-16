@@ -338,7 +338,7 @@ it("emits an empty registered manifest list when the final pré is deleted", asy
   expect(saved.activity.filter((entry) => entry.title === "Pré-manifesto excluído")).toHaveLength(
     1,
   );
-  expect(screen.getByRole("heading", { name: "Nenhum pré pendente" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Nenhum manifesto cadastrado" })).toBeInTheDocument();
   expectMetric("Manifestos em aberto", "00");
   expectMetric("Documentos pendentes", "00");
 });

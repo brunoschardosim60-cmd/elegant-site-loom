@@ -1,15 +1,8 @@
-import { useState } from "react";
-import {
-  ArrowRight,
-  CheckCheck,
-  ChevronLeft,
-  ChevronRight,
-  Clock3,
-  History,
-  Search,
-} from "lucide-react";
+import { useRef, useState } from "react";
+import { ArrowRight, CheckCheck, Clock3, History, Search } from "lucide-react";
 import { Button } from "./ui/button";
 import { ActionActor } from "./action-actor";
+import { DocumentPagination, documentPageSize as pageSize } from "./document-pagination";
 import { conferenceTimestamp, type TrackingRow, type TrackingStatus } from "@/lib/ctc-tracking";
 import {
   formatManifestDate,
@@ -18,7 +11,6 @@ import {
   normalizeIssueDate,
 } from "@/lib/manifest-date";
 
-const pageSize = 50;
 export function CtcTracking({
   rows,
   status,
@@ -26,6 +18,7 @@ export function CtcTracking({
   scope,
   now,
   onAuditManifest,
+  personal = false,
 }: {
   rows: TrackingRow[];
   status: TrackingStatus;
@@ -33,8 +26,10 @@ export function CtcTracking({
   scope: string;
   now: string;
   onAuditManifest?: ((id: string) => void) | undefined;
+  personal?: boolean;
 }) {
   const [pagination, setPagination] = useState({ scope, page: 0 });
+  const tableRef = useRef<HTMLDivElement>(null);
   const pages = Math.max(1, Math.ceil(rows.length / pageSize));
   const page = pagination.scope === scope ? Math.min(pagination.page, pages - 1) : 0;
   const visible = rows.slice(page * pageSize, (page + 1) * pageSize);
@@ -57,11 +52,18 @@ export function CtcTracking({
         </label>
         <p role="status">
           {rows.length} CTC{rows.length === 1 ? "" : "s"} encontrado{rows.length === 1 ? "" : "s"}
-          <span>Horários de Brasília · consulta dos cadastros da equipe</span>
+          <span>
+            Horários de Brasília ·{" "}
+            {personal ? "consulta dos seus cadastros" : "consulta dos cadastros da equipe"}
+          </span>
         </p>
       </div>
       {visible.length ? (
-        <div className="manifest-card tracking-table-wrap">
+        <div
+          ref={tableRef}
+          tabIndex={-1}
+          className="manifest-card tracking-table-wrap paged-documents"
+        >
           <table className="document-table tracking-table" aria-label="Rastreamento de CTCs">
             <thead>
               <tr>
@@ -179,37 +181,13 @@ export function CtcTracking({
           </p>
         </div>
       )}
-      {rows.length > pageSize && (
-        <nav className="tracking-pagination" aria-label="Páginas do rastreamento">
-          <span>
-            {page * pageSize + 1}–{Math.min((page + 1) * pageSize, rows.length)} de {rows.length}{" "}
-            CTCs
-          </span>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={page === 0}
-            onClick={() => setPagination({ scope, page: page - 1 })}
-          >
-            <ChevronLeft size={14} />
-            Anterior
-          </Button>
-          <span>
-            Página {page + 1} de {pages}
-          </span>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={page + 1 >= pages}
-            onClick={() => setPagination({ scope, page: page + 1 })}
-          >
-            Próxima
-            <ChevronRight size={14} />
-          </Button>
-        </nav>
-      )}
+      <DocumentPagination
+        total={rows.length}
+        page={page}
+        onPageChange={(next) => setPagination({ scope, page: next })}
+        label="Páginas do rastreamento"
+        targetRef={tableRef}
+      />
     </section>
   );
 }

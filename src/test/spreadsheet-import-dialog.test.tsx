@@ -67,6 +67,20 @@ const upload = () =>
     target: { files: [new File(["xlsx"], "108.xlsx")] },
   });
 const droppedFile = () => new File(["xlsx"], "108.xlsx");
+it("clears spreadsheet search and day without changing the selected manifests", async () => {
+  const save = vi.fn();
+  render(<SpreadsheetImportDialog manifests={[]} onClose={vi.fn()} onCreate={save} />);
+  upload();
+  await screen.findByLabelText("Selecionar manifesto 06052233");
+  fireEvent.click(screen.getByLabelText("Selecionar manifesto 06052233"));
+  fireEvent.change(screen.getByLabelText("Buscar motorista, placa ou manifesto na planilha"), {
+    target: { value: "nada" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Limpar filtros" }));
+  expect(screen.getByLabelText("Selecionar manifesto 06052233")).not.toBeChecked();
+  expect(screen.getByLabelText("Selecionar manifesto 06052234")).toBeChecked();
+  expect(save).not.toHaveBeenCalled();
+});
 const dropZone = () => screen.getByLabelText("Enviar planilha 108").closest("label")!;
 it("highlights a dragged file, keeps the highlight across children and reads a drop exactly once without registering", async () => {
   const save = vi.fn();

@@ -123,7 +123,7 @@ export function DriverManifestList({
           {groups.size} {groups.size === 1 ? "motorista" : "motoristas"} · {manifests.length}{" "}
           {manifests.length === 1 ? "manifesto" : "manifestos"}
         </span>
-        <span>Selecione um manifesto para conferir</span>
+        <span>Selecione um manifesto para {readOnly ? "consultar" : "conferir"}</span>
       </div>
       {[...groups.entries()].map(([key, group]) => {
         const pendingCount = group.manifests.reduce(

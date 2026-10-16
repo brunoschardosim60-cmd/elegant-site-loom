@@ -146,7 +146,7 @@ it("saves a confirmed deletion and retains its audit entry without re-registerin
     { title: "Pré-manifesto excluído" },
   ]);
   await screen.findByText("Todos os dados salvos");
-  expect(screen.getByRole("heading", { name: "Nenhum pré pendente" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Nenhum manifesto cadastrado" })).toBeInTheDocument();
 });
 it("updates another persons receipt without remounting the scanner or losing its typed value", async () => {
   render(<AccountWorkspace />);
