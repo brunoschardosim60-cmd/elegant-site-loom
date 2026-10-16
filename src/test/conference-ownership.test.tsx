@@ -122,7 +122,7 @@ it("a teammate CTC scan uses the shared record and exposes the team view", () =>
   });
 });
 
-it("shows the last editor and receipt actor with Brasília time on actual manifest rows", () => {
+it("shows the last editor only in team consultation and preserves the receipt actor in personal rows", () => {
   const item = manifest("06059990", "bruno@example.test", "0000000001");
   item.updatedByEmail = "gisele@example.test";
   item.updatedAt = "2026-10-16T18:30:00Z";
@@ -133,16 +133,30 @@ it("shows the last editor and receipt actor with Brasília time on actual manife
     receivedAt: "2026-10-16T17:00:00Z",
   };
   item.documents.push({ ...item.documents[0], id: "pending", ctc: "0000000002", received: false });
-  render(
+  const view = render(
     <ConferenceWorkspace
       initialState={{ manifests: [item], activity: [], issues: [] }}
       accountEmail="bruno@example.test"
     />,
   );
+  expect(screen.queryByText(/Atualizado por/)).not.toBeInTheDocument();
+  expect(screen.getByText(/Conferido por/)).toHaveTextContent(
+    "alan@example.test · 16/10/2026, 14:00",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Pendências" }));
+  expect(screen.queryByText(/Atualizado por/)).not.toBeInTheDocument();
+  view.rerender(
+    <ConferenceWorkspace
+      initialState={{ manifests: [item], activity: [], issues: [] }}
+      accountEmail="bruno@example.test"
+      scope="team"
+    />,
+  );
   expect(screen.getByText(/Atualizado por/)).toHaveTextContent(
     "gisele@example.test · 16/10/2026, 15:30",
   );
-  expect(screen.getByText(/Conferido por/)).toHaveTextContent(
-    "alan@example.test · 16/10/2026, 14:00",
+  fireEvent.click(screen.getByRole("button", { name: "Conferência" }));
+  expect(screen.getByText(/Atualizado por/)).toHaveTextContent(
+    "gisele@example.test · 16/10/2026, 15:30",
   );
 });

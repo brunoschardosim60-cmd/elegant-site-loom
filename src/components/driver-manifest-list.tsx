@@ -298,16 +298,16 @@ export function DriverManifestList({
                           aria-hidden="true"
                         />
                       </button>
-                      <div className="px-3 pb-1">
-                        {readOnly && (
+                      {readOnly && (
+                        <div className="px-3 pb-1">
                           <ActionActor label="Cadastrado por" email={manifest.createdByEmail} />
-                        )}
-                        <ActionActor
-                          label="Atualizado por"
-                          email={manifest.updatedByEmail}
-                          at={manifest.updatedAt}
-                        />
-                      </div>
+                          <ActionActor
+                            label="Atualizado por"
+                            email={manifest.updatedByEmail}
+                            at={manifest.updatedAt}
+                          />
+                        </div>
+                      )}
                       {(onIssueDateChange ||
                         onDeleteManifest ||
                         onAuditManifest ||

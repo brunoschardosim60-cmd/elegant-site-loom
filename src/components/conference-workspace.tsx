@@ -918,11 +918,13 @@ export function ConferenceWorkspace({
                                         : "Cadastro"}{" "}
                                       {formatManifestDate(manifestReferenceDate(manifest))}
                                     </span>
-                                    <ActionActor
-                                      label="Atualizado por"
-                                      email={manifest.updatedByEmail}
-                                      at={manifest.updatedAt}
-                                    />
+                                    {teamReadOnly && (
+                                      <ActionActor
+                                        label="Atualizado por"
+                                        email={manifest.updatedByEmail}
+                                        at={manifest.updatedAt}
+                                      />
+                                    )}
                                   </td>
                                   <td className="text-muted-foreground" data-label="Nota fiscal">
                                     {doc.nf}
