@@ -283,6 +283,7 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
           accountEmail={session.user.email || ""}
           accountId={session.user.id}
           sharedDemands={view.team.sharedDemands === true}
+          personalReceipts={view.team.personalReceipts === true}
           scope={scope}
           onScopeChange={setScope}
           onManageTeam={() => {

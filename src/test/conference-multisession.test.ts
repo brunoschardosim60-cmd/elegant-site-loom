@@ -8,6 +8,7 @@ import { parseLuft108 } from "@/lib/luft-spreadsheet";
 import { applyImports } from "@/lib/manifest-import";
 import { emptyConference, type ConferenceState } from "@/lib/conference-state";
 import { selectOwnedRoutes } from "@/lib/conference-ownership";
+import { personalDocument, setPersonalReceipt } from "@/lib/personal-receipts";
 
 // Three independent clients send overlapping HTTP requests to the actual SQL
 // RPCs. PostgreSQL transactions serialize the commits. No production data,
@@ -76,6 +77,7 @@ beforeAll(async () => {
     "20261017010000_security_hardening.sql",
     "20261017020000_security_scalar_types.sql",
     "20261018010000_shared_personal_demands.sql",
+    "20261018020000_personal_receipt_acceptance.sql",
   ])
     await db.exec(await readFile(`supabase/migrations/${migration}`, "utf8"));
   server = createServer(async (request, response) => {
@@ -179,6 +181,111 @@ function receive(base: ConferenceState, doc: number) {
 }
 const audit = async () =>
   (await rpc(1, "get_conference_audit")).data as { action: string; actor_email: string }[];
+
+it("keeps personal confirmations independent, accepts a peer explicitly, and does not undo the other account", async () => {
+  const { sessions, views } = await clients();
+  const change = (index: number, received: boolean, accept = false) => {
+    const state = structuredClone(views[index]!.state),
+      manifest = state.manifests[0]!;
+    const peer = personalDocument(manifest.documents[0]!, uid(index + 1)).peerReceipt;
+    state.manifests[0] = setPersonalReceipt(
+      manifest,
+      manifest.documents[0]!.id,
+      uid(index + 1),
+      received,
+      "1900-01-01",
+      accept ? peer : undefined,
+    );
+    sessions[index]!.change(state);
+  };
+  change(1, true);
+  await settle(sessions, views);
+  const original = views[0]!.state.manifests[0]!.documents[0]!;
+  expect(original.received).toBe(true);
+  expect(personalDocument(original, uid(1))).toMatchObject({
+    received: false,
+    peerReceipt: { id: uid(2) },
+  });
+  expect(personalDocument(original, uid(2))).toMatchObject({ received: true });
+  change(0, true, true);
+  await settle(sessions, views);
+  const accepted = views[0]!.state.manifests[0]!.documents[0]!.receiptChecks!.find(
+    (check) => check.id === uid(1),
+  )!;
+  expect(accepted).toMatchObject({
+    received: true,
+    acceptedFrom: uid(2),
+    sourceReceivedAt: original.receiptChecks![0]!.receivedAt,
+    email: "device1@example.invalid",
+  });
+  expect(accepted.receivedAt).not.toBe("1900-01-01");
+  change(1, false);
+  await settle(sessions, views);
+  const after = views[0]!.state.manifests[0]!.documents[0]!;
+  expect(after.received).toBe(true);
+  expect(personalDocument(after, uid(1)).received).toBe(true);
+  expect(personalDocument(after, uid(2)).received).toBe(false);
+  // A stale acceptance cannot reuse the now revoked source's timestamp.
+  const stale = structuredClone(views[2]!.state);
+  stale.manifests[0] = setPersonalReceipt(
+    stale.manifests[0]!,
+    after.id,
+    uid(3),
+    true,
+    "1900-01-01",
+    original.receiptChecks![0],
+  );
+  expect(
+    (await rpc(3, "save_team_conference", { base_data: views[2]!.state, next_data: stale })).error
+      ?.message,
+  ).toContain("CONFERENCE_CONFLICT");
+  expect(
+    (await audit()).some(
+      (event) =>
+        event.action === "ctc_personal_accepted" && event.actor_email === "device1@example.invalid",
+    ),
+  ).toBe(true);
+  sessions.forEach((session) => session.stop());
+});
+
+it("invalidates approval suggestions after the NF changes, without losing the historical receipt", async () => {
+  const { sessions, views } = await clients();
+  const next = structuredClone(views[1]!.state),
+    manifest = next.manifests[0]!;
+  next.manifests[0] = setPersonalReceipt(
+    manifest,
+    manifest.documents[0]!.id,
+    uid(2),
+    true,
+    "1900-01-01",
+  );
+  sessions[1]!.change(next);
+  await settle(sessions, views);
+  const oldReceipt = views[0]!.state.manifests[0]!.documents[0]!.receiptChecks![0]!;
+  const staleBase = structuredClone(views[2]!.state);
+  const edited = structuredClone(views[0]!.state);
+  edited.manifests[0]!.documents[0]!.nf = "999-1";
+  sessions[0]!.change(edited);
+  await settle(sessions, views);
+  const doc = views[0]!.state.manifests[0]!.documents[0]!;
+  expect(doc.received).toBe(false);
+  expect(personalDocument(doc, uid(1)).peerReceipt).toBeUndefined();
+  expect(doc.receiptChecks).toContainEqual(oldReceipt);
+  const staleAcceptance = structuredClone(staleBase);
+  staleAcceptance.manifests[0] = setPersonalReceipt(
+    staleAcceptance.manifests[0]!,
+    doc.id,
+    uid(3),
+    true,
+    "1900-01-01",
+    oldReceipt,
+  );
+  expect(
+    (await rpc(3, "save_team_conference", { base_data: staleBase, next_data: staleAcceptance }))
+      .error?.message,
+  ).toContain("CONFERENCE_CONFLICT");
+  sessions.forEach((session) => session.stop());
+});
 
 it("two members link concurrently and a stale creator scan keeps both personal associations", async () => {
   const { sessions, views } = await clients();

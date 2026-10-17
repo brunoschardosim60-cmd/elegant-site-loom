@@ -29,6 +29,9 @@ const actions: Record<string, string> = {
   ctc_removed: "CTC removido",
   ctc_received: "CTC conferido",
   ctc_reopened: "Conferência desfeita",
+  ctc_personal_received: "CTC conferido na conta",
+  ctc_personal_accepted: "Conferência da equipe aceita",
+  ctc_personal_reopened: "Conferência desfeita na conta",
 };
 const labels: Record<string, string> = {
   nf: "NF",

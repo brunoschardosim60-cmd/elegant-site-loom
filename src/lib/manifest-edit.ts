@@ -26,6 +26,8 @@ export function applyManifestEdit(
         receivedAt: undefined,
         receivedBy: undefined,
         receivedByEmail: undefined,
+        receiptChecks: undefined,
+        peerReceipt: undefined,
       })),
     });
   if (content(latest) !== content(base))

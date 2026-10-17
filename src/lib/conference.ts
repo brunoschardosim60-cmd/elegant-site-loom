@@ -16,11 +16,24 @@ export type DocumentItem = {
   receivedAt?: string | undefined;
   receivedBy?: string | undefined;
   receivedByEmail?: string | undefined;
+  receiptChecks?: PersonalReceipt[] | undefined;
+  /** Derived personal-view suggestion; never persisted. */
+  peerReceipt?: PersonalReceipt | undefined;
   deliveryDates?: string[] | undefined;
   /** Last reported Luft occurrence for each literal NF-series, independent of receipt. */
   nfOccurrences?: NfOccurrence[] | undefined;
   /** Derived for display only; never persisted. */
   reroutedTo?: string | undefined;
+};
+export type PersonalReceipt = {
+  id: string;
+  received: boolean;
+  receivedAt?: string | undefined;
+  email?: string | undefined;
+  acceptedFrom?: string | undefined;
+  sourceReceivedAt?: string | undefined;
+  documentVersion?: string | undefined;
+  legacy?: boolean | undefined;
 };
 export type Manifest = {
   id: string;

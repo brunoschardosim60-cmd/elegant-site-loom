@@ -11,14 +11,21 @@ export type TrackingFilters = {
   filter?: string;
   status?: TrackingStatus;
   now?: string | number | Date;
+  routesPresented?: boolean;
 };
 
 /** Consult the saved CTCs, including finalized prés, without changing receipt state. */
 export function selectTrackingRows(
   manifests: Manifest[],
-  { query = "", filter = "all", status = "all", now = Date.now() }: TrackingFilters = {},
+  {
+    query = "",
+    filter = "all",
+    status = "all",
+    now = Date.now(),
+    routesPresented = false,
+  }: TrackingFilters = {},
 ): TrackingRow[] {
-  return presentRoutes(manifests)
+  return (routesPresented ? manifests : presentRoutes(manifests))
     .filter((manifest) => filter !== "old" || manifestAgeDays(manifest, now) >= 2)
     .slice()
     .sort((a, b) => (filter === "new" ? compareManifestDates(b, a) : compareManifestDates(a, b)))

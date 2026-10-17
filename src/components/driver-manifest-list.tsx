@@ -18,6 +18,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ActionActor } from "./action-actor";
+import { AcceptTeamReceipt } from "./accept-team-receipt";
 import { NfOccurrences } from "./nf-occurrences";
 import { reviewManifestTotals } from "@/lib/manifest-review";
 import type { Manifest } from "@/lib/conference";
@@ -37,6 +38,7 @@ type Props = {
   age: (manifest: Manifest) => number;
   now?: string;
   onToggleDocument: (manifest: Manifest, id: string, received: boolean) => void;
+  onAcceptReceipt?: ((manifest: Manifest, id: string) => void) | undefined;
   onIssueDateChange?: (manifestId: string, issueDate: string | undefined) => void;
   onDeleteManifest?: (id: string) => void;
   onEditManifest?: (manifest: Manifest) => void;
@@ -71,6 +73,7 @@ export function DriverManifestList({
   age,
   now,
   onToggleDocument,
+  onAcceptReceipt,
   onIssueDateChange,
   onDeleteManifest,
   onAuditManifest,
@@ -497,6 +500,12 @@ export function DriverManifestList({
                                             ? "Remanifestado"
                                             : "Pendente"}
                                       </span>
+                                      {!readOnly && onAcceptReceipt && (
+                                        <AcceptTeamReceipt
+                                          doc={doc}
+                                          onAccept={() => onAcceptReceipt(manifest, doc.id)}
+                                        />
+                                      )}
                                       {doc.received && (
                                         <ActionActor
                                           label="Conferido por"

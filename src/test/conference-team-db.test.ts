@@ -39,7 +39,9 @@ const make = (id = "DI00123456789", ctc = "0000000001") => ({
   driver: "Motorista Teste",
   plate: "ABC1234",
   date: "2026-10-13T03:00:00Z",
-  documents: [{ id: `${id}-${ctc}`, ctc, nf: "123-1", volumes: 2, received: false }],
+  documents: [
+    { id: `${id}-${ctc}`, ctc, nf: "123-1", volumes: 2, received: false, receiptChecks: [] },
+  ],
 });
 const save = (base: ConferenceState, next: ConferenceState) =>
   call("save_team_conference", [base, next]);
@@ -112,6 +114,12 @@ beforeAll(async () => {
   );
   await db.exec(demands);
   await db.exec(demands);
+  const receipts = await readFile(
+    "supabase/migrations/20261018020000_personal_receipt_acceptance.sql",
+    "utf8",
+  );
+  await db.exec(receipts);
+  await db.exec(receipts);
 }, 30000);
 afterAll(async () => {
   await db?.close();
@@ -582,7 +590,7 @@ it("attributes peer edits and receipts to actual users, preserves them on repeat
   expect(repeat.data).toEqual(second.data);
   expect(repeat.revision).toBe(second.revision);
   const edited = structuredClone(repeat.data);
-  edited.manifests.at(-1)!.documents[0]!.nf = "456-1";
+  edited.manifests.at(-1)!.documents[0]!.client = "LAB ATUALIZADO";
   const third = await save(repeat.data, edited);
   expect(third.data.manifests.at(-1)).toMatchObject({
     createdByEmail: "person2@example.com",

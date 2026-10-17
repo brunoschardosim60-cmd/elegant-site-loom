@@ -3,6 +3,7 @@ import { conferenceStateSchema, type ConferenceState } from "./conference-state"
 
 export const teamSchema = z.object({
   sharedDemands: z.boolean().optional(),
+  personalReceipts: z.boolean().optional(),
   teamId: z.string().uuid(),
   name: z.string(),
   owner: z.boolean(),
@@ -41,6 +42,15 @@ function merge(b: Json | undefined, l: Json | undefined, r: Json | undefined): J
     const result: Record<string, Json> = {};
     for (const k of new Set([...Object.keys(b), ...Object.keys(l), ...Object.keys(r)])) {
       if (k === "finishedAt" && "documents" in l && "documents" in r) continue;
+      if (
+        ["received", "receivedAt", "receivedBy", "receivedByEmail"].includes(k) &&
+        "ctc" in l &&
+        "ctc" in r &&
+        ("receiptChecks" in l || "receiptChecks" in r)
+      ) {
+        if (r[k] !== undefined) result[k] = r[k];
+        continue;
+      }
       if (k === "demandUserIds" && "documents" in l && "documents" in r) {
         result[k] = [
           ...new Set([...(Array.isArray(l[k]) ? l[k] : []), ...(Array.isArray(r[k]) ? r[k] : [])]),

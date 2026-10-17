@@ -2,7 +2,7 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { activityTimestamp, matchesConferenceSearch } from "./conference-display";
 import type { Manifest } from "./conference";
-import { isPendingDocument, presentRoutes } from "./conference-routes";
+import { isPendingDocument } from "./conference-routes";
 import {
   compareManifestDates,
   formatManifestDate,
@@ -12,7 +12,7 @@ import {
   normalizeIssueTime,
 } from "./manifest-date";
 import { selectTrackingRows, type TrackingStatus } from "./ctc-tracking";
-import { belongsTo, type DemandOwner } from "./conference-ownership";
+import { selectOwnedRoutes, type DemandOwner } from "./conference-ownership";
 
 type ReportIssue = { title: string; description: string; time: string; at?: string | undefined };
 type ReportView = "pending" | "missing" | "finished" | "issues" | "tracking";
@@ -68,15 +68,16 @@ const date = (value: string | Date | undefined, withTime = false) => {
 export function selectConferenceReport(input: ConferencePdfInput) {
   const query = input.query ?? "";
   const now = (input.generatedAt ?? new Date()).getTime();
+  const scoped = selectOwnedRoutes(input.manifests, input.owner);
   if (input.view === "tracking") {
     const groups = new Map<string, Manifest>();
-    for (const { manifest, doc } of selectTrackingRows(input.manifests, {
+    for (const { manifest, doc } of selectTrackingRows(scoped, {
       query: input.query ?? "",
       filter: input.filter ?? "all",
       status: input.trackingStatus ?? "all",
       now,
+      routesPresented: true,
     })) {
-      if (input.owner && !belongsTo(manifest, input.owner)) continue;
       const group = groups.get(manifest.id) ?? { ...manifest, documents: [] };
       group.documents.push(doc);
       groups.set(manifest.id, group);
@@ -86,8 +87,7 @@ export function selectConferenceReport(input: ConferencePdfInput) {
   const manifests =
     input.view === "issues"
       ? []
-      : presentRoutes(input.manifests)
-          .filter((manifest) => !input.owner || belongsTo(manifest, input.owner))
+      : scoped
           .filter((manifest) =>
             input.view === "finished"
               ? Boolean(manifest.finishedAt || manifest.routeResolved)

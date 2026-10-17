@@ -1,5 +1,6 @@
 import type { Manifest } from "./conference";
 import { isPendingDocument, presentRoutes } from "./conference-routes";
+import { personalManifest } from "./personal-receipts";
 
 export type WorkspaceScope = "mine" | "team";
 export type DemandOwner = { email: string; userId?: string | undefined };
@@ -11,7 +12,9 @@ export const belongsTo = (manifest: Manifest, owner: DemandOwner) =>
 
 /** Always resolve reroutes across the whole team before narrowing the display. */
 export function selectOwnedRoutes(manifests: Manifest[], owner?: DemandOwner) {
-  return presentRoutes(manifests).filter((manifest) => !owner || belongsTo(manifest, owner));
+  return presentRoutes(
+    manifests.map((manifest) => personalManifest(manifest, owner?.userId)),
+  ).filter((manifest) => !owner || belongsTo(manifest, owner));
 }
 
 export function demandTotals(manifests: Manifest[]) {

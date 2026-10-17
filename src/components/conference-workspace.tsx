@@ -35,6 +35,8 @@ import { parseScan, setReceived, type Manifest } from "@/lib/conference";
 import { findCurrentMatches, isAnotherRoute, isPendingDocument } from "@/lib/conference-routes";
 
 import { SpreadsheetImportDialog } from "./spreadsheet-import-dialog";
+import { AcceptTeamReceipt } from "./accept-team-receipt";
+import { personalDocument, personalManifest, setPersonalReceipt } from "@/lib/personal-receipts";
 import { isExportManifest } from "@/lib/manifest-id";
 import { ManifestImportDialog } from "./manifest-import-dialog";
 import { DriverManifestList } from "./driver-manifest-list";
@@ -102,6 +104,7 @@ export function ConferenceWorkspace({
   onAuditManifest,
   accountId,
   sharedDemands = false,
+  personalReceipts = false,
   scope: controlledScope,
   onScopeChange,
   onManageTeam,
@@ -113,6 +116,7 @@ export function ConferenceWorkspace({
   onAuditManifest?: (id: string) => void;
   accountId?: string | undefined;
   sharedDemands?: boolean;
+  personalReceipts?: boolean;
   scope?: WorkspaceScope;
   onScopeChange?: ((scope: WorkspaceScope) => void) | undefined;
   onManageTeam?: (() => void) | undefined;
@@ -325,31 +329,44 @@ export function ConferenceWorkspace({
       notify("CTC localizado nos cadastros da equipe.");
     }
     setFocusedManifest({ id: manifest.id });
-    if (doc.received) {
+    const ownDoc = personalReceipts ? personalDocument(doc, accountId) : doc;
+    if (ownDoc.received) {
       notify(
-        `CTC ${reading.number} já foi bipado${conferenceTimestamp(doc.receivedAt) ? ` em ${conferenceTimestamp(doc.receivedAt)}` : ""}.`,
+        `CTC ${reading.number} já foi bipado${conferenceTimestamp(ownDoc.receivedAt) ? ` em ${conferenceTimestamp(ownDoc.receivedAt)}` : ""}.`,
         true,
       );
       log("CTC já conferido", `CTC ${reading.number} · ${manifest.driver.split(" ")[0]}`, true);
       return;
     }
-    const changed = setReceived(manifest, doc.id, true, new Date().toISOString());
+    const changed =
+      personalReceipts && accountId
+        ? setPersonalReceipt(manifest, doc.id, accountId, true, new Date().toISOString())
+        : setReceived(manifest, doc.id, true, new Date().toISOString());
     update(current.current.map((item) => (item.id === manifest.id ? changed : item)));
+    const personallyFinished = personalManifest(
+      changed,
+      personalReceipts ? accountId : undefined,
+    ).finishedAt;
     notify(
-      changed.finishedAt
+      personallyFinished
         ? `Pré de ${manifest.driver.split(" ")[0]} finalizado!`
         : `CTC ${reading.number} · ${manifest.driver.split(" ")[0]} · conferido`,
     );
     log(
-      changed.finishedAt ? "Pré-manifesto finalizado" : `CTC ${reading.number} conferido`,
+      personallyFinished ? "Pré-manifesto finalizado" : `CTC ${reading.number} conferido`,
       manifest.driver,
     );
   }
-  function toggleDocument(manifest: Manifest, id: string, received: boolean) {
+  function toggleDocument(manifest: Manifest, id: string, received: boolean, acceptPeer = false) {
     if (teamReadOnly) return;
     const latest = current.current.find((item) => item.id === manifest.id);
     const doc = latest?.documents.find((item) => item.id === id);
-    if (!latest || !doc || doc.received === received) return;
+    const ownDoc = doc && personalReceipts ? personalDocument(doc, accountId) : doc;
+    if (!latest || !doc || !ownDoc || ownDoc.received === received) return;
+    if (acceptPeer && !ownDoc.peerReceipt) {
+      notify("A conferência da equipe mudou. Confira novamente antes de aceitar.", true);
+      return;
+    }
     if (
       received &&
       !findCurrentMatches(current.current, doc.ctc).some((match) => match.doc.id === id)
@@ -357,10 +374,29 @@ export function ConferenceWorkspace({
       notify("Este CTC foi remanifestado. Confira na rota mais recente.", true);
       return;
     }
-    const changed = setReceived(latest, id, received, new Date().toISOString());
+    const changed =
+      personalReceipts && accountId
+        ? setPersonalReceipt(
+            latest,
+            id,
+            accountId,
+            received,
+            new Date().toISOString(),
+            acceptPeer ? ownDoc.peerReceipt : undefined,
+          )
+        : setReceived(latest, id, received, new Date().toISOString());
     update(current.current.map((item) => (item.id === latest.id ? changed : item)));
-    log(received ? "Documento conferido manualmente" : "Conferência desfeita", latest.driver);
-    if (changed.finishedAt) notify(`Pré de ${latest.driver.split(" ")[0]} finalizado!`);
+    log(
+      acceptPeer
+        ? "Conferência da equipe aceita"
+        : received
+          ? "Documento conferido manualmente"
+          : "Conferência desfeita",
+      latest.driver,
+    );
+    if (acceptPeer) notify("Conferência aceita na sua conta. Confira o status de salvamento.");
+    if (personalManifest(changed, personalReceipts ? accountId : undefined).finishedAt)
+      notify(`Pré de ${latest.driver.split(" ")[0]} finalizado!`);
   }
   function changeIssueDate(manifestId: string, value: string | undefined) {
     const issueDate = normalizeIssueDate(value ?? "");
@@ -440,9 +476,13 @@ export function ConferenceWorkspace({
   const documents = presented.flatMap((item) => item.documents);
   const trackingRows =
     view === "tracking"
-      ? selectTrackingRows(manifests, { query, filter, status: trackingStatus, now }).filter(
-          ({ manifest }) => !demandOwner || belongsTo(manifest, demandOwner),
-        )
+      ? selectTrackingRows(presented, {
+          query,
+          filter,
+          status: trackingStatus,
+          now,
+          routesPresented: true,
+        })
       : [];
   const missing = pending.flatMap((item) => item.documents).filter(isPendingDocument);
   const age = (manifest: Manifest) => manifestAgeDays(manifest, now);
@@ -974,6 +1014,14 @@ export function ConferenceWorkspace({
                                       <Clock3 size={10} />
                                       Pendente
                                     </span>
+                                    {!teamReadOnly && personalReceipts && (
+                                      <AcceptTeamReceipt
+                                        doc={doc}
+                                        onAccept={() =>
+                                          toggleDocument(manifest, doc.id, true, true)
+                                        }
+                                      />
+                                    )}
                                     <span className="tracking-detail">
                                       {manifestAgeLabel(manifest, now)}
                                     </span>
@@ -1052,6 +1100,11 @@ export function ConferenceWorkspace({
                       age={age}
                       now={now}
                       onToggleDocument={toggleDocument}
+                      onAcceptReceipt={
+                        personalReceipts
+                          ? (manifest, id) => toggleDocument(manifest, id, true, true)
+                          : undefined
+                      }
                       onIssueDateChange={changeIssueDate}
                       onDeleteManifest={requestDelete}
                       onAuditManifest={onAuditManifest}

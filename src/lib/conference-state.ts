@@ -22,6 +22,21 @@ const documentSchema = z.object({
   receivedAt: z.string().optional(),
   receivedBy: z.string().uuid().optional(),
   receivedByEmail: z.string().email().optional(),
+  receiptChecks: z
+    .array(
+      z.object({
+        id: z.string().uuid(),
+        received: z.boolean(),
+        receivedAt: z.string().optional(),
+        email: z.string().email().optional(),
+        acceptedFrom: z.string().uuid().optional(),
+        sourceReceivedAt: z.string().optional(),
+        documentVersion: z.string().optional(),
+        legacy: z.boolean().optional(),
+      }),
+    )
+    .max(1000)
+    .optional(),
   nfOccurrences: z
     .array(
       z

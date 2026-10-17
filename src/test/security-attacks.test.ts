@@ -68,6 +68,117 @@ afterEach(async () => {
 afterAll(async () => {
   await db.close();
 });
+it("cannot seed a teammate confirmation through the pre-team legacy endpoint", async () => {
+  await login(3);
+  await rpc("save_conference", [
+    0,
+    {
+      ...empty,
+      manifests: [
+        {
+          id: "06058889",
+          driver: "LEGACY",
+          plate: "ABC1D23",
+          date: "2026-10-17",
+          documents: [
+            {
+              id: "legacy-doc",
+              ctc: "0000000009",
+              nf: "9-1",
+              volumes: 1,
+              received: false,
+              receiptChecks: [
+                {
+                  id: uid(1),
+                  received: true,
+                  email: "security-1@example.invalid",
+                  receivedAt: "2000-01-01T00:00:00Z",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  ]);
+  const team = await rpc("get_conference_team");
+  expect(team.data.manifests[0]!.documents[0]!.receiptChecks).toEqual([]);
+});
+it("backfills an unattributed historical receipt without inventing an authenticated author", async () => {
+  await login(3);
+  await rpc("save_conference", [
+    0,
+    {
+      ...empty,
+      manifests: [
+        {
+          id: "06058890",
+          driver: "LEGACY",
+          plate: "ABC1D23",
+          date: "2026-10-17",
+          documents: [
+            {
+              id: "legacy",
+              ctc: "0000000010",
+              nf: "10-1",
+              volumes: 1,
+              received: true,
+              receivedAt: "2026-10-17T12:00:00Z",
+            },
+          ],
+        },
+      ],
+    },
+  ]);
+  const team = await rpc("get_conference_team"),
+    doc = team.data.manifests[0]!.documents[0]!;
+  expect(doc.received).toBe(true);
+  expect(doc.receivedAt).toBe("2026-10-17T12:00:00Z");
+  expect(doc.receivedBy).toBeUndefined();
+  expect(doc.receiptChecks).toEqual([
+    expect.objectContaining({ id: uid(3), received: true, legacy: true }),
+  ]);
+});
+it("ignores forged peer reversals and assigns personal receipt authors and times from authentication", async () => {
+  const base = (await rpc("get_conference_team")).data;
+  const created = await rpc<{ data: ConferenceState }>("save_team_conference", [
+    base,
+    {
+      ...base,
+      manifests: [
+        {
+          id: "06058889",
+          driver: "TEST",
+          plate: "ABC1D23",
+          date: "2026-10-17",
+          documents: [{ id: "doc", ctc: "0000000009", nf: "9-1", volumes: 1, received: true }],
+        },
+      ],
+    },
+  ]);
+  await login(2);
+  await rpc("get_conference_team", [true]);
+  const forged = structuredClone(created.data),
+    doc = forged.manifests[0]!.documents[0]!;
+  doc.receiptChecks![0]!.received = false;
+  doc.receiptChecks!.push({
+    id: uid(2),
+    received: true,
+    email: "security-1@example.invalid",
+    receivedAt: "1900-01-01",
+  });
+  const saved = await rpc<{ data: ConferenceState }>("save_team_conference", [
+    created.data,
+    forged,
+  ]);
+  const checks = saved.data.manifests[0]!.documents[0]!.receiptChecks!;
+  expect(checks.find((c) => c.id === uid(1))!.received).toBe(true);
+  expect(checks.find((c) => c.id === uid(2))).toMatchObject({
+    received: true,
+    email: "security-2@example.invalid",
+  });
+  expect(checks.find((c) => c.id === uid(2))!.receivedAt).not.toBe("1900-01-01");
+});
 it("only adds the authenticated member, rejects forged links, and preserves links from old browsers", async () => {
   const base = (await rpc("get_conference_team")).data;
   const created = await rpc<{ data: ConferenceState }>("save_team_conference", [
