@@ -166,20 +166,24 @@ export class TeamSync {
   }
   private fail(error: unknown, refreshing = false) {
     const message = String((error as { message?: string })?.message ?? error);
-    this.collision = /CONFERENCE_CONFLICT|CONFERENCE_DUPLICATE/.test(message);
+    this.collision = /CONFERENCE_CONFLICT|CONFERENCE_DUPLICATE|CONFERENCE_TEAM_CHANGED/.test(
+      message,
+    );
     // Read failures can recover automatically. A failed save or an actual
     // conflict still requires explicit action, preserving the local edits.
     this.refreshRetryAt =
       refreshing && !this.collision
         ? Date.now() + Math.min(60000, 5000 * 2 ** Math.min(this.refreshFailures++, 4))
         : 0;
-    this.failure = /CONFERENCE_TOTALS_REVIEW/.test(message)
-      ? "Os totais diferem do cabeçalho. Revise o pré antes de salvar. As alterações locais foram preservadas."
-      : /CONFERENCE_DUPLICATE/.test(message)
-        ? "Outra pessoa já cadastrou esse pré, CTC ou foto. Nenhuma duplicata foi salva. Gere o PDF se precisar guardar as alterações locais e recarregue os dados."
-        : this.collision
-          ? "O mesmo campo foi alterado por outra pessoa ou o registro foi excluído. Gere o PDF para guardar as alterações locais antes de recarregar."
-          : "Não foi possível sincronizar. Mantenha esta página aberta e tente novamente.";
+    this.failure = /CONFERENCE_TEAM_CHANGED/.test(message)
+      ? "Sua equipe mudou nesta sessão. Gere o PDF se precisar guardar alterações locais e recarregue para abrir os dados da equipe atual. Nenhum dado foi transferido automaticamente."
+      : /CONFERENCE_TOTALS_REVIEW/.test(message)
+        ? "Os totais diferem do cabeçalho. Revise o pré antes de salvar. As alterações locais foram preservadas."
+        : /CONFERENCE_DUPLICATE/.test(message)
+          ? "Outra pessoa já cadastrou esse pré, CTC ou foto. Nenhuma duplicata foi salva. Gere o PDF se precisar guardar as alterações locais e recarregue os dados."
+          : this.collision
+            ? "O mesmo campo foi alterado por outra pessoa ou o registro foi excluído. Gere o PDF para guardar as alterações locais antes de recarregar."
+            : "Não foi possível sincronizar. Mantenha esta página aberta e tente novamente.";
   }
   async flush() {
     if (this.stopped || this.busy || this.failure || !this.pending()) return;
@@ -225,7 +229,7 @@ export class TeamSync {
         const stamp = z
           .object({ teamId: z.string().uuid(), revision: z.number().int().nonnegative() })
           .parse(version.data);
-        if (stamp.teamId !== this.team.teamId) throw new Error("CONFERENCE_CONFLICT");
+        if (stamp.teamId !== this.team.teamId) throw new Error("CONFERENCE_TEAM_CHANGED");
         if (stamp.revision === this.team.revision) {
           succeeded = true;
           return;
@@ -235,7 +239,7 @@ export class TeamSync {
       if (this.stopped) return;
       if (result.error) throw result.error;
       const fresh = teamSchema.parse(result.data);
-      if (fresh.teamId !== this.team.teamId) throw new Error("CONFERENCE_CONFLICT");
+      if (fresh.teamId !== this.team.teamId) throw new Error("CONFERENCE_TEAM_CHANGED");
       if (fresh.revision !== this.team.revision) {
         this.local = mergeConference(this.base, this.local, fresh.data);
         this.base = fresh.data;

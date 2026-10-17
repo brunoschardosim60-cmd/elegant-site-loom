@@ -153,6 +153,8 @@ it("ignores late results after unmount and rejects an unexpected workspace switc
   const other = new TeamSync(team(), rpc, publish);
   await other.refresh(true);
   expect(publish.mock.lastCall![0].conflict).toBe(true);
+  expect(publish.mock.lastCall![0].error).toContain("Sua equipe mudou");
+  expect(publish.mock.lastCall![0].error).not.toContain("O mesmo campo foi alterado");
 });
 it("polls only the revision when nothing changed and never downloads or saves the whole state", async () => {
   const rpc = vi
