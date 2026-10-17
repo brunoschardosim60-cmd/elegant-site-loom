@@ -43,6 +43,16 @@ function merge(b: Json | undefined, l: Json | undefined, r: Json | undefined): J
     for (const k of new Set([...Object.keys(b), ...Object.keys(l), ...Object.keys(r)])) {
       if (k === "finishedAt" && "documents" in l && "documents" in r) continue;
       if (
+        ["receivedAt", "email"].includes(k) &&
+        "received" in l &&
+        "received" in r &&
+        !("ctc" in l) &&
+        ("documentVersion" in l || "documentVersion" in r)
+      ) {
+        if (l["received"] === true && r[k] !== undefined) result[k] = r[k];
+        continue;
+      }
+      if (
         ["received", "receivedAt", "receivedBy", "receivedByEmail"].includes(k) &&
         "ctc" in l &&
         "ctc" in r &&

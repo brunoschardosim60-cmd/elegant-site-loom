@@ -247,6 +247,36 @@ it("keeps personal confirmations independent, accepts a peer explicitly, and doe
   ).toBe(true);
   sessions.forEach((session) => session.stop());
 });
+it("can undo a personal confirmation while its first save is still in flight", async () => {
+  const { sessions, views } = await clients();
+  const checked = structuredClone(views[0]!.state),
+    manifest = checked.manifests[0]!;
+  checked.manifests[0] = setPersonalReceipt(
+    manifest,
+    manifest.documents[0]!.id,
+    uid(1),
+    true,
+    "1900-01-01",
+  );
+  sessions[0]!.change(checked);
+  const undone = structuredClone(checked);
+  undone.manifests[0] = setPersonalReceipt(
+    undone.manifests[0]!,
+    manifest.documents[0]!.id,
+    uid(1),
+    false,
+    "1900-01-01",
+  );
+  sessions[0]!.change(undone);
+  await settle(sessions, views);
+  expect(views.every((view) => !view.pending && !view.error)).toBe(true);
+  expect(views[0]!.state.manifests[0]!.documents[0]!.received).toBe(false);
+  expect(
+    views[0]!.state.manifests[0]!.documents[0]!.receiptChecks!.find((check) => check.id === uid(1))!
+      .received,
+  ).toBe(false);
+  sessions.forEach((session) => session.stop());
+});
 
 it("invalidates approval suggestions after the NF changes, without losing the historical receipt", async () => {
   const { sessions, views } = await clients();
