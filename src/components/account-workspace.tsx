@@ -282,6 +282,7 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
           onSnapshot={changed}
           accountEmail={session.user.email || ""}
           accountId={session.user.id}
+          sharedDemands={view.team.sharedDemands === true}
           scope={scope}
           onScopeChange={setScope}
           onManageTeam={() => {

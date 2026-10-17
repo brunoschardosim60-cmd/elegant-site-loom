@@ -52,6 +52,7 @@ export const conferenceStateSchema = z.object({
     z.object({
       id: z.string(),
       createdBy: z.string().uuid().optional(),
+      demandUserIds: z.array(z.string().uuid()).max(1000).optional(),
       createdByEmail: z.string().email().optional(),
       updatedBy: z.string().uuid().optional(),
       updatedByEmail: z.string().email().optional(),

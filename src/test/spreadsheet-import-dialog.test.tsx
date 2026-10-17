@@ -35,6 +35,42 @@ beforeEach(() => {
   mock.read.mockReset().mockResolvedValue(data());
 });
 afterEach(cleanup);
+it("offers identical teammate manifests explicitly without preselecting or duplicating them", async () => {
+  const draft = data().drafts[0]!;
+  const save = vi.fn().mockReturnValue({ ok: true, manifests: [] });
+  render(
+    <SpreadsheetImportDialog
+      manifests={[
+        {
+          id: draft.id,
+          driver: draft.driver,
+          plate: draft.plate,
+          date: "2026-10-14",
+          issueDate: draft.issueDate,
+          createdBy: "00000000-0000-4000-8000-000000000001",
+          createdByEmail: "first@example.invalid",
+          documents: [{ id: "d1", ctc: "0000000001", nf: "123-1", volumes: 2, received: true }],
+        },
+      ]}
+      demandOwner={{
+        email: "second@example.invalid",
+        userId: "00000000-0000-4000-8000-000000000002",
+      }}
+      sharedDemands
+      onClose={vi.fn()}
+      onCreate={save}
+    />,
+  );
+  upload();
+  await screen.findByText("Adicionar às minhas demandas");
+  expect(
+    screen.getByRole("checkbox", { name: `Selecionar manifesto ${draft.id}` }),
+  ).not.toBeChecked();
+  expect(save).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Selecionar existentes da equipe" }));
+  fireEvent.click(screen.getByRole("button", { name: "Adicionar 1 às minhas demandas" }));
+  expect(save).toHaveBeenCalledWith([draft]);
+});
 it("explains ignored older and undated occurrences without offering an unsafe refresh", async () => {
   const source = data();
   source.drafts[0]!.rows[0]!.occurrenceCode = "91";

@@ -75,6 +75,7 @@ beforeAll(async () => {
     "20261016030000_latest_nf_occurrences.sql",
     "20261017010000_security_hardening.sql",
     "20261017020000_security_scalar_types.sql",
+    "20261018010000_shared_personal_demands.sql",
   ])
     await db.exec(await readFile(`supabase/migrations/${migration}`, "utf8"));
   server = createServer(async (request, response) => {
@@ -178,6 +179,32 @@ function receive(base: ConferenceState, doc: number) {
 }
 const audit = async () =>
   (await rpc(1, "get_conference_audit")).data as { action: string; actor_email: string }[];
+
+it("two members link concurrently and a stale creator scan keeps both personal associations", async () => {
+  const { sessions, views } = await clients();
+  for (const index of [1, 2]) {
+    const next = structuredClone(views[index]!.state);
+    next.manifests[0]!.demandUserIds = [uid(index + 1)];
+    sessions[index]!.change(next);
+  }
+  sessions[0]!.change(receive(views[0]!.state, 0));
+  await settle(sessions, views);
+  expect(views.every((view) => !view.pending && !view.error)).toBe(true);
+  for (let index = 0; index < 3; index++) {
+    const state = views[index]!.state;
+    expect(state.manifests).toHaveLength(1);
+    expect(state.manifests[0]!.demandUserIds).toEqual([uid(2), uid(3)]);
+    expect(state.manifests[0]!.createdBy).toBe(uid(1));
+    expect(state.manifests[0]!.documents[0]).toMatchObject({ received: true, receivedBy: uid(1) });
+    expect(
+      selectOwnedRoutes(state.manifests, {
+        email: `device${index + 1}@example.invalid`,
+        userId: uid(index + 1),
+      }),
+    ).toHaveLength(1);
+    sessions[index]!.stop();
+  }
+});
 
 it("three people register their own demands concurrently while all sessions retain the whole team", async () => {
   const { sessions, views } = await clients();

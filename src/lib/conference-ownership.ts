@@ -4,6 +4,7 @@ import { isPendingDocument, presentRoutes } from "./conference-routes";
 export type WorkspaceScope = "mine" | "team";
 export type DemandOwner = { email: string; userId?: string | undefined };
 export const belongsTo = (manifest: Manifest, owner: DemandOwner) =>
+  !!(owner.userId && manifest.demandUserIds?.includes(owner.userId)) ||
   !!(owner.userId && manifest.createdBy
     ? manifest.createdBy === owner.userId
     : owner.email && manifest.createdByEmail?.toLowerCase() === owner.email.toLowerCase());

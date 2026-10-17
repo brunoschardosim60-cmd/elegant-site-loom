@@ -26,6 +26,7 @@ export type Manifest = {
   id: string;
   /** Assigned by the authenticated server; edits and receipts keep the original creator. */
   createdBy?: string | undefined;
+  demandUserIds?: string[] | undefined;
   createdByEmail?: string | undefined;
   updatedBy?: string | undefined;
   updatedByEmail?: string | undefined;

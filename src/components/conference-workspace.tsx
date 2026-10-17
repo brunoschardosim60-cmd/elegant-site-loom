@@ -52,6 +52,7 @@ import {
 import { NfOccurrences } from "./nf-occurrences";
 import { planOccurrenceUpdates } from "@/lib/nf-occurrences";
 import { DocumentPagination, documentPageSize } from "./document-pagination";
+import { applyDemandImports } from "@/lib/shared-demand-import";
 import { applyImports, type ImportDraft, type ImportOutcome } from "@/lib/manifest-import";
 import type { ConferenceState } from "@/lib/conference-state";
 import {
@@ -100,6 +101,7 @@ export function ConferenceWorkspace({
   accountEmail,
   onAuditManifest,
   accountId,
+  sharedDemands = false,
   scope: controlledScope,
   onScopeChange,
   onManageTeam,
@@ -110,6 +112,7 @@ export function ConferenceWorkspace({
   accountEmail?: string;
   onAuditManifest?: (id: string) => void;
   accountId?: string | undefined;
+  sharedDemands?: boolean;
   scope?: WorkspaceScope;
   onScopeChange?: ((scope: WorkspaceScope) => void) | undefined;
   onManageTeam?: (() => void) | undefined;
@@ -473,8 +476,17 @@ export function ConferenceWorkspace({
     (pendingPage + 1) * documentPageSize,
   );
 
-  function importDrafts(drafts: ImportDraft[]) {
-    const result = applyImports(current.current, drafts, new Date().toISOString());
+  function importDrafts(drafts: ImportDraft[], linkExisting = false) {
+    const result =
+      linkExisting && accountEmail && accountId
+        ? applyDemandImports(
+            current.current,
+            drafts,
+            { email: accountEmail, userId: accountId },
+            new Date().toISOString(),
+            sharedDemands,
+          )
+        : applyImports(current.current, drafts, new Date().toISOString());
     if (result.ok) {
       const existingIds = new Set(current.current.map((manifest) => manifest.id));
       update(
@@ -1181,7 +1193,9 @@ export function ConferenceWorkspace({
           <SpreadsheetImportDialog
             manifests={manifests}
             onClose={() => setSheetOpen(false)}
-            onCreate={importDrafts}
+            onCreate={(drafts) => importDrafts(drafts, true)}
+            demandOwner={accountEmail ? { email: accountEmail, userId: accountId } : undefined}
+            sharedDemands={sharedDemands}
             onUpdateOccurrences={updateOccurrences}
           />
         )}

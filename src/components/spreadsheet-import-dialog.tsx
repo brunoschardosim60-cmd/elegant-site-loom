@@ -13,6 +13,8 @@ import {
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Button } from "./ui/button";
 import type { Manifest } from "@/lib/conference";
+import { demandImportStatus } from "@/lib/shared-demand-import";
+import type { DemandOwner } from "@/lib/conference-ownership";
 import { findImportConflicts, type ImportDraft, type ImportOutcome } from "@/lib/manifest-import";
 import { findLuftCtcOverlaps, luftManifestDays, type LuftExport } from "@/lib/luft-spreadsheet";
 import { formatManifestDate } from "@/lib/manifest-date";
@@ -24,8 +26,12 @@ export function SpreadsheetImportDialog({
   onClose,
   onCreate,
   onUpdateOccurrences,
+  demandOwner,
+  sharedDemands = false,
 }: {
   manifests: Manifest[];
+  demandOwner?: DemandOwner | undefined;
+  sharedDemands?: boolean;
   onClose: () => void;
   onCreate: (drafts: ImportDraft[]) => ImportOutcome;
   onUpdateOccurrences?: (drafts: ImportDraft[]) => ImportOutcome;
@@ -120,7 +126,9 @@ export function SpreadsheetImportDialog({
         new Set(
           parsed.drafts
             .filter(
-              (draft) => !overlaps.has(draft.id) && !findImportConflicts(manifests, [draft]).length,
+              (draft) =>
+                !overlaps.has(draft.id) &&
+                demandImportStatus(manifests, draft, demandOwner, sharedDemands).kind === "create",
             )
             .map((draft) => draft.id),
         ),
@@ -147,10 +155,15 @@ export function SpreadsheetImportDialog({
   }, [result, manifests, drafts]);
   const conflicts = useMemo(
     () =>
-      drafts.flatMap((draft, index) =>
-        findImportConflicts(manifests, [draft]).map((conflict) => ({ ...conflict, index })),
-      ),
-    [manifests, drafts],
+      drafts.flatMap((draft, index) => {
+        const status = demandImportStatus(manifests, draft, demandOwner, sharedDemands);
+        if (status.kind === "link") return [];
+        const conflicts = findImportConflicts(manifests, [draft]);
+        return status.message
+          ? [{ kind: "manifest" as const, index, message: status.message }]
+          : conflicts.map((conflict) => ({ ...conflict, index }));
+      }),
+    [manifests, drafts, demandOwner, sharedDemands],
   );
   const overlaps = useMemo(() => findLuftCtcOverlaps(drafts), [drafts]);
   const remanifestations = useMemo(() => {
@@ -175,6 +188,10 @@ export function SpreadsheetImportDialog({
       normalized(`${draft.driver} ${draft.plate} ${draft.id}`).includes(normalized(query.trim())),
   );
   const chosen = drafts.filter((draft) => selected.has(draft.id));
+  const linked = drafts.filter(
+    (draft) => demandImportStatus(manifests, draft, demandOwner, sharedDemands).kind === "link",
+  );
+  const chosenLinks = linked.filter((draft) => selected.has(draft.id)).length;
   const selectionOverlaps = findLuftCtcOverlaps(chosen);
   const selectedBlocked = chosen.filter((draft) => blocked.has(draft.id)).length;
   const current = drafts.find((draft) => draft.id === active);
@@ -602,8 +619,27 @@ export function SpreadsheetImportDialog({
                 Exibindo {visible.length} de {drafts.length} ·{" "}
                 {visible.filter((d) => selected.has(d.id)).length} selecionados nesta lista,{" "}
                 {chosen.length} no total. Filtros não alteram a seleção. Cadastros repetidos ficam
-                bloqueados.
+                bloqueados. Manifestos iguais de outro login podem ser adicionados às suas demandas,
+                sem duplicar a equipe.
               </p>
+              {linked.length > 0 && (
+                <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm">
+                  <p>
+                    {linked.length} manifesto(s) já estão na equipe e podem aparecer também nas suas
+                    demandas. A conferência será compartilhada; volumes, notas e autoria original
+                    serão preservados.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-2"
+                    onClick={() => setSelected(new Set(linked.map((draft) => draft.id)))}
+                  >
+                    Selecionar existentes da equipe
+                  </Button>
+                </div>
+              )}
               {selectedBlocked > 0 && (
                 <div
                   role="alert"
@@ -723,6 +759,11 @@ export function SpreadsheetImportDialog({
                                 .slice(0, 1)
                                 .map((conflict) => conflict.message)}
                             </span>
+                          ) : linked.some((item) => item.id === draft.id) ? (
+                            <span className="sheet-row-status text-primary">
+                              <CheckCircle2 size={14} />
+                              Adicionar às minhas demandas
+                            </span>
                           ) : overlaps.some((item) => item.manifestIds.includes(draft.id)) ? (
                             <span className="sheet-row-status text-warning">
                               <AlertCircle size={14} />
@@ -831,7 +872,10 @@ export function SpreadsheetImportDialog({
               Cancelar
             </Button>
             <Button type="button" disabled={!canSave} onClick={save}>
-              <Check size={16} /> Cadastrar {chosen.length || ""} manifestos
+              <Check size={16} />{" "}
+              {chosenLinks
+                ? `Adicionar ${chosen.length} às minhas demandas`
+                : `Cadastrar ${chosen.length || ""} manifestos`}
             </Button>
           </div>
         </div>

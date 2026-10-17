@@ -68,6 +68,47 @@ afterEach(async () => {
 afterAll(async () => {
   await db.close();
 });
+it("only adds the authenticated member, rejects forged links, and preserves links from old browsers", async () => {
+  const base = (await rpc("get_conference_team")).data;
+  const created = await rpc<{ data: ConferenceState }>("save_team_conference", [
+    base,
+    {
+      ...base,
+      manifests: [
+        {
+          id: "06058888",
+          driver: "TEST",
+          plate: "ABC1D23",
+          date: "2026-10-14",
+          documents: [{ id: "d", ctc: "0000000001", nf: "1-1", volumes: 1, received: false }],
+        },
+      ],
+    },
+  ]);
+  await login(2);
+  await rpc("get_conference_team", [true]);
+  const forged = structuredClone(created.data);
+  forged.manifests[0]!.demandUserIds = [uid(3)];
+  await expect(rpc("save_team_conference", [created.data, forged])).rejects.toThrow(
+    "CONFERENCE_INVALID",
+  );
+  forged.manifests[0]!.demandUserIds = [uid(2)];
+  const linked = await rpc<{ data: ConferenceState }>("save_team_conference", [
+    created.data,
+    forged,
+  ]);
+  expect(linked.data.manifests[0]!.demandUserIds).toEqual([uid(2)]);
+  expect(linked.data.manifests[0]!.createdBy).toBe(uid(1));
+  await login(1);
+  const oldBrowser = structuredClone(linked.data);
+  delete oldBrowser.manifests[0]!.demandUserIds;
+  oldBrowser.manifests[0]!.driver = "UPDATED";
+  const saved = await rpc<{ data: ConferenceState }>("save_team_conference", [
+    oldBrowser,
+    oldBrowser,
+  ]);
+  expect(saved.data.manifests[0]!.demandUserIds).toEqual([uid(2)]);
+});
 it("rejects scalar type poisoning that would make the entire team's saved state undecodable", async () => {
   await login(1);
   const base = (await rpc("get_conference_team")).data;

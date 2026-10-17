@@ -50,8 +50,8 @@ export function ManifestDeleteDialog({
             {exported ? "Excluir manifesto?" : "Excluir pré-manifesto?"}
           </AlertDialogTitle>
           <AlertDialogDescription>
-            O {exported ? "manifesto" : "pré"} e todos os seus CTCs serão removidos da sua conta.
-            Esta ação não pode ser desfeita.
+            O {exported ? "manifesto" : "pré"} e todos os seus CTCs serão removidos de toda a
+            equipe, inclusive dos outros logins que os acompanham. Esta ação não pode ser desfeita.
           </AlertDialogDescription>
         </AlertDialogHeader>
         {manifest && (

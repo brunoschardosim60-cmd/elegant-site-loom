@@ -106,6 +106,12 @@ beforeAll(async () => {
   );
   await db.exec(scalarTypes);
   await db.exec(scalarTypes);
+  const demands = await readFile(
+    "supabase/migrations/20261018010000_shared_personal_demands.sql",
+    "utf8",
+  );
+  await db.exec(demands);
+  await db.exec(demands);
 }, 30000);
 afterAll(async () => {
   await db?.close();
