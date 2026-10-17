@@ -4,6 +4,6 @@
 - [x] Validar importação, formulários e layout no navegador e nos testes existentes.
 
 # Importação Luft e PDF
-- [ ] Refinar resumo, filtros, tabelas, detalhes e ações da importação sem mudar regras.
-- [ ] Refinar a hierarquia, tabelas e paginação visual do PDF.
-- [ ] Validar importação em 1366×768 e 390×844, PDF e testes existentes.
+- [x] Refinar resumo, filtros, tabelas, detalhes e ações da importação sem mudar regras.
+- [x] Refinar a hierarquia, tabelas e paginação visual do PDF.
+- [x] Validar importação em 1366×768 e 390×844, PDF e testes existentes.
