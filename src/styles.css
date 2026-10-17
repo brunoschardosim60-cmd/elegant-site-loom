@@ -906,3 +906,38 @@ h1 { font-size: 22px; }
 .nf-occurrences strong, .nf-occurrence-invoice { font-weight:500; color:var(--foreground); }
 .sheet-import-dialog button { overflow-wrap:anywhere; }
 @media(max-width:760px) { .nf-occurrences { font-size:12px; } .sheet-import-dialog button { max-width:100%; white-space:normal; height:auto; min-height:32px; } }
+
+/* Luft report review: fixed actions, readable nested table regions. */
+.sheet-import-dialog { background:var(--card); }
+.sheet-import-body { overscroll-behavior:contain; scrollbar-gutter:stable; }
+.sheet-upload strong { overflow-wrap:anywhere; line-height:1.6; }
+.sheet-import-metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:14px 0; }
+.sheet-import-metrics > div { border-right:1px solid var(--border); padding-right:12px; }
+.sheet-import-metrics > div:last-child { border:0; }
+.sheet-import-metrics dt { font-size:12px; color:var(--muted-foreground); }
+.sheet-import-metrics dd { font-size:22px; font-weight:750; color:var(--foreground); font-variant-numeric:tabular-nums; }
+.sheet-import-filters { border-top:1px solid var(--border); padding-top:16px; }
+.sheet-selection-tools { min-width:0; }
+.sheet-manifest-table th { font-size:11px; color:var(--muted-foreground); }
+.sheet-manifest-table td { padding:12px 10px; vertical-align:top; font-size:12px; line-height:1.6; }
+.sheet-manifest-table tbody tr:hover { background:var(--muted); }
+.sheet-manifest-link { white-space:normal; max-width:260px; }
+.sheet-row-status { display:flex; align-items:flex-start; gap:6px; }
+.sheet-row-status svg { flex-shrink:0; margin-top:3px; }
+.sheet-nfs-wrap { overscroll-behavior:contain; scrollbar-gutter:stable; }
+.sheet-nfs-wrap td { padding:10px 12px; border-top:1px solid var(--border); font-size:12px; line-height:1.6; vertical-align:top; }
+.sheet-nfs-wrap th { font-size:11px; color:var(--muted-foreground); }
+.sheet-nfs-wrap tbody tr:nth-child(even) { background:var(--muted); }
+.sheet-import-footer { background:var(--muted); }
+.sheet-import-footer > p { min-width:0; font-size:12px; line-height:1.6; }
+.sheet-import-footer > div { flex-shrink:0; }
+@media(max-width:760px) {
+  .sheet-import-metrics { gap:8px; }
+  .sheet-import-metrics dd { font-size:20px; }
+  .sheet-import-metrics > div { padding-right:6px; }
+  .sheet-upload { align-items:flex-start; }
+  .sheet-manifest-table td { padding:0; font-size:13px; }
+  .sheet-manifest-table-wrap { max-height:42dvh; }
+  .sheet-manifest-link { max-width:100%; }
+  .sheet-import-dialog .sheet-import-footer > div > button { min-height:44px; }
+}

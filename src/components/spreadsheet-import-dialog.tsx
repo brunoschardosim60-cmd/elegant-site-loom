@@ -439,11 +439,17 @@ export function SpreadsheetImportDialog({
                     ["NFs", drafts.reduce((sum, draft) => sum + draft.rows.length, 0)],
                     ["Volumes", drafts.reduce((sum, draft) => sum + (draft.totalVolumes ?? 0), 0)],
                   ].map(([label, value]) => (
-                    <div key={label}><dt>{label}</dt><dd>{value}</dd></div>
+                    <div key={label}>
+                      <dt>{label}</dt>
+                      <dd>{value}</dd>
+                    </div>
                   ))}
                 </dl>
-                {allUniqueCtcs < drafts.reduce((sum, draft) => sum + (draft.expectedRows ?? 0), 0) && (
-                  <p className="text-xs text-muted-foreground">{allUniqueCtcs} CTCs únicos entre as rotas</p>
+                {allUniqueCtcs <
+                  drafts.reduce((sum, draft) => sum + (draft.expectedRows ?? 0), 0) && (
+                  <p className="text-xs text-muted-foreground">
+                    {allUniqueCtcs} CTCs únicos entre as rotas
+                  </p>
                 )}
                 <p className="mt-1 text-xs">
                   {result.ignored} linhas de outras filiais ou motivos ignoradas. {result.repeated}{" "}
@@ -553,41 +559,43 @@ export function SpreadsheetImportDialog({
                   ))}
                 </select>
                 <div className="sheet-selection-tools flex flex-wrap items-center gap-1 sm:col-span-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    setSelected(
-                      new Set(
-                        visible.filter((draft) => !blocked.has(draft.id)).map((draft) => draft.id),
-                      ),
-                    )
-                  }
-                >
-                  Selecionar resultados
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setSelected(new Set())}
-                >
-                  Limpar seleção
-                </Button>
-                {(query.trim() || dayFilter) && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setSelected(
+                        new Set(
+                          visible
+                            .filter((draft) => !blocked.has(draft.id))
+                            .map((draft) => draft.id),
+                        ),
+                      )
+                    }
+                  >
+                    Selecionar resultados
+                  </Button>
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
-                    onClick={() => {
-                      setQuery("");
-                      setDayFilter("");
-                    }}
+                    onClick={() => setSelected(new Set())}
                   >
-                    <FilterX size={14} /> Limpar filtros
+                    Limpar seleção
                   </Button>
-                )}
+                  {(query.trim() || dayFilter) && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setQuery("");
+                        setDayFilter("");
+                      }}
+                    >
+                      <FilterX size={14} /> Limpar filtros
+                    </Button>
+                  )}
                 </div>
               </div>
               <p className="text-xs text-muted-foreground">
@@ -708,19 +716,23 @@ export function SpreadsheetImportDialog({
                         </td>
                         <td data-label="Situação" className="border-t p-3 min-w-40">
                           {blocked.has(draft.id) ? (
-                            <span className="sheet-row-status text-warning"><AlertCircle size={14} />
+                            <span className="sheet-row-status text-warning">
+                              <AlertCircle size={14} />
                               {conflicts
                                 .filter((conflict) => drafts[conflict.index]?.id === draft.id)
                                 .slice(0, 1)
                                 .map((conflict) => conflict.message)}
                             </span>
                           ) : overlaps.some((item) => item.manifestIds.includes(draft.id)) ? (
-                            <span className="sheet-row-status text-warning"><AlertCircle size={14} />
+                            <span className="sheet-row-status text-warning">
+                              <AlertCircle size={14} />
                               CTC em outro manifesto ·{" "}
                               {selected.has(draft.id) ? "selecionado" : "aguarda escolha"}
                             </span>
                           ) : (
-                            <span className="sheet-row-status text-success"><CheckCircle2 size={14} /> Pronto para cadastrar</span>
+                            <span className="sheet-row-status text-success">
+                              <CheckCircle2 size={14} /> Pronto para cadastrar
+                            </span>
                           )}
                         </td>
                       </tr>

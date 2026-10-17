@@ -59,7 +59,21 @@ export const Route = createFileRoute("/layout-preview")({
     if (!import.meta.env.DEV) throw notFound();
   },
   head: () => ({
-    meta: [{ title: "Prévia de layout · confere." }, { name: "robots", content: "noindex" }],
+    meta: [
+      { title: "Prévia de layout · confere." },
+      {
+        name: "description",
+        content: "Prévia local das telas de conferência do confere. com dados fictícios.",
+      },
+      { property: "og:title", content: "Prévia de layout · confere." },
+      {
+        property: "og:description",
+        content: "Revisão local das telas de conferência e importação Luft.",
+      },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
+      { name: "robots", content: "noindex" },
+    ],
   }),
   component: LayoutPreview,
 });
