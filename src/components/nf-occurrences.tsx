@@ -17,8 +17,13 @@ export function NfOccurrences({
         .filter(Boolean),
     ),
   ];
-  const occurrences = new Map(values?.map((value) => [value.nf, value]));
-  if (!invoices.some((invoice) => occurrences.has(invoice)))
+  const occurrences = new Map(
+    values
+      ?.filter((value) => value.code.trim() || value.description.trim())
+      .map((value) => [value.nf, value]),
+  );
+  const hasOccurrences = invoices.some((invoice) => occurrences.has(invoice));
+  if (!invoices.length)
     return (
       <>
         {prefix && "NF "}
@@ -32,13 +37,21 @@ export function NfOccurrences({
           const item = occurrences.get(invoice);
           return (
             <li key={invoice}>
-              <span className="nf-occurrence-invoice">NF {invoice}</span>
-              {item && (
+              <span className="nf-occurrence-invoice">
+                {(prefix || hasOccurrences) && "NF "}
+                {invoice}
+              </span>
+              {item ? (
                 <>
                   {" · "}
                   {item.code && <strong>{item.code}</strong>}
                   {item.code && item.description && " — "}
                   {item.description || "Descrição não informada"}
+                </>
+              ) : (
+                <>
+                  {" "}
+                  <span className="nf-occurrence-empty">Sem ocorrência</span>
                 </>
               )}
             </li>

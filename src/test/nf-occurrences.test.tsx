@@ -33,8 +33,9 @@ it("renders each NF once, keeping notes without occurrences and ignoring associa
   expect(container.textContent?.match(/21582-1/g)).toHaveLength(1);
   expect(container).toHaveTextContent("NF 21581-1 · 01 — ENTREGA REALIZADA NORMALMENTE");
   expect(container).not.toHaveTextContent("99999-1");
+  expect(screen.getByText("Sem ocorrência").closest("li")).toHaveTextContent("21582-1");
   rerender(<NfOccurrences nf="21581-1" />);
-  expect(container).toHaveTextContent(/^21581-1$/);
+  expect(container).toHaveTextContent(/^21581-1 Sem ocorrência$/);
 });
 
 const headers = [
