@@ -13,6 +13,7 @@
 
 ## Application rules
 
+- Keep PDF layout changes independent of report selection so exported filters, route history and totals match the operational view.
 - Persist registered conference state in Supabase behind authentication. Team members are confirmed accounts admitted by explicit email invitation, without a fixed member cap; shared RPCs must verify membership and all tables keep RLS. Preserve the owner's original records and never merge unrelated personal accounts automatically. Use transactional three-way merges, server-side duplicate checks and immutable authenticated audit; reject conflicting field edits. Never persist unsaved import drafts or photos or expose service-role keys.
 - Isolate CTC parsing and conference transitions in a browser-safe domain module so barcode rules can be tested independently.
 - Confer by the Luft CTC identifier (10 digits), as requested by the user. Preserve leading zeroes and never derive a CTC from a CT-e or NF-e key.

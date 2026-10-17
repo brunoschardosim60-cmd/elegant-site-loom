@@ -2,6 +2,9 @@ import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import {
   AlertCircle,
   CheckCircle2,
+  Check,
+  FilterX,
+  RefreshCw,
   FileSpreadsheet,
   Loader2,
   Search,
@@ -223,29 +226,29 @@ export function SpreadsheetImportDialog({
           }
         }}
         onDrop={(event) => event.preventDefault()}
-        className="sheet-import-dialog w-[calc(100vw-1rem)] max-w-5xl max-h-[94dvh] flex flex-col overflow-hidden p-0"
+        className="sheet-import-dialog w-[calc(100vw-1rem)] max-w-6xl max-h-[94dvh] flex flex-col overflow-hidden p-0"
       >
-        <DialogHeader className="shrink-0 border-b px-5 py-5 sm:px-7">
+        <DialogHeader className="sheet-import-header shrink-0 border-b px-5 py-4 sm:px-6">
           <div className="flex items-center gap-3">
-            <span className="rounded-xl bg-primary/10 p-3 text-primary">
+            <span className="rounded-lg bg-primary/10 p-2.5 text-primary">
               <FileSpreadsheet size={25} />
             </span>
-            <div>
+            <div className="min-w-0">
               <DialogTitle>Importar planilha da Luft</DialogTitle>
               <DialogDescription className="mt-1">
-                Relatório 108 · Filial 06 · DIS (Distribuição). Sem fotos e sem IA.
+                Relatório 108 · Relação de Notas por Manifesto
               </DialogDescription>
             </div>
           </div>
         </DialogHeader>
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-7 space-y-4">
+        <div className="sheet-import-body min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-6 space-y-4">
           <label
             onDragEnter={dragFile}
             onDragOver={dragFile}
             onDragLeave={leaveFile}
             onDrop={dropFile}
             data-dragging={dragging || undefined}
-            className={`focus-within:ring-2 focus-within:ring-primary focus-within:ring-offset-2 flex items-center gap-3 rounded-xl border border-dashed p-4 transition-colors ${busy ? "cursor-wait opacity-60" : "cursor-pointer hover:bg-primary/10"} ${dragging ? "border-primary bg-primary/10 ring-2 ring-primary ring-offset-2" : "border-primary/40 bg-primary/5"}`}
+            className={`focus-within:ring-2 focus-within:ring-primary focus-within:ring-offset-2 sheet-upload flex items-center gap-3 rounded-lg border border-dashed p-4 transition-colors ${busy ? "cursor-wait opacity-60" : "cursor-pointer hover:bg-primary/10"} ${dragging ? "border-primary bg-primary/10 ring-2 ring-primary ring-offset-2" : "border-primary/30 bg-primary/5"}`}
           >
             <input
               type="file"
@@ -266,7 +269,7 @@ export function SpreadsheetImportDialog({
                   : filename || "Arraste a planilha 108 ou clique para selecionar"}
               </strong>
               <span className="text-xs text-muted-foreground">
-                Um arquivo XLSX, até 8 MB. TRA e outras filiais ficam de fora.
+                XLSX · até 8 MB · Filial 06 + DIS. TRA e outras filiais ficam de fora.
               </span>
             </span>
           </label>
@@ -309,7 +312,7 @@ export function SpreadsheetImportDialog({
           {!!result?.errors.length && (
             <div
               role="alert"
-              className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900"
+              className="rounded-lg border border-warning/30 bg-warning-soft p-3 text-sm text-warning"
             >
               <strong className="flex gap-2 items-center">
                 <AlertCircle size={16} />
@@ -329,7 +332,7 @@ export function SpreadsheetImportDialog({
           {!!overlaps.length && (
             <div
               role="alert"
-              className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900"
+              className="rounded-lg border border-warning/30 bg-warning-soft p-3 text-sm text-warning"
             >
               <strong>CTC presente em mais de um manifesto</strong>
               <p className="mt-1">
@@ -341,12 +344,13 @@ export function SpreadsheetImportDialog({
                 {overlaps.map((item) => (
                   <div
                     key={item.ctc}
-                    className="rounded border border-amber-200 bg-background/70 p-3"
+                    className="rounded border border-warning/20 bg-background/70 p-3"
                   >
                     <p className="font-semibold">CTC {item.ctc}</p>
                     <div className="mt-2 flex flex-wrap gap-2">
                       {item.manifestIds.map((id) => {
-                        const draft = drafts.find((candidate) => candidate.id === id)!;
+                        const draft = drafts.find((candidate) => candidate.id === id);
+                        if (!draft) return null;
                         return (
                           <Button
                             key={id}
@@ -417,7 +421,7 @@ export function SpreadsheetImportDialog({
           {result && (
             <>
               <div
-                className={`rounded-lg border px-4 py-3 text-sm ${result.errors.length ? "bg-amber-50 border-amber-300 text-amber-900" : "bg-emerald-50 border-emerald-200 text-emerald-900"}`}
+                className={`sheet-import-summary border-l-2 pl-4 py-1 text-sm ${result.errors.length ? "border-warning" : "border-success"}`}
                 role="status"
               >
                 <p className="flex items-center gap-2 font-semibold">
@@ -425,16 +429,28 @@ export function SpreadsheetImportDialog({
                   {drafts.length} manifestos em {days.length} {days.length === 1 ? "dia" : "dias"} ·{" "}
                   {seconds.toFixed(1).replace(".", ",")} s
                 </p>
-                <p className="mt-1 text-sm">
-                  <strong>Período:</strong> {formatManifestDate(days[0]?.date)} a{" "}
-                  {formatManifestDate(days.at(-1)?.date)} ·{" "}
-                  <strong>{drafts.reduce((s, d) => s + (d.expectedRows ?? 0), 0)}</strong> CTCs ·{" "}
-                  {allUniqueCtcs < drafts.reduce((s, d) => s + (d.expectedRows ?? 0), 0) && (
-                    <span>({allUniqueCtcs} únicos entre as rotas) · </span>
-                  )}
-                  <strong>{drafts.reduce((s, d) => s + d.rows.length, 0)}</strong> NFs ·{" "}
-                  <strong>{drafts.reduce((s, d) => s + (d.totalVolumes ?? 0), 0)}</strong> volumes
+                <p className="mt-1 text-muted-foreground">
+                  {formatManifestDate(days[0]?.date)} a {formatManifestDate(days.at(-1)?.date)}
                 </p>
+                <dl className="sheet-import-metrics">
+                  {[
+                    ["Manifestos", drafts.length],
+                    ["CTCs", drafts.reduce((sum, draft) => sum + (draft.expectedRows ?? 0), 0)],
+                    ["NFs", drafts.reduce((sum, draft) => sum + draft.rows.length, 0)],
+                    ["Volumes", drafts.reduce((sum, draft) => sum + (draft.totalVolumes ?? 0), 0)],
+                  ].map(([label, value]) => (
+                    <div key={label}>
+                      <dt>{label}</dt>
+                      <dd>{value}</dd>
+                    </div>
+                  ))}
+                </dl>
+                {allUniqueCtcs <
+                  drafts.reduce((sum, draft) => sum + (draft.expectedRows ?? 0), 0) && (
+                  <p className="text-xs text-muted-foreground">
+                    {allUniqueCtcs} CTCs únicos entre as rotas
+                  </p>
+                )}
                 <p className="mt-1 text-xs">
                   {result.ignored} linhas de outras filiais ou motivos ignoradas. {result.repeated}{" "}
                   repetições idênticas removidas. Nada foi cadastrado ainda.
@@ -454,19 +470,20 @@ export function SpreadsheetImportDialog({
                 aria-label="Resumo por dia de manifesto"
               >
                 {days.map((day) => (
-                  <button
+                  <Button
+                    variant="outline"
                     key={day.date}
                     type="button"
                     aria-pressed={dayFilter === day.date}
                     aria-label={`Mostrar manifestos de ${formatManifestDate(day.date)}`}
                     onClick={() => setDayFilter((old) => (old === day.date ? "" : day.date))}
-                    className={`shrink-0 rounded-lg border px-3 py-1.5 text-left text-xs ${dayFilter === day.date ? "border-primary bg-primary/5 text-primary" : "hover:bg-muted/50"}`}
+                    className={`sheet-day shrink-0 h-auto block rounded-lg border px-3 py-2 text-left text-xs ${dayFilter === day.date ? "border-primary bg-primary/5 text-primary" : "hover:bg-muted/50"}`}
                   >
                     <strong className="block">{formatManifestDate(day.date)}</strong>
                     <span className="block">
                       {day.manifests} man. · {day.ctcs} CTCs · {day.volumes} vol.
                     </span>
-                  </button>
+                  </Button>
                 ))}
               </div>
               {!!occurrenceUpdates?.count && onUpdateOccurrences && (
@@ -496,7 +513,7 @@ export function SpreadsheetImportDialog({
                       } else setError(outcome.error);
                     }}
                   >
-                    Atualizar ocorrências das NFs cadastradas
+                    <RefreshCw size={15} /> Atualizar ocorrências das NFs cadastradas
                   </Button>
                 </div>
               )}
@@ -507,7 +524,7 @@ export function SpreadsheetImportDialog({
                 </p>
               )}
               {!!occurrenceUpdates?.skippedUncertain && (
-                <p role="status" className="text-xs text-amber-700">
+                <p role="status" className="text-sm text-warning">
                   {occurrenceUpdates.skippedUncertain} ocorrência(s) diferente(s) sem referência
                   suficiente de data ou geração do relatório. Os dados salvos foram mantidos.
                 </p>
@@ -517,7 +534,7 @@ export function SpreadsheetImportDialog({
                   {updateMessage}
                 </p>
               )}
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="sheet-import-filters grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
                 <label className="focus-within:ring-2 focus-within:ring-primary flex min-w-0 flex-[2_1_220px] items-center gap-2 rounded-lg border px-3 py-2">
                   <Search size={15} className="text-muted-foreground" />
                   <input
@@ -541,41 +558,45 @@ export function SpreadsheetImportDialog({
                     </option>
                   ))}
                 </select>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    setSelected(
-                      new Set(
-                        visible.filter((draft) => !blocked.has(draft.id)).map((draft) => draft.id),
-                      ),
-                    )
-                  }
-                >
-                  Selecionar resultados
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setSelected(new Set())}
-                >
-                  Limpar seleção
-                </Button>
-                {(query.trim() || dayFilter) && (
+                <div className="sheet-selection-tools flex flex-wrap items-center gap-1 sm:col-span-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setSelected(
+                        new Set(
+                          visible
+                            .filter((draft) => !blocked.has(draft.id))
+                            .map((draft) => draft.id),
+                        ),
+                      )
+                    }
+                  >
+                    Selecionar resultados
+                  </Button>
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
-                    onClick={() => {
-                      setQuery("");
-                      setDayFilter("");
-                    }}
+                    onClick={() => setSelected(new Set())}
                   >
-                    Limpar filtros
+                    Limpar seleção
                   </Button>
-                )}
+                  {(query.trim() || dayFilter) && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setQuery("");
+                        setDayFilter("");
+                      }}
+                    >
+                      <FilterX size={14} /> Limpar filtros
+                    </Button>
+                  )}
+                </div>
               </div>
               <p className="text-xs text-muted-foreground">
                 Exibindo {visible.length} de {drafts.length} ·{" "}
@@ -586,7 +607,7 @@ export function SpreadsheetImportDialog({
               {selectedBlocked > 0 && (
                 <div
                   role="alert"
-                  className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900"
+                  className="rounded-lg border border-warning/30 bg-warning-soft p-3 text-sm text-warning"
                 >
                   <p>
                     {selectedBlocked} manifesto(s) selecionado(s) já cadastrado(s) pela equipe.
@@ -611,10 +632,10 @@ export function SpreadsheetImportDialog({
                 role="region"
                 aria-label="Lista de manifestos da planilha"
                 tabIndex={0}
-                className="sheet-manifest-table-wrap max-h-[45dvh] overflow-auto rounded-lg border"
+                className="sheet-manifest-table-wrap max-h-[38dvh] overflow-auto rounded-lg border"
               >
                 <table
-                  className="sheet-manifest-table w-full text-left text-xs"
+                  className="sheet-manifest-table w-full text-left text-sm"
                   aria-label="Manifestos da planilha"
                 >
                   <thead>
@@ -642,7 +663,7 @@ export function SpreadsheetImportDialog({
                           draft.id === active
                             ? "bg-primary/5"
                             : blocked.has(draft.id)
-                              ? "bg-amber-50"
+                              ? "bg-warning-soft"
                               : ""
                         }
                         key={draft.id}
@@ -664,15 +685,16 @@ export function SpreadsheetImportDialog({
                           />
                         </td>
                         <td data-label="Manifesto / motorista" className="border-t p-3">
-                          <button
+                          <Button
+                            variant="ghost"
                             type="button"
-                            className="text-left hover:underline"
+                            className="sheet-manifest-link h-auto block p-0 text-left hover:bg-transparent hover:underline"
                             aria-label={`Ver NFs do manifesto ${draft.id}`}
                             onClick={() => setActive(draft.id)}
                           >
                             <strong className="block font-mono text-primary">{draft.id}</strong>
                             <span className="block mt-1 min-w-40">{draft.driver}</span>
-                          </button>
+                          </Button>
                         </td>
                         <td data-label="Placa" className="border-t p-3 font-mono">
                           {draft.plate}
@@ -694,19 +716,23 @@ export function SpreadsheetImportDialog({
                         </td>
                         <td data-label="Situação" className="border-t p-3 min-w-40">
                           {blocked.has(draft.id) ? (
-                            <span className="text-amber-800">
+                            <span className="sheet-row-status text-warning">
+                              <AlertCircle size={14} />
                               {conflicts
                                 .filter((conflict) => drafts[conflict.index]?.id === draft.id)
                                 .slice(0, 1)
                                 .map((conflict) => conflict.message)}
                             </span>
                           ) : overlaps.some((item) => item.manifestIds.includes(draft.id)) ? (
-                            <span className="text-amber-800">
+                            <span className="sheet-row-status text-warning">
+                              <AlertCircle size={14} />
                               CTC em outro manifesto ·{" "}
                               {selected.has(draft.id) ? "selecionado" : "aguarda escolha"}
                             </span>
                           ) : (
-                            <span className="text-emerald-700">Pronto para cadastrar</span>
+                            <span className="sheet-row-status text-success">
+                              <CheckCircle2 size={14} /> Pronto para cadastrar
+                            </span>
                           )}
                         </td>
                       </tr>
@@ -720,7 +746,7 @@ export function SpreadsheetImportDialog({
                 )}
               </div>
               {current && (
-                <details key={current.id} open className="rounded-lg border p-3">
+                <details key={current.id} open className="sheet-nf-details border-t pt-4">
                   <summary className="cursor-pointer text-sm font-semibold">
                     NFs do manifesto {current.id} · {current.driver}
                   </summary>
@@ -728,9 +754,9 @@ export function SpreadsheetImportDialog({
                     role="region"
                     aria-label="Notas fiscais do manifesto selecionado"
                     tabIndex={0}
-                    className="sheet-nfs-wrap mt-3 max-h-56 overflow-auto"
+                    className="sheet-nfs-wrap mt-3 max-h-64 overflow-auto rounded-lg border"
                   >
-                    <table className="w-full text-left text-xs">
+                    <table className="w-full text-left text-sm">
                       <thead>
                         <tr>
                           {[
@@ -741,7 +767,7 @@ export function SpreadsheetImportDialog({
                             "Destinatário",
                             "Última ocorrência",
                           ].map((label) => (
-                            <th key={label} className="pb-2 pr-4">
+                            <th key={label} className="p-3 whitespace-nowrap">
                               {label}
                             </th>
                           ))}
@@ -789,7 +815,7 @@ export function SpreadsheetImportDialog({
             </>
           )}
         </div>
-        <div className="sheet-import-footer shrink-0 border-t px-5 py-4 sm:px-7 flex flex-wrap items-center justify-between gap-3">
+        <div className="sheet-import-footer shrink-0 border-t px-5 py-3 sm:px-6 grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
           <p className="text-sm" role="status">
             {chosen.length} manifestos em {luftManifestDays(chosen).length}{" "}
             {luftManifestDays(chosen).length === 1 ? "dia" : "dias"} · {ctcs} CTCs · {nfs} NFs ·{" "}
@@ -805,7 +831,7 @@ export function SpreadsheetImportDialog({
               Cancelar
             </Button>
             <Button type="button" disabled={!canSave} onClick={save}>
-              Cadastrar {chosen.length || ""} manifestos
+              <Check size={16} /> Cadastrar {chosen.length || ""} manifestos
             </Button>
           </div>
         </div>
