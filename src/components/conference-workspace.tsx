@@ -929,7 +929,7 @@ export function ConferenceWorkspace({
                               {visibleMissingRows.map(({ manifest, doc, days }) => (
                                 <tr key={`${manifest.id}:${doc.id}`}>
                                   <td className="ctc-number" data-label="CTC / Cliente">
-                                    {doc.ctc}
+                                    <span className="ctc-identifier">{doc.ctc}</span>
                                     {doc.client && (
                                       <span className="block text-muted-foreground text-[10px] font-sans mt-1">
                                         {doc.client}

@@ -466,7 +466,7 @@ export function DriverManifestList({
                                 .map((doc) => (
                                   <tr key={doc.id} className={doc.received ? "received-row" : ""}>
                                     <td className="ctc-number" data-label="CTC / Cliente">
-                                      {doc.ctc}
+                                      <span className="ctc-identifier">{doc.ctc}</span>
                                       {doc.client && (
                                         <span className="driver-document-client">{doc.client}</span>
                                       )}

@@ -89,7 +89,7 @@ export function CtcTracking({
                     className={doc.received ? "received-row" : ""}
                   >
                     <td data-label="CTC / Nota fiscal" className="ctc-number">
-                      <strong>{doc.ctc}</strong>
+                      <strong className="ctc-identifier">{doc.ctc}</strong>
                       <div className="tracking-detail">
                         <NfOccurrences nf={doc.nf} values={doc.nfOccurrences} prefix />
                       </div>
