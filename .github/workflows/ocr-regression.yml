@@ -22,6 +22,8 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Check TypeScript
         run: bunx tsc --noEmit
+      - name: Check dependency security
+        run: bun audit --audit-level high
       - name: Run all regression tests
         run: bun run test
       - name: Build production application

@@ -22,7 +22,7 @@ export function renderErrorPage(): string {
       <h1>Não foi possível carregar esta página</h1>
       <p>Ocorreu um problema ao carregar. Tente novamente ou volte para o início.</p>
       <div class="actions">
-        <button class="primary" onclick="location.reload()">Tentar novamente</button>
+        <a class="primary" href="">Tentar novamente</a>
         <a class="secondary" href="/">Voltar ao início</a>
       </div>
     </div>

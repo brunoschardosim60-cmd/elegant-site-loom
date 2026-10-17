@@ -11,7 +11,7 @@ select public.save_conference(0,'{"manifests":[],"activity":[],"issues":[]}');
 do $$ begin
   if (select count(*) from public.conference_states)<>1 then raise exception 'Owner read failed'; end if;
   begin
-    perform public.save_conference(0,'{}'); raise exception 'Stale revision accepted';
+    perform public.save_conference(0,'{"manifests":[],"activity":[],"issues":[]}'); raise exception 'Stale revision accepted';
   exception when others then if sqlerrm<>'CONFERENCE_CONFLICT' then raise; end if; end;
 end $$;
 select public.get_conference_team(false);

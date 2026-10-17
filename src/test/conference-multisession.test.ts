@@ -73,6 +73,7 @@ beforeAll(async () => {
     "20261016010000_personal_team_demands.sql",
     "20261016020000_visible_action_actors.sql",
     "20261016030000_latest_nf_occurrences.sql",
+    "20261017010000_security_hardening.sql",
   ])
     await db.exec(await readFile(`supabase/migrations/${migration}`, "utf8"));
   server = createServer(async (request, response) => {

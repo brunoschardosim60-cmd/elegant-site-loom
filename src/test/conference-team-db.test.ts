@@ -94,6 +94,12 @@ beforeAll(async () => {
   );
   await db.exec(chronology);
   await db.exec(chronology);
+  const security = await readFile(
+    "supabase/migrations/20261017010000_security_hardening.sql",
+    "utf8",
+  );
+  await db.exec(security);
+  await db.exec(security);
 }, 30000);
 afterAll(async () => {
   await db?.close();

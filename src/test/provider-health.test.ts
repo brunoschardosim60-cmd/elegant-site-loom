@@ -21,7 +21,7 @@ beforeEach(() => {
   vi.stubEnv("GEMINI_SERVICE_OWNER_EMAIL", undefined);
   vi.stubEnv("GEMINI_API_KEY_FALLBACK", "synthetic-reserve");
   mocks.user.mockResolvedValue({
-    data: { user: { email: "brunoschardosim60@gmail.com" } },
+    data: { user: { email: "brunoschardosim60@gmail.com", email_confirmed_at: "2026-10-16" } },
     error: null,
   });
 });
@@ -30,6 +30,15 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 const input = { data: { accessToken: "synthetic-access-token" } };
+it("does not authorize an unconfirmed owner email", async () => {
+  mocks.user.mockResolvedValue({
+    data: { user: { email: "brunoschardosim60@gmail.com", email_confirmed_at: null } },
+    error: null,
+  });
+  const { checkPhotoProviders } = await import("@/lib/provider-health.functions");
+  expect((await checkPhotoProviders(input)).checks).toEqual([]);
+  expect(mocks.fetch).not.toHaveBeenCalled();
+});
 it("authenticates the service owner before using provider credentials", async () => {
   mocks.user.mockResolvedValue({ data: { user: { email: "outsider@example.com" } }, error: null });
   const { checkPhotoProviders } = await import("@/lib/provider-health.functions");

@@ -14,7 +14,6 @@ import {
   repairPrompt,
 } from "./photo-repair";
 import { photoQuotaFailure } from "./photo-quota";
-const requests = new Map<string, { count: number; until: number }>();
 
 function providerKeys(preferAdditional = false) {
   const primary = process.env["GEMINI_API_KEY"];
@@ -171,7 +170,7 @@ export const readPhotoWithGemini = createServerFn({ method: "POST" })
       );
       // Do not consume the user's request bucket or start Gemini after closing.
       signal.throwIfAborted();
-      if (authError || !user.user)
+      if (authError || !user.user?.email_confirmed_at)
         return {
           ok: false as const,
           fallback: false,
@@ -209,18 +208,19 @@ export const readPhotoWithGemini = createServerFn({ method: "POST" })
           unavailable: true,
           error: "Configure uma chave de leitura por IA no servidor da Vercel.",
         };
-      const now = Date.now();
-      for (const [ip, value] of requests) if (value.until < now) requests.delete(ip);
-      const userId = user.user.id;
-      const bucket = requests.get(userId) || { count: 0, until: now + 600000 };
-      if (bucket.count >= 80)
+      const quota = await withinSignal(
+        () => Promise.resolve(auth.rpc("consume_conference_reader_quota")),
+        signal,
+      );
+      signal.throwIfAborted();
+      if (quota.error || quota.data !== true)
         return {
           ok: false as const,
           unavailable: true,
-          error: "Muitas fotos seguidas. Aguarde alguns minutos.",
+          error: quota.error
+            ? "Não foi possível autorizar a leitura por IA. Use a leitura local ou tente novamente."
+            : "Muitas fotos seguidas. Aguarde alguns minutos.",
         };
-      bucket.count++;
-      requests.set(userId, bucket);
       const compact = data.mode === "survey" || data.mode === "verify" || data.mode === "repair";
       stage = "connection";
       // A retired model returns 404; retry once with Google's stable alias of the same tier.

@@ -61,6 +61,30 @@ const successResponse = () =>
     }),
   );
 let user = 0;
+it("denies an unconfirmed service-owner email and a failed durable quota check without calling Gemini", async () => {
+  mocks.user.mockResolvedValue({
+    data: {
+      user: { id: "unconfirmed", email: "brunoschardosim60@gmail.com", email_confirmed_at: null },
+    },
+    error: null,
+  });
+  expect(await readPhotoWithGemini(input)).toMatchObject({ ok: false, fallback: false });
+  expect(mocks.membership).not.toHaveBeenCalled();
+  expect(mocks.fetch).not.toHaveBeenCalled();
+  mocks.user.mockResolvedValue({
+    data: {
+      user: {
+        id: "confirmed",
+        email: "brunoschardosim60@gmail.com",
+        email_confirmed_at: "2026-10-16",
+      },
+    },
+    error: null,
+  });
+  mocks.membership.mockResolvedValue({ data: null, error: { message: "synthetic failure" } });
+  expect(await readPhotoWithGemini(input)).toMatchObject({ ok: false, unavailable: true });
+  expect(mocks.fetch).not.toHaveBeenCalled();
+});
 const advanceUntil = (startedAt: number, elapsed: number) =>
   vi.advanceTimersByTimeAsync(Math.max(0, startedAt + elapsed - Date.now()));
 
@@ -105,8 +129,14 @@ beforeEach(() => {
   vi.stubEnv("GEMINI_API_KEY_FALLBACK_2", undefined);
   vi.stubEnv("GEMINI_OCR_MODEL", undefined);
   vi.stubEnv("GEMINI_OCR_VERIFY_MODEL", undefined);
-  mocks.user.mockResolvedValue({ data: { user: { id: `server-test-${++user}` } }, error: null });
-  mocks.membership.mockResolvedValue({ data: "brunoschardosim60@gmail.com", error: null });
+  mocks.user.mockResolvedValue({
+    data: { user: { id: `server-test-${++user}`, email_confirmed_at: "2026-10-16" } },
+    error: null,
+  });
+  mocks.membership.mockImplementation(async (name: string) => ({
+    data: name === "consume_conference_reader_quota" ? true : "brunoschardosim60@gmail.com",
+    error: null,
+  }));
   mocks.client.mockImplementation(() => ({ auth: { getUser: mocks.user }, rpc: mocks.membership }));
   mocks.request.mockReturnValue({ signal: new AbortController().signal });
   vi.stubGlobal("fetch", mocks.fetch);
@@ -147,12 +177,18 @@ it("denies OCR quota to an authenticated account outside the authorized team", a
 });
 it("keeps the verified service owner on the fast path and passes the member bearer token to Supabase only", async () => {
   mocks.user.mockResolvedValue({
-    data: { user: { id: "service-owner", email: "brunoschardosim60@gmail.com" } },
+    data: {
+      user: {
+        id: "service-owner",
+        email: "brunoschardosim60@gmail.com",
+        email_confirmed_at: "2026-10-16",
+      },
+    },
     error: null,
   });
   mocks.fetch.mockResolvedValue(successResponse());
   expect(await readPhotoWithGemini(input)).toMatchObject({ ok: true });
-  expect(mocks.membership).not.toHaveBeenCalled();
+  expect(mocks.membership).toHaveBeenCalledExactlyOnceWith("consume_conference_reader_quota");
   expect(mocks.client.mock.calls[0]![2].global.headers.Authorization).toBe(
     "Bearer synthetic-session-token",
   );
@@ -329,7 +365,11 @@ it("uses the remaining deadline for Gemini after authentication rather than rese
     () =>
       new Promise((resolve) =>
         setTimeout(
-          () => resolve({ data: { user: { id: `slow-auth-${user}` } }, error: null }),
+          () =>
+            resolve({
+              data: { user: { id: `slow-auth-${user}`, email_confirmed_at: "2026-10-16" } },
+              error: null,
+            }),
           5000,
         ),
       ),
@@ -390,7 +430,10 @@ it("does not consume the per-user photo bucket when closing during authenticatio
     });
   }
   mocks.request.mockReturnValue({ signal: new AbortController().signal });
-  mocks.user.mockResolvedValue({ data: { user: { id: userId } }, error: null });
+  mocks.user.mockResolvedValue({
+    data: { user: { id: userId, email_confirmed_at: "2026-10-16" } },
+    error: null,
+  });
   mocks.fetch.mockResolvedValue(
     new Response(
       JSON.stringify({

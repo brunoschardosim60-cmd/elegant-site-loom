@@ -2,6 +2,8 @@ import "./lib/error-capture";
 
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
+import { secureRequest, securityHeaders } from "./lib/http-security";
+import { publicSupabaseConfig, supabaseConfig } from "./lib/supabase-config";
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
@@ -46,16 +48,29 @@ function isH3SwallowedErrorBody(body: string): boolean {
 
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
+    const nonce = crypto.randomUUID().replaceAll("-", "");
+    let databaseUrl = supabaseConfig.url;
     try {
+      databaseUrl = publicSupabaseConfig(process.env).url;
+    } catch {
+      /* Auth endpoint rejects invalid configuration separately. */
+    }
+    const protect = (response: Response) =>
+      securityHeaders(response, nonce, import.meta.env.PROD, databaseUrl);
+    try {
+      const prepared = await secureRequest(request, nonce);
+      if (prepared instanceof Response) return protect(prepared);
       const handler = await getServerEntry();
-      const response = await handler.fetch(request, env, ctx);
-      return await normalizeCatastrophicSsrResponse(response);
+      const response = await handler.fetch(prepared, env, ctx);
+      return protect(await normalizeCatastrophicSsrResponse(response));
     } catch (error) {
       console.error(error);
-      return new Response(renderErrorPage(), {
-        status: 500,
-        headers: { "content-type": "text/html; charset=utf-8" },
-      });
+      return protect(
+        new Response(renderErrorPage(), {
+          status: 500,
+          headers: { "content-type": "text/html; charset=utf-8" },
+        }),
+      );
     }
   },
 };

@@ -22,6 +22,7 @@ export const checkPhotoProviders = createServerFn({ method: "POST" })
     signal.throwIfAborted();
     if (
       user.error ||
+      !user.data.user?.email_confirmed_at ||
       user.data.user?.email?.toLowerCase() !==
         (process.env["GEMINI_SERVICE_OWNER_EMAIL"] || "brunoschardosim60@gmail.com").toLowerCase()
     )
