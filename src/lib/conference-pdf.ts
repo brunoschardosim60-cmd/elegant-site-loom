@@ -124,7 +124,7 @@ export function createConferencePdf(input: ConferencePdfInput) {
   const height = pdf.internal.pageSize.getHeight();
   const margin = 10;
   const available = width - margin * 2;
-  const continuationTop = 10;
+  const continuationTop = 12;
   let cursor = 27;
   const text = (value: string, x: number, y: number, size = 9, bold = false, color = ink) => {
     pdf.setFont("helvetica", bold ? "bold" : "normal");
@@ -135,8 +135,8 @@ export function createConferencePdf(input: ConferencePdfInput) {
   // Report branding and generation metadata belong only on the first page.
   // Continuations reserve space only for the current driver/manifest and columns.
   const drawFirstHeader = () => {
-    text("confere.", margin, 13, 15, true, blue);
-    text(labels[input.view], margin + 30, 13, 11, true);
+    text("confere.", margin, 13, 18, true, blue);
+    text(labels[input.view], margin + 36, 13, 12, true);
     pdf.setFont("helvetica", "normal");
     pdf.setFontSize(8);
     pdf.setTextColor(...muted);
@@ -175,12 +175,12 @@ export function createConferencePdf(input: ConferencePdfInput) {
   const cardWidth = (available - 4 * (metrics.length - 1)) / metrics.length;
   metrics.forEach(([label, value], index) => {
     const x = margin + index * (cardWidth + 4);
-    pdf.setFillColor(242, 246, 249);
-    pdf.roundedRect(x, cursor - 2, cardWidth, 12, 1.5, 1.5, "F");
-    text(label!, x + 3, cursor + 2, 6.8, true, muted);
-    text(value!, x + 3, cursor + 8, 11.5, true, blue);
+    pdf.setDrawColor(...line);
+    if (index) pdf.line(x - 2, cursor - 1, x - 2, cursor + 11);
+    text(label ?? "", x + 2, cursor + 2, 7, true, muted);
+    text(value ?? "", x + 2, cursor + 10, 15, true, ink);
   });
-  cursor += 14;
+  cursor += 18;
   if (input.view !== "issues") {
     const nfs = documents.reduce(
       (sum, doc) => sum + doc.nf.split(/[,;]/).filter((nf) => /^\d/.test(nf.trim())).length,
@@ -264,10 +264,12 @@ export function createConferencePdf(input: ConferencePdfInput) {
     for (const [driver, manifests] of groups) {
       pdf.setFont("helvetica", "bold");
       pdf.setFontSize(10);
-      const driverLines = pdf.splitTextToSize(driver, available) as string[];
+      const driverLines = pdf.splitTextToSize(driver, available - 3) as string[];
       const driverHeight = driverLines.length * 4.5 + 2;
       const drawDriver = () => {
-        text(driverLines.join("\n"), margin, cursor, 10, true, blue);
+        pdf.setFillColor(...blue);
+        pdf.rect(margin, cursor - 3, 1, driverHeight - 1, "F");
+        text(driverLines.join("\n"), margin + 3, cursor, 10, true, blue);
         cursor += driverHeight;
       };
       reserve(driverHeight + 36);
@@ -294,7 +296,7 @@ export function createConferencePdf(input: ConferencePdfInput) {
         const remanifested = manifest.documents.filter((doc) => doc.reroutedTo).length;
         const header = (continuation = false) => {
           pdf.setFillColor(233, 240, 245);
-          pdf.roundedRect(margin, cursor - 1, available, headerHeight, 1.5, 1.5, "F");
+          pdf.rect(margin, cursor - 1, available, headerHeight, "F");
           text(
             `${field(manifest.id)}${continuation ? " (continuação)" : ""}`,
             margin + 2,
@@ -375,7 +377,7 @@ export function createConferencePdf(input: ConferencePdfInput) {
           styles: {
             font: "helvetica",
             fontSize: 8.5,
-            cellPadding: 1.5,
+            cellPadding: { top: 2.2, right: 2, bottom: 2.2, left: 2 },
             textColor: ink,
             valign: "middle",
             overflow: "linebreak",
@@ -387,6 +389,7 @@ export function createConferencePdf(input: ConferencePdfInput) {
             textColor: [255, 255, 255],
             fontStyle: "bold",
             fontSize: 8,
+            cellPadding: 2.2,
           },
           alternateRowStyles: { fillColor: [245, 248, 250] },
           columnStyles: {
@@ -410,12 +413,14 @@ export function createConferencePdf(input: ConferencePdfInput) {
           didParseCell: (data) => {
             if (data.section === "body" && manifest.documents[data.row.index]?.reroutedTo)
               data.cell.styles.fillColor = [235, 243, 250];
-            if (data.section === "body" && data.column.index === statusIndex)
+            if (data.section === "body" && data.column.index === statusIndex) {
+              data.cell.styles.fontStyle = "bold";
               data.cell.styles.textColor = manifest.documents[data.row.index]?.received
                 ? [22, 105, 77]
                 : manifest.documents[data.row.index]?.reroutedTo
                   ? blue
                   : [146, 91, 17];
+            }
           },
         });
         cursor = (pdf as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 4;
@@ -430,7 +435,8 @@ export function createConferencePdf(input: ConferencePdfInput) {
     pdf.setFont("helvetica", "normal");
     pdf.setFontSize(7.5);
     pdf.setTextColor(...muted);
-    pdf.text(`${page} / ${pages}`, width - margin, height - 6, { align: "right" });
+    pdf.text("Conferência de documentos", margin, height - 6);
+    pdf.text(`Página ${page} de ${pages}`, width - margin, height - 6, { align: "right" });
   }
   return pdf;
 }
