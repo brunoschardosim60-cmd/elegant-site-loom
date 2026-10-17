@@ -49,7 +49,6 @@ import {
   selectOwnedRoutes,
   type WorkspaceScope,
 } from "@/lib/conference-ownership";
-import { ActionActor } from "./action-actor";
 import { NfOccurrences } from "./nf-occurrences";
 import { planOccurrenceUpdates } from "@/lib/nf-occurrences";
 import { DocumentPagination, documentPageSize } from "./document-pagination";
@@ -951,13 +950,6 @@ export function ConferenceWorkspace({
                                         : "Cadastro"}{" "}
                                       {formatManifestDate(manifestReferenceDate(manifest))}
                                     </span>
-                                    {teamReadOnly && (
-                                      <ActionActor
-                                        label="Atualizado por"
-                                        email={manifest.updatedByEmail}
-                                        at={manifest.updatedAt}
-                                      />
-                                    )}
                                   </td>
                                   <td className="text-muted-foreground" data-label="Nota fiscal">
                                     <NfOccurrences nf={doc.nf} values={doc.nfOccurrences} />

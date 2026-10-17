@@ -5,6 +5,7 @@ import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
 import type { ConferenceTeam } from "@/lib/conference-team";
 import { teamRequest } from "@/lib/team-request";
+import { ActionActor } from "./action-actor";
 
 const auditSchema = z.array(
   z.object({
@@ -73,6 +74,9 @@ export function TeamPanel({
   const [loading, setLoading] = useState(false);
   const [more, setMore] = useState(false);
   const [appliedFilter, setAppliedFilter] = useState("");
+  const inspectedManifest = team.data.manifests.find(
+    (manifest) => manifest.id.trim().toUpperCase() === appliedFilter,
+  );
   const [historyError, setHistoryError] = useState("");
   const version = useRef(0);
   async function join() {
@@ -320,6 +324,18 @@ export function TeamPanel({
             <p className="text-xs text-muted-foreground">
               Consulta: {appliedFilter || "Todos os manifestos"}
             </p>
+            {inspectedManifest &&
+              (inspectedManifest.createdByEmail || inspectedManifest.updatedByEmail) && (
+                <div className="rounded-lg border bg-muted/40 px-3 py-2">
+                  <p className="text-xs font-medium">Responsáveis pelo cadastro</p>
+                  <ActionActor label="Cadastrado por" email={inspectedManifest.createdByEmail} />
+                  <ActionActor
+                    label="Atualizado por"
+                    email={inspectedManifest.updatedByEmail}
+                    at={inspectedManifest.updatedAt}
+                  />
+                </div>
+              )}
             {historyError && (
               <p role="alert" className="text-sm text-destructive">
                 {historyError}

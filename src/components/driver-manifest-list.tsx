@@ -299,16 +299,6 @@ export function DriverManifestList({
                           aria-hidden="true"
                         />
                       </button>
-                      {readOnly && (
-                        <div className="px-3 pb-1">
-                          <ActionActor label="Cadastrado por" email={manifest.createdByEmail} />
-                          <ActionActor
-                            label="Atualizado por"
-                            email={manifest.updatedByEmail}
-                            at={manifest.updatedAt}
-                          />
-                        </div>
-                      )}
                       {(onIssueDateChange ||
                         onDeleteManifest ||
                         onAuditManifest ||
@@ -422,6 +412,7 @@ export function DriverManifestList({
                               type="button"
                               className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
                               aria-label={`Histórico do ${noun} ${manifest.id}`}
+                              title="Ver responsáveis e histórico de alterações"
                               onClick={() => onAuditManifest(manifest.id)}
                             >
                               <History size={13} />
