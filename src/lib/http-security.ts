@@ -59,12 +59,12 @@ export function securityHeaders(
     const supabase = new URL(databaseUrl);
     const csp = [
       "default-src 'self'",
-      `script-src 'self' 'nonce-${nonce}' 'wasm-unsafe-eval' https://cdn.jsdelivr.net`,
+      `script-src 'self' 'nonce-${nonce}' 'wasm-unsafe-eval'`,
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "font-src 'self' https://fonts.gstatic.com",
       "img-src 'self' data: blob:",
       `connect-src 'self' ${supabase.origin} wss://${supabase.host} https://cdn.jsdelivr.net https://tessdata.projectnaptha.com`,
-      "worker-src 'self' blob:",
+      "worker-src 'self'",
       "object-src 'none'",
       "base-uri 'none'",
       "frame-ancestors 'none'",

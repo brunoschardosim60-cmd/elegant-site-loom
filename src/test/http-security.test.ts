@@ -62,6 +62,13 @@ it("protects HTML and error responses without caching account data or allowing a
     /script-src[^;]*'unsafe-(?:inline|eval)'/,
   );
   expect(result.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+  expect(
+    result.headers
+      .get("content-security-policy")!
+      .split(";")
+      .find((part) => part.trim().startsWith("script-src")),
+  ).not.toMatch(/https?:/);
+  expect(result.headers.get("content-security-policy")).toContain("worker-src 'self'");
   expect(result.headers.get("x-frame-options")).toBe("DENY");
   expect(result.headers.get("x-content-type-options")).toBe("nosniff");
   expect(result.headers.get("cache-control")).toBe("private, no-store");

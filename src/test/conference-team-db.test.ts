@@ -100,6 +100,12 @@ beforeAll(async () => {
   );
   await db.exec(security);
   await db.exec(security);
+  const scalarTypes = await readFile(
+    "supabase/migrations/20261017020000_security_scalar_types.sql",
+    "utf8",
+  );
+  await db.exec(scalarTypes);
+  await db.exec(scalarTypes);
 }, 30000);
 afterAll(async () => {
   await db?.close();

@@ -11,6 +11,7 @@ vi.mock("@/lib/image-prep", () => ({
   prepareForOcr: vi.fn(async (file: File) => new Blob([file])),
 }));
 import { createWorker } from "tesseract.js";
+import { ocrWorkerOptions } from "@/lib/ocr-worker-options";
 import { prepareForOcr } from "@/lib/image-prep";
 import { detectPhotoOrientations, hasUprightPhotoHeading } from "@/lib/photo-orientation";
 
@@ -40,7 +41,7 @@ describe("Local thumbnail orientation", () => {
       .mockResolvedValueOnce(read("PRÉ-MANIFESTO"))
       .mockResolvedValueOnce(read("DACTE"));
     expect(await detectPhotoOrientations(files, progress)).toEqual([270, 0]);
-    expect(createWorker).toHaveBeenCalledExactlyOnceWith("por");
+    expect(createWorker).toHaveBeenCalledExactlyOnceWith("por", 1, ocrWorkerOptions);
     expect(vi.mocked(prepareForOcr).mock.calls.map((call) => call.slice(0, 3))).toEqual([
       [files[0], 0, 1400],
       [files[0], 270, 1400],

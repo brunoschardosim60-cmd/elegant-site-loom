@@ -1,4 +1,5 @@
 import { createWorker, PSM, type Worker } from "tesseract.js";
+import { ocrWorkerOptions } from "./ocr-worker-options";
 import { prepareForOcr } from "./image-prep";
 
 export type PhotoAngle = 0 | 90 | 180 | 270;
@@ -59,7 +60,7 @@ export async function detectPhotoOrientations(
       stop();
       return angles;
     }
-    const starting = createWorker("por");
+    const starting = createWorker("por", 1, ocrWorkerOptions);
     void starting
       .then((value) => {
         if (stopped) dispose(value);

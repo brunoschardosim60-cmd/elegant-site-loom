@@ -1,4 +1,5 @@
 import { createWorker, PSM, type Worker } from "tesseract.js";
+import { ocrWorkerOptions } from "./ocr-worker-options";
 import {
   prepareBitmapForOcr as prepareForOcr,
   prepareNumericMontage,
@@ -60,7 +61,9 @@ export async function readPhotoNumbers(
 ): Promise<NumericPhotoRead> {
   const started = performance.now();
   signal?.throwIfAborted();
-  const starting = existingWorker ? Promise.resolve(existingWorker) : createWorker("por");
+  const starting = existingWorker
+    ? Promise.resolve(existingWorker)
+    : createWorker("por", 1, ocrWorkerOptions);
   let worker: Worker | undefined;
   let original: ImageBitmap | undefined;
   let terminated = false;
@@ -341,7 +344,7 @@ export function createPhotoNumericVerifier(size: 1 | 2) {
     }
   };
   const start = () => {
-    const pending = createWorker("por");
+    const pending = createWorker("por", 1, ocrWorkerOptions);
     void pending
       .then((worker) => {
         if (closed) void disposeWorker(worker);

@@ -21,6 +21,8 @@ await probe("HTTP protections and nonced SSR", origin + "/", {}, (response, html
   const nonce = csp?.match(/'nonce-([^']+)'/)?.[1];
   assert(nonce);
   assert(csp.includes("frame-ancestors 'none'"));
+  assert(!csp.match(/script-src ([^;]+)/)?.[1].includes("https:"));
+  assert(csp.includes("worker-src 'self'"));
   assert.equal(response.headers.get("x-frame-options"), "DENY");
   assert.equal(response.headers.get("x-content-type-options"), "nosniff");
   assert.match(response.headers.get("cache-control"), /no-store/);
@@ -29,6 +31,16 @@ await probe("HTTP protections and nonced SSR", origin + "/", {}, (response, html
   assert(scripts.every(([tag]) => tag.includes(`nonce="${nonce}"`)));
   assert(!/(?:sb_secret_[A-Za-z0-9_-]{20,}|AIza[A-Za-z0-9_-]{30,})/.test(html));
 });
+await probe(
+  "Lockfile-pinned local OCR worker",
+  origin + "/ocr-assets/worker.min.js",
+  {},
+  (response, body) => {
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get("content-type"), /javascript/);
+    assert(body.length > 10000);
+  },
+);
 for (const path of ["/.env", "/.git/config", "/layout-preview"])
   await probe("Private/development path " + path, origin + path, {}, (response) =>
     assert.equal(response.status, 404),

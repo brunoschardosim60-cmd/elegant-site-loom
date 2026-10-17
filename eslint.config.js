@@ -14,8 +14,10 @@ export default tseslint.config(
       ".tanstack",
       ".nitro",
       ".vercel",
+      "public/ocr-assets",
       // Local visual-review harnesses are not part of the application.
       ".layout-qa*",
+      ".security-ocr-qa*",
       ".sheet-review*",
       ".ocr-*",
       "**/*.local.*",

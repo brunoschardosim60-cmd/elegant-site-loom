@@ -1,4 +1,5 @@
 import { createWorker, PSM, type Worker } from "tesseract.js";
+import { ocrWorkerOptions } from "./ocr-worker-options";
 import {
   clean,
   isPreIdWord,
@@ -668,7 +669,9 @@ export async function readPrePhotos(
       ? Number((navigator as Navigator & { deviceMemory?: number }).deviceMemory)
       : undefined;
   const poolSize = getLocalOcrPoolSize(files.length, cores, mobile, deviceMemory);
-  const startingAll = Array.from({ length: poolSize }, () => createWorker("por"));
+  const startingAll = Array.from({ length: poolSize }, () =>
+    createWorker("por", 1, ocrWorkerOptions),
+  );
   let cancelStartup = () => {};
   const aborted = new Promise<undefined>((resolve) => {
     cancelStartup = () => resolve(undefined);
@@ -752,7 +755,7 @@ export async function readPrePhoto(
   progress: (message: string) => void = () => {},
   detailed = false,
 ) {
-  const worker = await createWorker("por");
+  const worker = await createWorker("por", 1, ocrWorkerOptions);
   try {
     const result = await readWithWorker(worker, file, progress, undefined, detailed);
     return { ...result, pre: markLocalPhoto(result.pre) };

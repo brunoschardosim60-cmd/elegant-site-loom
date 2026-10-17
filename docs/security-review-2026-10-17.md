@@ -41,3 +41,15 @@ A visão pessoal filtra os registros apresentados; a equipe explicitamente convi
 - [Supabase: segurança de funções](https://supabase.com/docs/guides/database/functions)
 - [TanStack: proteção de server functions](https://tanstack.com/start/latest/docs/framework/react/guide/server-functions)
 - [Bun: auditoria de dependências](https://bun.com/docs/install/audit)
+
+## Segunda revisão — validação estrita e OCR próprio
+
+Em uma reprodução isolada com conta confirmada e autorizada, o banco aceitava campos como `driver: 42` e `volumes: 1e100`. O navegador rejeitava depois esse estado inteiro. A migração `20261017020000_security_scalar_types.sql` recusa tipos incorretos, números fora do intervalo seguro, datas inválidas e metadados de NF incompatíveis com o esquema. Rejeições não modificam registros. A reprodução falhou antes da correção e passou depois; as três suítes de banco passaram com a migração reaplicada para verificar idempotência.
+
+**Aplicação remota pendente:** essa segunda migração foi validada somente no PostgreSQL isolado. O controle do Chrome/Supabase deixou de responder antes da aplicação. Publicar o código pelo Git não executa automaticamente as migrações neste projeto. A primeira migração de segurança permanece aplicada.
+
+O código executável do OCR (worker e variantes WebAssembly LSTM) agora é preparado a partir das dependências instaladas e fixadas no lockfile, servido pelo próprio site. A CSP do documento deixa de permitir scripts do CDN e workers blob. Os arquivos de treinamento de idioma continuam como dados externos; nenhuma foto é enviada pelo teste local. Uma leitura real da referência de 15 linhas concluiu em 11,3 segundos sob a CSP restrita, com pré DI00601869631, placa TRB7E25, motorista DAVID VARGAS FERNANDES e total de 98 volumes. Os avisos de revisão permanecem; esse teste verifica funcionamento e não certifica exatidão de todos os campos.
+
+Credenciais com formatos reconhecidos e campos de senha/token são ocultados nos diagnósticos de erro do servidor, inclusive valores JSON com aspas escapadas. Essa filtragem não equivale a classificar automaticamente toda informação privada possível.
+
+Validação: 815 testes passaram, compilação de produção concluída, TypeScript e lint sem erros após os ajustes. As 16 verificações externas limitadas passaram contra a compilação local. Não foram feitos ataques destrutivos, carga ou escrita autenticada nos registros reais.

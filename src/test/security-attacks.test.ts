@@ -68,6 +68,31 @@ afterEach(async () => {
 afterAll(async () => {
   await db.close();
 });
+it("rejects scalar type poisoning that would make the entire team's saved state undecodable", async () => {
+  await login(1);
+  const base = (await rpc("get_conference_team")).data;
+  const pre = {
+    id: "06058888",
+    driver: "TESTE",
+    plate: "ABC1D23",
+    date: "2026-10-17",
+    documents: [{ id: "typed-doc", ctc: "0000000088", nf: "123-1", volumes: 1, received: false }],
+  };
+  const attacks: unknown[] = [
+    { ...pre, driver: 42 },
+    { ...pre, plate: false },
+    { ...pre, id: 60588888 },
+    { ...pre, documents: [{ ...pre.documents[0], id: 42 }] },
+    { ...pre, documents: [{ ...pre.documents[0], ctc: 1234567890 }] },
+    { ...pre, documents: [{ ...pre.documents[0], volumes: 1e100 }] },
+  ];
+  for (const candidate of attacks)
+    await expect(
+      rpc("save_team_conference", [base, { ...base, manifests: [candidate] }]),
+    ).rejects.toThrow("CONFERENCE_INVALID");
+  expect((await rpc("get_conference_team")).data).toEqual(base);
+  expect(await rpc("get_conference_audit")).toEqual([]);
+});
 it("keeps SQL metacharacters in imported names as data without executing them", async () => {
   await login(1);
   const base = (await rpc("get_conference_team")).data;
