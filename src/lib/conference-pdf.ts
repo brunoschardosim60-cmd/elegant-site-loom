@@ -435,7 +435,7 @@ export function createConferencePdf(input: ConferencePdfInput) {
     pdf.setFont("helvetica", "normal");
     pdf.setFontSize(7.5);
     pdf.setTextColor(...muted);
-    pdf.text("Conferência de documentos · confere.", margin, height - 6);
+    pdf.text("Conferência de documentos", margin, height - 6);
     pdf.text(`Página ${page} de ${pages}`, width - margin, height - 6, { align: "right" });
   }
   return pdf;
