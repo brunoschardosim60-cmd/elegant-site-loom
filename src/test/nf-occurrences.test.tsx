@@ -11,6 +11,14 @@ vi.mock("@/lib/photo-reader.functions", () => ({
   photoReaderStatus: async () => ({ configured: false }),
 }));
 afterEach(cleanup);
+it("renders hostile imported occurrence descriptions as plain text without creating executable markup", () => {
+  const attack = '<img src=x onerror="alert(1)"><script>alert(1)</script>';
+  const { container } = render(
+    <NfOccurrences nf="123-1" values={[{ nf: "123-1", code: "01", description: attack }]} />,
+  );
+  expect(container).toHaveTextContent(attack);
+  expect(container.querySelector("script, img, iframe")).toBeNull();
+});
 it("renders each NF once, keeping notes without occurrences and ignoring associations for removed notes", () => {
   const { container, rerender } = render(
     <NfOccurrences

@@ -68,6 +68,28 @@ afterEach(async () => {
 afterAll(async () => {
   await db.close();
 });
+it("keeps SQL metacharacters in imported names as data without executing them", async () => {
+  await login(1);
+  const base = (await rpc("get_conference_team")).data;
+  const driver = "ROBERT'); DROP TABLE public.conference_states; --";
+  const next = {
+    ...base,
+    manifests: [
+      {
+        id: "06059999",
+        driver,
+        plate: "ABC1D23",
+        date: "2026-10-17",
+        documents: [
+          { id: "sql-probe", ctc: "0000000099", nf: "123-1", volumes: 1, received: false },
+        ],
+      },
+    ],
+  };
+  const saved = await rpc("save_team_conference", [base, next]);
+  expect(saved.data.manifests[0]!.driver).toBe(driver);
+  expect((await rpc("get_conference_team")).data.manifests).toHaveLength(1);
+});
 it("shares an atomic photo budget across requests, denies counter tampering and renews only after the window expires", async () => {
   await login(1);
   for (let n = 0; n < 80; n++) expect(await rpc("consume_conference_reader_quota")).toBe(true);
