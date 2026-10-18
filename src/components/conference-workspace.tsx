@@ -1093,6 +1093,7 @@ export function ConferenceWorkspace({
                     )
                   ) : visible.length ? (
                     <DriverManifestList
+                      personal={!!demandOwner}
                       readOnly={teamReadOnly}
                       manifests={visible}
                       query={query}

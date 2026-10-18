@@ -31,6 +31,7 @@ import {
 } from "@/lib/manifest-date";
 
 type Props = {
+  personal?: boolean;
   readOnly?: boolean;
   manifests: Manifest[];
   query: string;
@@ -66,6 +67,7 @@ const countVolumes = (manifests: Manifest[], pendingOnly = false) =>
 
 /** Keeps every driver's manifests together while opening only the table being used. */
 export function DriverManifestList({
+  personal = false,
   readOnly = false,
   manifests,
   query,
@@ -509,6 +511,7 @@ export function DriverManifestList({
                                       {doc.received && (
                                         <ActionActor
                                           label="Conferido por"
+                                          hideAuthor={personal}
                                           email={doc.receivedByEmail}
                                           at={doc.receivedAt}
                                         />

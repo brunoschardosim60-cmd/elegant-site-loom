@@ -137,7 +137,7 @@ export function CtcTracking({
                       )}
                     </td>
                     <td data-label="Conferência">
-                      {doc.received && (
+                      {doc.received && !personal && (
                         <ActionActor label="Conferido por" email={doc.receivedByEmail} />
                       )}
                       {doc.received ? (

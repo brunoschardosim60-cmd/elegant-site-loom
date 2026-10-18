@@ -122,7 +122,7 @@ it("a teammate CTC scan uses the shared record and exposes the team view", () =>
   });
 });
 
-it("keeps authorship out of personal and team lists while preserving receipt authors and history access", () => {
+it("keeps personal receipt dates discreet and shows receipt authors only in the team, with history access", () => {
   const audit = vi.fn();
   const item = manifest("06059990", "bruno@example.test", "0000000001");
   item.updatedByEmail = "gisele@example.test";
@@ -142,9 +142,8 @@ it("keeps authorship out of personal and team lists while preserving receipt aut
     />,
   );
   expect(screen.queryByText(/Atualizado por/)).not.toBeInTheDocument();
-  expect(screen.getByText(/Conferido por/)).toHaveTextContent(
-    "alan@example.test · 16/10/2026, 14:00",
-  );
+  expect(screen.queryByText(/Conferido por/)).not.toBeInTheDocument();
+  expect(screen.getByText("16/10/2026, 14:00")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Pendências" }));
   expect(screen.queryByText(/Atualizado por/)).not.toBeInTheDocument();
   view.rerender(
@@ -158,6 +157,9 @@ it("keeps authorship out of personal and team lists while preserving receipt aut
   expect(screen.queryByText(/Atualizado por|Cadastrado por/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Conferência" }));
   expect(screen.queryByText(/Atualizado por|Cadastrado por/)).not.toBeInTheDocument();
+  expect(screen.getByText(/Conferido por/)).toHaveTextContent(
+    "alan@example.test · 16/10/2026, 14:00",
+  );
   fireEvent.click(screen.getByRole("button", { name: "Histórico do manifesto 06059990" }));
   expect(audit).toHaveBeenCalledWith("06059990");
 });
