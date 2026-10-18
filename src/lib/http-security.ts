@@ -11,7 +11,15 @@ export async function secureRequest(request: Request, nonce: string): Promise<Re
   const length = headers.get("content-length");
   if (length && (!/^\d+$/.test(length) || Number(length) > MAX_REQUEST_BYTES))
     return new Response("Arquivo ou solicitação muito grande.", { status: 413 });
-  if (!request.body) return new Request(request, { headers });
+  // Rebuild from the URL: cloning a foreign Request implementation breaks in dev SSR.
+  const rebuild = (body?: ArrayBuffer) =>
+    new Request(request.url, {
+      method: request.method,
+      headers,
+      redirect: "manual",
+      ...(body ? { body, duplex: "half" as const } : {}),
+    });
+  if (!request.body) return rebuild();
   const reader = request.body.getReader();
   let size = 0;
   const chunks: Uint8Array<ArrayBuffer>[] = [];
