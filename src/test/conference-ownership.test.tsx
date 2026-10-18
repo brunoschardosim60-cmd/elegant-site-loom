@@ -121,6 +121,40 @@ it("a teammate CTC scan uses the shared record and exposes the team view", () =>
     documents: [{ received: true }],
   });
 });
+it.each([false, true])(
+  "only locates a non-owned CTC in team consultation in personal receipt mode (already received=%s)",
+  (received) => {
+    const onSnapshot = vi.fn();
+    const other = manifest("06059991", "gisele@example.test", "0000000002");
+    other.createdBy = "gisele";
+    if (received) {
+      other.finishedAt = "2026-10-17T12:00:00Z";
+      other.documents[0]!.received = true;
+      other.documents[0]!.receiptChecks = [
+        { id: "gisele", received: true, receivedAt: other.finishedAt },
+      ];
+    }
+    render(
+      <ConferenceWorkspace
+        initialState={{ manifests: [other], activity: [], issues: [] }}
+        accountEmail="bruno@example.test"
+        accountId="bruno"
+        personalReceipts
+        onSnapshot={onSnapshot}
+      />,
+    );
+    onSnapshot.mockClear();
+    fireEvent.change(screen.getByRole("textbox", { name: "Código do CTC" }), {
+      target: { value: "0000000002" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^Conferir$/ }));
+    expect(screen.getByText(/Equipe · 1 manifestos/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "MOTORISTA GISELE" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Marcar CTC/ })).not.toBeInTheDocument();
+    expect(onSnapshot).not.toHaveBeenCalled();
+    expect(other.documents[0]!.received).toBe(received);
+  },
+);
 
 it("keeps personal receipt dates discreet and shows receipt authors only in the team, with history access", () => {
   const audit = vi.fn();

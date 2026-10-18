@@ -19,6 +19,7 @@ export default tseslint.config(
       ".layout-qa*",
       ".security-ocr-qa*",
       ".sheet-review*",
+      ".receipt-qa*",
       ".ocr-*",
       "**/*.local.*",
     ],

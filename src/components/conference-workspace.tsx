@@ -186,6 +186,7 @@ export function ConferenceWorkspace({
   const [newOpen, setNewOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [receiptReview, setReceiptReview] = useState<TeamReceiptCandidate[] | null>(null);
+  const [receiptReviewUpdated, setReceiptReviewUpdated] = useState(false);
   const availableTeamReceipts = useMemo(
     () =>
       personalReceipts && accountEmail && scope === "mine"
@@ -208,6 +209,8 @@ export function ConferenceWorkspace({
     setFilter("all");
     setTrackingStatus("all");
     setCode("");
+    setReceiptReview(null);
+    setReceiptReviewUpdated(false);
   }, [scope]);
   async function exportPdf() {
     if (pdfBusy) return;
@@ -300,9 +303,14 @@ export function ConferenceWorkspace({
         (item) => item.id.toUpperCase() === input.toUpperCase(),
       );
       if (manifest) {
-        if (demandOwner && !belongsTo(manifest, demandOwner)) changeScope("team");
+        const foreign = demandOwner && !belongsTo(manifest, demandOwner);
+        if (foreign) changeScope("team");
+        const displayed = selectOwnedRoutes(
+          current.current,
+          foreign ? undefined : demandOwner,
+        ).find((item) => item.id === manifest.id);
         setFocusedManifest({ id: manifest.id });
-        setView(manifest.finishedAt ? "finished" : "pending");
+        setView(displayed?.finishedAt || displayed?.routeResolved ? "finished" : "pending");
         setFilter("all");
         setQuery(manifest.id);
         notify(`Pré de ${manifest.driver.split(" ")[0]} localizado`);
@@ -341,6 +349,16 @@ export function ConferenceWorkspace({
     if (demandOwner && !belongsTo(manifest, demandOwner)) {
       changeScope("team");
       notify("CTC localizado nos cadastros da equipe.");
+      if (personalReceipts) {
+        const displayed = selectOwnedRoutes(current.current).find(
+          (item) => item.id === manifest.id,
+        );
+        setFocusedManifest({ id: manifest.id });
+        setView(displayed?.finishedAt || displayed?.routeResolved ? "finished" : "pending");
+        setFilter("all");
+        setQuery(manifest.id);
+        return;
+      }
     }
     setFocusedManifest({ id: manifest.id });
     const ownDoc = personalReceipts ? personalDocument(doc, accountId) : doc;
@@ -381,6 +399,7 @@ export function ConferenceWorkspace({
     );
     if (!changed) {
       setReceiptReview(selectTeamReceiptCandidates(current.current, demandOwner));
+      setReceiptReviewUpdated(true);
       notify(
         "As conferências mudaram. Revise a lista atualizada antes de aceitar. Nenhum CTC foi alterado.",
         true,
@@ -915,13 +934,15 @@ export function ConferenceWorkspace({
                       <TeamReceiptReview
                         available={availableTeamReceipts}
                         review={receiptReview}
-                        onOpen={() =>
+                        updated={receiptReviewUpdated}
+                        onOpen={() => {
+                          setReceiptReviewUpdated(false);
                           setReceiptReview(
                             demandOwner
                               ? selectTeamReceiptCandidates(current.current, demandOwner)
                               : [],
-                          )
-                        }
+                          );
+                        }}
                         onClose={() => setReceiptReview(null)}
                         onAccept={acceptTeamReview}
                       />

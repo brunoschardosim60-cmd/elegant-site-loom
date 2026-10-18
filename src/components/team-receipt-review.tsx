@@ -6,12 +6,14 @@ import type { TeamReceiptCandidate } from "@/lib/team-receipt-review";
 export function TeamReceiptReview({
   available,
   review,
+  updated = false,
   onOpen,
   onClose,
   onAccept,
 }: {
   available: TeamReceiptCandidate[];
   review: TeamReceiptCandidate[] | null;
+  updated?: boolean;
   onOpen: () => void;
   onClose: () => void;
   onAccept: () => void;
@@ -41,7 +43,7 @@ export function TeamReceiptReview({
           if (!open) onClose();
         }}
       >
-        <DialogContent className="flex max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-2xl flex-col gap-4 overflow-hidden rounded-lg p-5 sm:p-6">
+        <DialogContent className="flex max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-2xl flex-col gap-4 overflow-hidden rounded-lg p-5 sm:p-6 data-[state=closed]:hidden">
           <DialogHeader className="shrink-0 text-left">
             <DialogTitle>Conferências disponíveis da equipe</DialogTitle>
             <DialogDescription>
@@ -52,6 +54,15 @@ export function TeamReceiptReview({
             </DialogDescription>
           </DialogHeader>
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
+            {updated && (
+              <p
+                role="alert"
+                className="mb-3 rounded-md border border-warning/30 bg-warning-soft p-3 text-sm text-warning"
+              >
+                As conferências mudaram. Nenhum CTC foi alterado. Confira a lista atualizada antes
+                de aceitar.
+              </p>
+            )}
             {!review?.length && (
               <p className="text-sm text-muted-foreground">
                 Não há mais conferências disponíveis. Nenhum CTC foi alterado.

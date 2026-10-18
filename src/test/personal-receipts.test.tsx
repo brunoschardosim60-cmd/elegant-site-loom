@@ -120,6 +120,27 @@ it("offers no batch acceptance in the read-only team scope", () => {
   );
   expect(screen.queryByRole("button", { name: /Conferências da equipe/ })).not.toBeInTheDocument();
 });
+it("locates a shared pre in personal Pending even when the teammate has already finished it", () => {
+  const original = state();
+  original.manifests[0]!.id = "DI00991700003";
+  render(
+    <ConferenceWorkspace
+      initialState={original}
+      accountEmail="bruno@example.invalid"
+      accountId={uid(1)}
+      personalReceipts
+    />,
+  );
+  fireEvent.change(screen.getByRole("textbox", { name: "Código do CTC" }), {
+    target: { value: "DI00991700003" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /^Conferir$/ }));
+  expect(screen.getByRole("heading", { name: "Conferência de documentos" })).toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: "Marcar CTC 0000000001 como recebido" }),
+  ).toBeInTheDocument();
+  expect(screen.getByText("Pendente", { exact: true })).toBeInTheDocument();
+});
 it("refreshes an open review without accepting anything when the source is revoked remotely", () => {
   const original = state(),
     snapshot = vi.fn();
@@ -141,6 +162,9 @@ it("refreshes an open review without accepting anything when the source is revok
   fireEvent.click(screen.getByRole("button", { name: "Aceitar todas (1)" }));
   expect(screen.getByRole("button", { name: "Aceitar todas (0)" })).toBeDisabled();
   expect(screen.getByRole("dialog")).toHaveTextContent("Nenhum CTC foi alterado.");
+  expect(within(screen.getByRole("dialog")).getByRole("alert")).toHaveTextContent(
+    "Confira a lista atualizada",
+  );
   expect(snapshot).not.toHaveBeenCalled();
 });
 it("uses personal receipt state consistently in lists and PDF, with no team duplication", () => {

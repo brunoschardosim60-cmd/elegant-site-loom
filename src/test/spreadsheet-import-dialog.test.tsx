@@ -71,6 +71,60 @@ it("offers identical teammate manifests explicitly without preselecting or dupli
   fireEvent.click(screen.getByRole("button", { name: "Adicionar 1 às minhas demandas" }));
   expect(save).toHaveBeenCalledWith([draft]);
 });
+it.each(["during-read", "after-preview"])(
+  "does not auto-link a manifest saved by another login %s",
+  async (timing) => {
+    const parsed = data();
+    parsed.drafts = parsed.drafts.slice(0, 1);
+    const draft = parsed.drafts[0]!;
+    let complete!: (result: LuftExport) => void;
+    mock.read.mockImplementationOnce(
+      () =>
+        new Promise<LuftExport>((resolve) => {
+          complete = resolve;
+        }),
+    );
+    const props = {
+      onClose: vi.fn(),
+      onCreate: vi.fn().mockReturnValue({ ok: true, manifests: [] }),
+      sharedDemands: true,
+      demandOwner: { email: "second@example.invalid", userId: "second" },
+    };
+    const existing = {
+      id: draft.id,
+      driver: draft.driver,
+      plate: draft.plate,
+      date: "2026-10-14",
+      issueDate: draft.issueDate,
+      createdBy: "first",
+      createdByEmail: "first@example.invalid",
+      documents: [{ id: "d1", ctc: "0000000001", nf: "123-1", volumes: 2, received: false }],
+    };
+    const mounted = render(<SpreadsheetImportDialog {...props} manifests={[]} />);
+    upload();
+    await waitFor(() => expect(mock.read).toHaveBeenCalledOnce());
+    if (timing === "after-preview") {
+      await act(async () => complete(parsed));
+      expect(
+        screen.getByRole("checkbox", { name: `Selecionar manifesto ${draft.id}` }),
+      ).toBeChecked();
+      // Choosing a new record is not consent to link a later teammate import.
+      fireEvent.click(screen.getByRole("checkbox", { name: `Selecionar manifesto ${draft.id}` }));
+      fireEvent.click(screen.getByRole("checkbox", { name: `Selecionar manifesto ${draft.id}` }));
+    }
+    mounted.rerender(<SpreadsheetImportDialog {...props} manifests={[existing]} />);
+    if (timing === "during-read") await act(async () => complete(parsed));
+    expect(await screen.findByText("Adicionar às minhas demandas")).toBeInTheDocument();
+    expect(
+      screen.getByRole("checkbox", { name: `Selecionar manifesto ${draft.id}` }),
+    ).not.toBeChecked();
+    expect(screen.getByRole("button", { name: "Cadastrar manifestos" })).toBeDisabled();
+    expect(props.onCreate).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("checkbox", { name: `Selecionar manifesto ${draft.id}` }));
+    fireEvent.click(screen.getByRole("button", { name: "Adicionar 1 às minhas demandas" }));
+    expect(props.onCreate).toHaveBeenCalledWith([draft]);
+  },
+);
 it("explains ignored older and undated occurrences without offering an unsafe refresh", async () => {
   const source = data();
   source.drafts[0]!.rows[0]!.occurrenceCode = "91";

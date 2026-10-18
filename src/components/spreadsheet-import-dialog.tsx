@@ -45,7 +45,10 @@ export function SpreadsheetImportDialog({
   const [updateMessage, setUpdateMessage] = useState("");
   const [query, setQuery] = useState("");
   const [dayFilter, setDayFilter] = useState("");
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [requestedSelection, setSelected] = useState<Set<string>>(new Set());
+  const [approvedLinks, setApprovedLinks] = useState<Set<string>>(new Set());
+  const latestImportContext = useRef({ manifests, demandOwner, sharedDemands });
+  latestImportContext.current = { manifests, demandOwner, sharedDemands };
   const [active, setActive] = useState("");
   const [dragging, setDragging] = useState(false);
   const dragDepth = useRef(0);
@@ -107,6 +110,7 @@ export function SpreadsheetImportDialog({
     setUpdateMessage("");
     setResult(null);
     setSelected(new Set());
+    setApprovedLinks(new Set());
     setQuery("");
     setDayFilter("");
     setActive("");
@@ -122,13 +126,19 @@ export function SpreadsheetImportDialog({
       const overlaps = new Set(
         findLuftCtcOverlaps(parsed.drafts).flatMap((item) => item.manifestIds),
       );
+      const latest = latestImportContext.current;
       setSelected(
         new Set(
           parsed.drafts
             .filter(
               (draft) =>
                 !overlaps.has(draft.id) &&
-                demandImportStatus(manifests, draft, demandOwner, sharedDemands).kind === "create",
+                demandImportStatus(
+                  latest.manifests,
+                  draft,
+                  latest.demandOwner,
+                  latest.sharedDemands,
+                ).kind === "create",
             )
             .map((draft) => draft.id),
         ),
@@ -145,6 +155,18 @@ export function SpreadsheetImportDialog({
     }
   }
   const drafts = useMemo(() => result?.drafts ?? [], [result]);
+  // An automatically selected new manifest can become a teammate's record during
+  // a concurrent save. Linking it still requires an explicit selection.
+  const selected = new Set(
+    [...requestedSelection].filter((id) => {
+      const draft = drafts.find((item) => item.id === id);
+      return (
+        !draft ||
+        demandImportStatus(manifests, draft, demandOwner, sharedDemands).kind !== "link" ||
+        approvedLinks.has(id)
+      );
+    }),
+  );
   const occurrenceUpdates = useMemo(() => {
     if (!result || result.errors.length) return null;
     try {
@@ -208,6 +230,15 @@ export function SpreadsheetImportDialog({
     chosen.every((draft) => !blocked.has(draft.id));
   function chooseManifest(id: string) {
     if (blocked.has(id)) return;
+    const draft = drafts.find((item) => item.id === id);
+    const linking =
+      !!draft && demandImportStatus(manifests, draft, demandOwner, sharedDemands).kind === "link";
+    setApprovedLinks((previous) => {
+      const next = new Set(previous);
+      if (linking) next.add(id);
+      else next.delete(id);
+      return next;
+    });
     const others = new Set(
       overlaps
         .filter((item) => item.manifestIds.includes(id))
@@ -580,15 +611,22 @@ export function SpreadsheetImportDialog({
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() =>
+                    onClick={() => {
+                      setApprovedLinks(
+                        new Set(
+                          linked
+                            .filter((draft) => visible.includes(draft))
+                            .map((draft) => draft.id),
+                        ),
+                      );
                       setSelected(
                         new Set(
                           visible
                             .filter((draft) => !blocked.has(draft.id))
                             .map((draft) => draft.id),
                         ),
-                      )
-                    }
+                      );
+                    }}
                   >
                     Selecionar resultados
                   </Button>
@@ -596,7 +634,10 @@ export function SpreadsheetImportDialog({
                     type="button"
                     variant="ghost"
                     size="sm"
-                    onClick={() => setSelected(new Set())}
+                    onClick={() => {
+                      setSelected(new Set());
+                      setApprovedLinks(new Set());
+                    }}
                   >
                     Limpar seleção
                   </Button>
@@ -634,7 +675,11 @@ export function SpreadsheetImportDialog({
                     variant="outline"
                     size="sm"
                     className="mt-2"
-                    onClick={() => setSelected(new Set(linked.map((draft) => draft.id)))}
+                    onClick={() => {
+                      const ids = new Set(linked.map((draft) => draft.id));
+                      setApprovedLinks(ids);
+                      setSelected(ids);
+                    }}
                   >
                     Selecionar existentes da equipe
                   </Button>
@@ -710,14 +755,26 @@ export function SpreadsheetImportDialog({
                             aria-label={`Selecionar manifesto ${draft.id}`}
                             disabled={blocked.has(draft.id) && !selected.has(draft.id)}
                             checked={selected.has(draft.id)}
-                            onChange={(event) =>
-                              setSelected((old) => {
+                            onChange={(event) => {
+                              const checked = event.target.checked;
+                              setApprovedLinks((old) => {
                                 const next = new Set(old);
-                                if (event.target.checked) next.add(draft.id);
+                                if (
+                                  checked &&
+                                  demandImportStatus(manifests, draft, demandOwner, sharedDemands)
+                                    .kind === "link"
+                                )
+                                  next.add(draft.id);
                                 else next.delete(draft.id);
                                 return next;
-                              })
-                            }
+                              });
+                              setSelected((old) => {
+                                const next = new Set(old);
+                                if (checked) next.add(draft.id);
+                                else next.delete(draft.id);
+                                return next;
+                              });
+                            }}
                           />
                         </td>
                         <td data-label="Manifesto / motorista" className="border-t p-3">
