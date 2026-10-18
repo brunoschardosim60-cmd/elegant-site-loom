@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   Loader2,
   ArrowRight,
@@ -35,7 +35,12 @@ import { parseScan, setReceived, type Manifest } from "@/lib/conference";
 import { findCurrentMatches, isAnotherRoute, isPendingDocument } from "@/lib/conference-routes";
 
 import { SpreadsheetImportDialog } from "./spreadsheet-import-dialog";
-import { AcceptTeamReceipt } from "./accept-team-receipt";
+import { TeamReceiptReview } from "./team-receipt-review";
+import {
+  acceptReviewedTeamReceipts,
+  selectTeamReceiptCandidates,
+  type TeamReceiptCandidate,
+} from "@/lib/team-receipt-review";
 import { personalDocument, personalManifest, setPersonalReceipt } from "@/lib/personal-receipts";
 import { isExportManifest } from "@/lib/manifest-id";
 import { ManifestImportDialog } from "./manifest-import-dialog";
@@ -131,7 +136,7 @@ export function ConferenceWorkspace({
   const demandOwner =
     scope === "mine" && accountEmail ? { email: accountEmail, userId: accountId } : undefined;
   function changeScope(next: WorkspaceScope) {
-    if (newOpen || sheetOpen || editingManifest || deleteId) return;
+    if (newOpen || sheetOpen || editingManifest || deleteId || receiptReview) return;
     setLocalScope(next);
     scopeOrigin.current = next;
     onScopeChange?.(next);
@@ -180,6 +185,14 @@ export function ConferenceWorkspace({
   const [blocked, setBlocked] = useState<string | null>(null);
   const [newOpen, setNewOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [receiptReview, setReceiptReview] = useState<TeamReceiptCandidate[] | null>(null);
+  const availableTeamReceipts = useMemo(
+    () =>
+      personalReceipts && accountEmail && scope === "mine"
+        ? selectTeamReceiptCandidates(manifests, { email: accountEmail, userId: accountId })
+        : [],
+    [manifests, personalReceipts, accountEmail, accountId, scope],
+  );
   const [editingManifest, setEditingManifest] = useState<Manifest | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const pendingDeleteId = useRef<string | null>(null);
@@ -231,9 +244,9 @@ export function ConferenceWorkspace({
   }, []);
   // Return to scanning after a dialog without pulling the list back to the top.
   useEffect(() => {
-    if (!blocked && !newOpen && !sheetOpen && !deleteId && !editingManifest)
+    if (!blocked && !newOpen && !sheetOpen && !deleteId && !editingManifest && !receiptReview)
       scanner.current?.focus({ preventScroll: true });
-  }, [blocked, newOpen, sheetOpen, deleteId, editingManifest]);
+  }, [blocked, newOpen, sheetOpen, deleteId, editingManifest, receiptReview]);
 
   function update(next: Manifest[]) {
     current.current = next;
@@ -274,6 +287,7 @@ export function ConferenceWorkspace({
       blocked ||
       newOpen ||
       sheetOpen ||
+      receiptReview ||
       editingManifest ||
       pendingDeleteId.current
     )
@@ -357,16 +371,37 @@ export function ConferenceWorkspace({
       manifest.driver,
     );
   }
-  function toggleDocument(manifest: Manifest, id: string, received: boolean, acceptPeer = false) {
+  function acceptTeamReview() {
+    if (teamReadOnly || !demandOwner || !receiptReview) return;
+    const changed = acceptReviewedTeamReceipts(
+      current.current,
+      demandOwner,
+      receiptReview,
+      new Date().toISOString(),
+    );
+    if (!changed) {
+      setReceiptReview(selectTeamReceiptCandidates(current.current, demandOwner));
+      notify(
+        "As conferências mudaram. Revise a lista atualizada antes de aceitar. Nenhum CTC foi alterado.",
+        true,
+      );
+      return;
+    }
+    const count = receiptReview.length;
+    update(changed);
+    log(
+      "Conferência da equipe aceita",
+      `${count} CTC(s) em ${new Set(receiptReview.map((item) => item.manifestId)).size} manifesto(s)`,
+    );
+    setReceiptReview(null);
+    notify(`${count} CTC(s) aceito(s) na sua conta. Confira o status de salvamento.`);
+  }
+  function toggleDocument(manifest: Manifest, id: string, received: boolean) {
     if (teamReadOnly) return;
     const latest = current.current.find((item) => item.id === manifest.id);
     const doc = latest?.documents.find((item) => item.id === id);
     const ownDoc = doc && personalReceipts ? personalDocument(doc, accountId) : doc;
     if (!latest || !doc || !ownDoc || ownDoc.received === received) return;
-    if (acceptPeer && !ownDoc.peerReceipt) {
-      notify("A conferência da equipe mudou. Confira novamente antes de aceitar.", true);
-      return;
-    }
     if (
       received &&
       !findCurrentMatches(current.current, doc.ctc).some((match) => match.doc.id === id)
@@ -376,25 +411,10 @@ export function ConferenceWorkspace({
     }
     const changed =
       personalReceipts && accountId
-        ? setPersonalReceipt(
-            latest,
-            id,
-            accountId,
-            received,
-            new Date().toISOString(),
-            acceptPeer ? ownDoc.peerReceipt : undefined,
-          )
+        ? setPersonalReceipt(latest, id, accountId, received, new Date().toISOString())
         : setReceived(latest, id, received, new Date().toISOString());
     update(current.current.map((item) => (item.id === latest.id ? changed : item)));
-    log(
-      acceptPeer
-        ? "Conferência da equipe aceita"
-        : received
-          ? "Documento conferido manualmente"
-          : "Conferência desfeita",
-      latest.driver,
-    );
-    if (acceptPeer) notify("Conferência aceita na sua conta. Confira o status de salvamento.");
+    log(received ? "Documento conferido manualmente" : "Conferência desfeita", latest.driver);
     if (personalManifest(changed, personalReceipts ? accountId : undefined).finishedAt)
       notify(`Pré de ${latest.driver.split(" ")[0]} finalizado!`);
   }
@@ -839,7 +859,14 @@ export function ConferenceWorkspace({
                     value={code}
                     onChange={(event) => setCode(event.target.value)}
                     autoComplete="off"
-                    disabled={!!blocked || newOpen || sheetOpen || !!deleteId || !!editingManifest}
+                    disabled={
+                      !!blocked ||
+                      newOpen ||
+                      sheetOpen ||
+                      !!receiptReview ||
+                      !!deleteId ||
+                      !!editingManifest
+                    }
                   />
                   <Button
                     type="submit"
@@ -849,6 +876,7 @@ export function ConferenceWorkspace({
                       !!blocked ||
                       newOpen ||
                       sheetOpen ||
+                      !!receiptReview ||
                       !!deleteId ||
                       !!editingManifest
                     }
@@ -881,6 +909,23 @@ export function ConferenceWorkspace({
                             : visible.length}
                     </span>
                   </h2>
+                  {!teamReadOnly &&
+                    personalReceipts &&
+                    (view === "pending" || view === "missing") && (
+                      <TeamReceiptReview
+                        available={availableTeamReceipts}
+                        review={receiptReview}
+                        onOpen={() =>
+                          setReceiptReview(
+                            demandOwner
+                              ? selectTeamReceiptCandidates(current.current, demandOwner)
+                              : [],
+                          )
+                        }
+                        onClose={() => setReceiptReview(null)}
+                        onAccept={acceptTeamReview}
+                      />
+                    )}
                   <Button
                     variant="outline"
                     size="sm"
@@ -1014,14 +1059,6 @@ export function ConferenceWorkspace({
                                       <Clock3 size={10} />
                                       Pendente
                                     </span>
-                                    {!teamReadOnly && personalReceipts && (
-                                      <AcceptTeamReceipt
-                                        doc={doc}
-                                        onAccept={() =>
-                                          toggleDocument(manifest, doc.id, true, true)
-                                        }
-                                      />
-                                    )}
                                     <span className="tracking-detail">
                                       {manifestAgeLabel(manifest, now)}
                                     </span>
@@ -1101,11 +1138,6 @@ export function ConferenceWorkspace({
                       age={age}
                       now={now}
                       onToggleDocument={toggleDocument}
-                      onAcceptReceipt={
-                        personalReceipts
-                          ? (manifest, id) => toggleDocument(manifest, id, true, true)
-                          : undefined
-                      }
                       onIssueDateChange={changeIssueDate}
                       onDeleteManifest={requestDelete}
                       onAuditManifest={onAuditManifest}

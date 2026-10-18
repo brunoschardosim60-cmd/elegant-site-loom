@@ -626,8 +626,8 @@ export function SpreadsheetImportDialog({
                 <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm">
                   <p>
                     {linked.length} manifesto(s) já estão na equipe e podem aparecer também nas suas
-                    demandas. A conferência será compartilhada; volumes, notas e autoria original
-                    serão preservados.
+                    demandas. Cada pessoa mantém sua conferência e pode aceitar as conferências da
+                    equipe. Volumes, notas e autoria original serão preservados.
                   </p>
                   <Button
                     type="button"
