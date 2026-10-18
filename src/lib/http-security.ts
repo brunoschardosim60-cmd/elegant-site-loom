@@ -44,7 +44,7 @@ export async function secureRequest(request: Request, nonce: string): Promise<Re
     body.set(chunk, offset);
     offset += chunk.byteLength;
   }
-  return new Request(request, { headers, body: body.buffer });
+  return rebuild(body.buffer);
 }
 
 export function securityHeaders(
