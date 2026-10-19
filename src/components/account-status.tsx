@@ -68,8 +68,8 @@ export function AccountStatusBar({
       <div className="account-identity">
         <span className="account-email">{email}</span>
         <span
-          role="status"
-          aria-live="polite"
+          role={error ? undefined : "status"}
+          aria-live={error ? "off" : "polite"}
           className={`account-sync-status ${error ? "account-sync-error" : pending ? "account-sync-pending" : "account-sync-saved"}`}
         >
           {error ? (

@@ -366,7 +366,8 @@ h1 { font-size: 28px; font-weight: 750; line-height: 1.3; }
 .driver-manifest-id { font-family: monospace; font-size: 13px; font-weight: 700; letter-spacing: .2px; color: var(--primary); overflow-wrap: anywhere; }
 .driver-manifest-date { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--muted-foreground); font-size: 10px; }
 .driver-manifest-date .plate { font-size: 10px; }
-.driver-manifest-summary { display: flex; flex-direction: column; align-items: flex-end; gap: 7px; }
+.driver-manifest-summary { display: flex; flex-direction: column; align-items: flex-end; gap: 7px; min-width: 0; flex-shrink: 1; }
+.driver-manifest-summary > * { max-width: 100%; }
 .driver-manifest-missing { font-size: 10px; color: var(--muted-foreground); }
 .driver-manifest-missing strong { color: var(--foreground); font-weight: 650; }
 .driver-manifest-chevron { flex-shrink: 0; color: var(--muted-foreground); transition: transform .15s; }

@@ -163,7 +163,12 @@ export function DriverManifestList({
               </div>
               <div className={`driver-group-totals ${pendingCount ? "" : "driver-group-done"}`}>
                 <span>
-                  <FileText size={13} />
+                  {pendingCount ? (
+                    <Clock3 size={13} aria-hidden="true" />
+                  ) : (
+                    <Check size={13} aria-hidden="true" />
+                  )}
+                  <FileText size={13} aria-hidden="true" />
                   <strong>{pendingCount || documentCount}</strong>{" "}
                   {pendingCount
                     ? pendingCount === 1
@@ -449,7 +454,12 @@ export function DriverManifestList({
                         </div>
                       </div>
                       {open && (
-                        <div className="driver-document-panel" id={tableId}>
+                        <div
+                          className="driver-document-panel"
+                          id={tableId}
+                          tabIndex={0}
+                          aria-label={`Documentos do pré ${manifest.id}`}
+                        >
                           <table className="document-table driver-document-table">
                             <thead>
                               <tr>

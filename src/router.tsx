@@ -5,8 +5,8 @@ import { routeTree } from "./routeTree.gen";
 export const getRouter = async () => {
   let nonce: string | undefined;
   if (import.meta.env.SSR) {
-    const { getRequestHeader } = await import("@tanstack/react-start/server");
-    nonce = getRequestHeader("x-confere-csp-nonce");
+    const { readCspNonce } = await import("./lib/csp-nonce.server");
+    nonce = readCspNonce();
   }
   const queryClient = new QueryClient();
 
