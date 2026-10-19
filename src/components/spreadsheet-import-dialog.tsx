@@ -352,6 +352,7 @@ export function SpreadsheetImportDialog({
           {error && (
             <p
               role="alert"
+              ref={(node) => node?.scrollIntoView({ block: "nearest" })}
               className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"
             >
               {error}

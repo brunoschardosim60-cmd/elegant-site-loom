@@ -5,8 +5,14 @@ import { AccountPanel } from "@/components/account-auth";
 import { ConferenceWorkspace } from "@/components/conference-workspace";
 
 // Local-only visual preview with fictitious data; never available in production builds.
+// Midday UTC keeps the rendered date identical on the server (UTC) and in the
+// browser (America/Sao_Paulo), avoiding a hydration mismatch in this preview.
 const now = Date.now();
-const day = (n: number) => new Date(now - n * 86400000).toISOString();
+const day = (n: number) => {
+  const date = new Date(now - n * 86400000);
+  date.setUTCHours(15, 0, 0, 0);
+  return date.toISOString();
+};
 const doc = (id: string, ctc: string, nf: string, volumes: number, received: boolean) => ({
   id,
   ctc,
@@ -49,6 +55,42 @@ const state = {
       documents: [
         doc("c1", "0000000301", "3001-1", 4, true),
         doc("c2", "0000000302", "3002-1", 6, false),
+      ],
+    },
+  ],
+};
+
+const longState = {
+  activity: [],
+  issues: [],
+  manifests: [
+    {
+      id: "DI0000000101",
+      driver: "MOTORISTA EXEMPLO COM NOME MUITO COMPRIDO DA SILVA SAURO JUNIOR",
+      plate: "AAA1A11",
+      date: day(2),
+      issueDate: day(2).slice(0, 10),
+      documents: Array.from({ length: 12 }, (_, i) =>
+        doc(`l1-${i}`, `00000010${String(10 + i)}`, `50${i}-1`, i + 1, i % 3 === 0),
+      ),
+    },
+    ...Array.from({ length: 5 }, (_, m) => ({
+      id: `DI00000002${m}2`,
+      driver: "MOTORISTA EXEMPLO COM NOME MUITO COMPRIDO DA SILVA SAURO JUNIOR",
+      plate: "AAA1A11",
+      date: day(m),
+      issueDate: day(m).slice(0, 10),
+      documents: [doc(`l2-${m}`, `00000020${String(20 + m)}`, `60${m}-2`, 2, false)],
+    })),
+    {
+      id: "DI0000000303",
+      driver: "MOTORISTA EXEMPLO B",
+      plate: "BBB2B22",
+      date: day(0),
+      issueDate: day(0).slice(0, 10),
+      documents: [
+        doc("l3-1", "0000000301", "3001-1", 4, true),
+        doc("l3-2", "0000000302", "3002-1", 6, false),
       ],
     },
   ],
@@ -104,6 +146,7 @@ function LayoutPreview() {
               ["loading", "Carregando cadastros"],
               ["load-error", "Erro ao carregar"],
               ["empty", "Lista vazia"],
+              ["long", "Nomes longos e muitos manifestos"],
             ].map(([value, label]) => (
               <option value={value} key={value}>
                 {label}
@@ -144,9 +187,13 @@ function LayoutPreview() {
             onReload={() => setScenario("normal")}
           />
           <ConferenceWorkspace
-            key={scenario === "empty" ? "empty" : "records"}
+            key={scenario === "empty" ? "empty" : scenario === "long" ? "long" : "records"}
             initialState={
-              scenario === "empty" ? { manifests: [], activity: [], issues: [] } : state
+              scenario === "empty"
+                ? { manifests: [], activity: [], issues: [] }
+                : scenario === "long"
+                  ? longState
+                  : state
             }
           />
         </div>
