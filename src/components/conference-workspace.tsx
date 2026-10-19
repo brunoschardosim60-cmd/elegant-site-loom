@@ -1024,7 +1024,9 @@ export function ConferenceWorkspace({
                       <>
                         <div
                           ref={pendingTableRef}
-                          tabIndex={-1}
+                          tabIndex={0}
+                          role="region"
+                          aria-label="Tabela de CTCs pendentes"
                           className="manifest-card pending-table-wrap paged-documents"
                         >
                           <table

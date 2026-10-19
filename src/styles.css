@@ -92,7 +92,7 @@
   --ring: oklch(0.42 0.17 260);
   --success: oklch(0.48 0.112 160);
   --success-soft: oklch(0.954 0.026 160);
-  --warning: oklch(0.60 0.13 70);
+  --warning: oklch(0.52 0.13 70);
   --warning-soft: oklch(0.965 0.036 85);
   --overlay: oklch(0.18 0.025 170 / 55%);
   --chart-1: oklch(0.646 0.222 41.116);
@@ -699,7 +699,7 @@ h1 { font-size: 28px; font-weight: 750; line-height: 1.3; }
   .import-alert strong { font-size: 12px; }
   .import-alert p { font-size: 11px; }
   .import-completeness { font-size: 11px; }
-  .import-form-footer { position: static; margin: 0 -16px -20px; padding: 15px 16px; gap: 10px; box-shadow: none; flex-wrap: wrap; }
+  .import-form-footer { position: sticky; bottom: -20px; margin: 0 -16px -20px; padding: 15px 16px; gap: 10px; flex-wrap: wrap; }
   .import-save-actions { margin-left: auto; }
   .import-save-actions button { font-size: 11px; min-height: 42px; padding: 0 12px; }
   .import-footer-info { gap: 3px; }

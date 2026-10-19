@@ -5,7 +5,6 @@ import {
   Check,
   ChevronDown,
   Clock3,
-  FileText,
   History,
   Package,
   Pencil,
@@ -168,7 +167,6 @@ export function DriverManifestList({
                   ) : (
                     <Check size={13} aria-hidden="true" />
                   )}
-                  <FileText size={13} aria-hidden="true" />
                   <strong>{pendingCount || documentCount}</strong>{" "}
                   {pendingCount
                     ? pendingCount === 1

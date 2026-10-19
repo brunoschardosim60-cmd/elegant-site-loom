@@ -62,7 +62,9 @@ export function CtcTracking({
       {visible.length ? (
         <div
           ref={tableRef}
-          tabIndex={-1}
+          tabIndex={0}
+          role="region"
+          aria-label="Tabela de rastreamento de CTCs"
           className="manifest-card tracking-table-wrap paged-documents"
         >
           <table className="document-table tracking-table" aria-label="Rastreamento de CTCs">
