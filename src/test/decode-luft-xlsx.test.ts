@@ -142,3 +142,57 @@ it("keeps fifty manifests across five dates for the same driver without dropping
     expect(applyImports(saved.manifests, parsed.drafts, "later").ok).toBe(false);
   }
 });
+
+it("streams past 20 thousand foreign-branch rows and keeps original error line numbers", () => {
+  const ignored = Array.from({ length: 25000 }, (_, i) => line(["outro", "DIS", "07"], i + 2)).join(
+    "",
+  );
+  const valid = line(base, 25002);
+  const invalid = line(
+    base.map((value, i) => (i === 6 ? "123" : value)),
+    25003,
+  );
+  const parsed = decodeLuftXlsx(
+    packed(
+      `<worksheet><sheetData>${line(headers, 1)}${ignored}${valid}${invalid}</sheetData></worksheet>`,
+    ),
+  );
+  expect(parsed.ignored).toBe(25000);
+  expect(parsed.selectedRows).toBe(2);
+  expect(parsed.drafts[0]?.rows).toHaveLength(1);
+  expect(parsed.errors).toEqual(["Linha 25003: confira CTC de 10 dígitos."]);
+});
+
+it("still rejects formulas in discarded branches and duplicate rows after filtering", () => {
+  const ignored = line(["outro", "DIS", "07"], 2);
+  expect(() =>
+    decodeLuftXlsx(
+      packed(
+        `<worksheet><sheetData>${line(headers, 1)}${ignored.replace("</c>", "<f>1+1</f></c>")}${line(base, 3)}</sheetData></worksheet>`,
+      ),
+    ),
+  ).toThrow("fórmulas");
+  expect(() =>
+    decodeLuftXlsx(
+      packed(
+        `<worksheet><sheetData>${line(headers, 1)}${ignored}${ignored}${line(base, 3)}</sheetData></worksheet>`,
+      ),
+    ),
+  ).toThrow("linhas repetidas");
+});
+
+it("decodes a UTF-8 shared value that crosses streamed ZIP chunks", () => {
+  const name = "Á".repeat(16000);
+  const xml = sheet([base]).replace(
+    '<c r="F2" t="inlineStr"><is><t>ANA</t></is></c>',
+    '<c r="F2" t="s"><v>0</v></c>',
+  );
+  const bytes = zipSync(
+    {
+      "xl/sharedStrings.xml": strToU8(`<sst><si><t>${name}</t></si></sst>`),
+      "xl/worksheets/sheet1.xml": strToU8(xml),
+    },
+    { level: 0 },
+  );
+  expect(decodeLuftXlsx(bytes.buffer as ArrayBuffer).drafts[0]?.driver).toBe(name);
+});

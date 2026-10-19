@@ -161,11 +161,11 @@ it("checks declared ZIP expansion before reading the workbook", () => {
   const buffer = new ArrayBuffer(68),
     view = new DataView(buffer);
   view.setUint32(0, 0x02014b50, true);
-  view.setUint32(24, 49 * 1024 * 1024, true);
+  view.setUint32(24, 1025 * 1024 * 1024, true);
   view.setUint32(46, 0x06054b50, true);
   view.setUint16(56, 1, true);
   view.setUint32(58, 46, true);
-  expect(() => validateSpreadsheetZip(buffer)).toThrow("48 MB");
+  expect(() => validateSpreadsheetZip(buffer)).toThrow("1024 MB");
   view.setUint32(24, 100, true);
   expect(() => validateSpreadsheetZip(buffer)).not.toThrow();
 });

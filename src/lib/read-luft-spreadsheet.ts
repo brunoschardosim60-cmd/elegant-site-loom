@@ -1,11 +1,12 @@
 import type { LuftExport } from "./luft-spreadsheet";
 import { reportGeneratedAt } from "./nf-occurrence-date";
+import { spreadsheetLimits } from "./luft-spreadsheet-limits";
 
 /** No file data leaves the browser. Termination cancels parsing and late results. */
 export async function readLuftSpreadsheet(file: File, signal: AbortSignal): Promise<LuftExport> {
   signal.throwIfAborted();
-  if (!/\.xlsx$/i.test(file.name) || file.size > 8 * 1024 * 1024)
-    throw new Error("Envie o relatório 108 em XLSX, com até 8 MB.");
+  if (!/\.xlsx$/i.test(file.name) || file.size > spreadsheetLimits.fileBytes)
+    throw new Error(`Envie o relatório 108 em XLSX, com até ${spreadsheetLimits.fileMb} MB.`);
   const bytes = await file.arrayBuffer();
   signal.throwIfAborted();
   return new Promise((resolve, reject) => {
@@ -23,8 +24,8 @@ export async function readLuftSpreadsheet(file: File, signal: AbortSignal): Prom
     };
     const timer = setTimeout(() => {
       cleanup();
-      reject(new Error("A planilha demorou mais de 20 segundos. Exporte um período menor."));
-    }, 20000);
+      reject(new Error("A planilha demorou mais de 2 minutos. Exporte um período menor."));
+    }, spreadsheetLimits.timeoutMs);
     signal.addEventListener("abort", abort, { once: true });
     worker.onerror = () => {
       cleanup();

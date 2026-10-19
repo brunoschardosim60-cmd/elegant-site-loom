@@ -2,9 +2,15 @@ import type { ImportDraft } from "./manifest-import";
 import { normalizeIssueDate, normalizeIssueTime } from "./manifest-date";
 import { isAnotherRoute } from "./conference-routes";
 import { lastOccurrenceDate } from "./nf-occurrence-date";
+import { spreadsheetLimits } from "./luft-spreadsheet-limits";
 
 export type SheetCell = string | number | boolean | null;
-export type LuftSheet = { name: string; rows: SheetCell[][] };
+export type LuftSheet = {
+  name: string;
+  rows: SheetCell[][];
+  rowNumbers?: number[];
+  ignored?: number;
+};
 export type LuftExport = {
   drafts: ImportDraft[];
   ignored: number;
@@ -40,11 +46,18 @@ const literal = (value: SheetCell | undefined) =>
       ? String(value)
       : "";
 
+export const isLuft108Header = (row: SheetCell[]) =>
+  fields.every((field) => row.some((cell) => normalized(cell) === normalized(field)));
+
+export const luftColumnIndex = (row: SheetCell[], name: string) =>
+  row.findIndex((cell) => normalized(cell) === normalized(name));
+
+export const isLuft108Demand = (branch: SheetCell | undefined, reason: SheetCell | undefined) =>
+  ["06", "6"].includes(normalized(branch)) && normalized(reason) === "DIS";
+
 /** Literal cell values only. No OCR substitutions, inferred series or guessed zeros. */
 export function parseLuft108(sheets: LuftSheet[]): LuftExport {
-  const matching = sheets.filter((sheet) =>
-    fields.every((field) => sheet.rows[0]?.some((cell) => normalized(cell) === normalized(field))),
-  );
+  const matching = sheets.filter((sheet) => isLuft108Header(sheet.rows[0] ?? []));
   if (matching.length > 1)
     throw new Error(
       "A planilha tem mais de uma aba de relatório 108. Exporte os dias juntos em uma única aba.",
@@ -103,15 +116,14 @@ export function parseLuft108(sheets: LuftSheet[]): LuftExport {
   const groups = new Map<string, ImportDraft>();
   const seen = new Map<string, string>();
   const errors: string[] = [];
-  let ignored = 0,
+  let ignored = sheet.ignored ?? 0,
     repeated = 0,
     selectedRows = 0;
   for (const [index, cells] of sheet.rows.slice(1).entries()) {
     if (cells.every((cell) => cell === null || cell === "")) continue;
     const at = (field: (typeof fields)[number]) => cells[indexes[field]];
-    const branch = normalized(at("Filial"));
     // Excel may store branch 06 as the integer 6, but CTC and manifest zeros are never guessed.
-    if (!["06", "6"].includes(branch) || normalized(at("Motivo")) !== "DIS") {
+    if (!isLuft108Demand(at("Filial"), at("Motivo"))) {
       ignored++;
       continue;
     }
@@ -167,7 +179,8 @@ export function parseLuft108(sheets: LuftSheet[]): LuftExport {
                       ? "código ou descrição da ocorrência"
                       : "";
     const fail = (message: string) => {
-      if (errors.length < 100) errors.push(`Linha ${index + 2}: ${message}.`);
+      if (errors.length < 100)
+        errors.push(`Linha ${sheet.rowNumbers?.[index + 1] ?? index + 2}: ${message}.`);
     };
     if (bad) {
       fail(`confira ${bad}`);
@@ -290,8 +303,8 @@ export function luftManifestDays(drafts: ImportDraft[]) {
 
 /** Check declared ZIP expansion before loading Excel; the worker has its own time limit. */
 export function validateSpreadsheetZip(buffer: ArrayBuffer) {
-  if (buffer.byteLength < 22 || buffer.byteLength > 8 * 1024 * 1024)
-    throw new Error("Envie uma planilha XLSX de até 8 MB.");
+  if (buffer.byteLength < 22 || buffer.byteLength > spreadsheetLimits.fileBytes)
+    throw new Error(`Envie uma planilha XLSX de até ${spreadsheetLimits.fileMb} MB.`);
   const view = new DataView(buffer);
   let end = -1;
   for (let at = buffer.byteLength - 22; at >= Math.max(0, buffer.byteLength - 65557); at--)
@@ -319,8 +332,10 @@ export function validateSpreadsheetZip(buffer: ArrayBuffer) {
     )
       throw new Error("Arquivo XLSX inválido ou protegido por senha.");
     total += view.getUint32(at + 24, true);
-    if (total > 48 * 1024 * 1024)
-      throw new Error("A planilha descompactada excede 48 MB. Exporte um período menor.");
+    if (total > spreadsheetLimits.expandedBytes)
+      throw new Error(
+        `A planilha descompactada excede ${spreadsheetLimits.expandedMb} MB. Exporte um período menor.`,
+      );
     at +=
       46 +
       view.getUint16(at + 28, true) +

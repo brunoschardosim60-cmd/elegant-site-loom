@@ -1,7 +1,11 @@
-import { unzipSync, strFromU8 } from "fflate";
+import { Unzip, UnzipInflate } from "fflate";
+import { spreadsheetLimits } from "./luft-spreadsheet-limits";
 import { SaxesParser } from "saxes";
 import {
   parseLuft108,
+  isLuft108Header,
+  isLuft108Demand,
+  luftColumnIndex,
   validateSpreadsheetZip,
   type LuftExport,
   type LuftSheet,
@@ -20,14 +24,14 @@ function xmlParser() {
   });
   return parser;
 }
-function sharedStrings(xml: string) {
+function sharedStrings() {
   const result: string[] = [];
-  if (!xml) return result;
   const parser = xmlParser();
   let inside = false,
     inText = false,
     phonetic = false,
-    value = "";
+    value = "",
+    characters = 0;
   parser.on("opentag", (node) => {
     const name = local(node.name);
     if (name === "si") {
@@ -48,13 +52,17 @@ function sharedStrings(xml: string) {
     if (name === "t") inText = false;
     if (name === "rPh") phonetic = false;
     if (name === "si") {
+      characters += value.length;
+      if (characters > spreadsheetLimits.sharedCharacters)
+        throw new Error(
+          "A planilha tem textos demais para este navegador. Exporte um período menor.",
+        );
       result.push(value);
       inside = false;
-      if (result.length > 200000) throw invalid();
+      if (result.length > spreadsheetLimits.sharedStrings) throw invalid();
     }
   });
-  parser.write(xml).close();
-  return result;
+  return { parser, result };
 }
 function dateFormats(xml: string) {
   const parser = xmlParser(),
@@ -113,16 +121,15 @@ function excelDate(value: number, epoch1904: boolean): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
 }
 function readSheet(
-  xml: string,
   strings: string[],
   dates: Set<number>,
   epoch1904: boolean,
-): SheetCell[][] {
+  budget: { cells: number; selected: number },
+) {
   const rows: SheetCell[][] = [],
     parser = xmlParser();
   let row: SheetCell[] | null = null,
     rowNumber = 0,
-    maxColumn = 0,
     column = 0,
     type = "",
     style = 0,
@@ -133,24 +140,37 @@ function readSheet(
     inCell = false,
     phonetic = false;
   let used = new Set<number>();
+  const rowNumbers: number[] = [];
+  let lastRow = 0,
+    ignored = 0,
+    matching = false,
+    branchColumn = -1,
+    reasonColumn = -1;
   parser.on("opentag", (node) => {
     const name = local(node.name),
       attr = node.attributes;
     if (name === "row") {
       if (row) throw invalid();
-      rowNumber = attr["r"] ? Number(attr["r"]) : rows.length + 1;
-      if (!Number.isInteger(rowNumber) || rowNumber <= rows.length || rowNumber > 20000)
-        throw new Error("A planilha excede 20 mil linhas ou contém linhas repetidas.");
+      rowNumber = attr["r"] ? Number(attr["r"]) : lastRow + 1;
+      if (
+        !Number.isInteger(rowNumber) ||
+        rowNumber <= lastRow ||
+        rowNumber > spreadsheetLimits.rows
+      )
+        throw new Error(
+          "A planilha excede o limite de linhas do Excel ou contém linhas repetidas.",
+        );
+      lastRow = rowNumber;
       row = [];
       used = new Set();
     } else if (name === "c" && row) {
       const match = /^([A-Z]{1,3})(\d+)$/.exec(attr["r"] ?? "");
       if (!match || Number(match[2]) !== rowNumber || inCell) throw invalid();
       column = [...match[1]!].reduce((sum, letter) => sum * 26 + letter.charCodeAt(0) - 64, 0) - 1;
-      maxColumn = Math.max(maxColumn, column + 1);
-      if (column >= 100 || used.has(column) || rowNumber * maxColumn > 2000000)
+      budget.cells++;
+      if (column >= 100 || used.has(column) || budget.cells > spreadsheetLimits.cells)
         throw new Error(
-          "A planilha excede 100 colunas ou dois milhões de células, ou repete uma célula.",
+          "A planilha excede 100 colunas ou 20 milhões de células, ou repete uma célula.",
         );
       used.add(column);
       type = attr["t"] ?? "n";
@@ -194,45 +214,97 @@ function readSheet(
       row[column] = cell;
       inCell = false;
     } else if (name === "row" && row) {
-      while (rows.length < rowNumber - 1) rows.push([]);
-      rows.push(Array.from({ length: row.length }, (_, index) => row![index] ?? null));
+      const cells = Array.from({ length: row.length }, (_, index) => row![index] ?? null);
+      if (rowNumber === 1) {
+        rows.push(cells);
+        rowNumbers.push(rowNumber);
+        matching = isLuft108Header(cells);
+        branchColumn = luftColumnIndex(cells, "Filial");
+        reasonColumn = luftColumnIndex(cells, "Motivo");
+      } else if (matching && cells.some((cell) => cell !== null && cell !== "")) {
+        if (!isLuft108Demand(cells[branchColumn], cells[reasonColumn])) ignored++;
+        else {
+          if (++budget.selected > spreadsheetLimits.selectedRows)
+            throw new Error(
+              "A planilha tem mais de 50 mil linhas da filial 06 + DIS. Exporte um período menor.",
+            );
+          rows.push(cells);
+          rowNumbers.push(rowNumber);
+        }
+      }
       row = null;
     }
   });
-  parser.write(xml).close();
-  return rows;
+  return { parser, result: () => ({ rows, rowNumbers, ignored }) };
 }
 
-/** Reads only OpenXML values. No Excel calculation engine, network or timer-based ZIP tasks. */
+/** Feed UTF-8 XML in bounded chunks; never materialize the expanded workbook. */
+function readZipXml(
+  buffer: ArrayBuffer,
+  budget: { expanded: number },
+  open: (name: string) => ((text: string, final: boolean) => void) | undefined,
+) {
+  const names = new Set<string>();
+  const unzip = new Unzip((file) => {
+    const relevant =
+      /^xl\/(sharedStrings|styles|workbook)\.xml$/.test(file.name) ||
+      /^xl\/worksheets\/[^/]+\.xml$/.test(file.name);
+    if (relevant && names.has(file.name)) throw invalid();
+    if (relevant) names.add(file.name);
+    const write = open(file.name);
+    if (!write) return;
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    file.ondata = (error, bytes, final) => {
+      if (error) throw error;
+      budget.expanded += bytes.length;
+      if (budget.expanded > spreadsheetLimits.expandedBytes) throw invalid();
+      write(decoder.decode(bytes, { stream: !final }), final);
+    };
+    file.start();
+  });
+  unzip.register(UnzipInflate);
+  const bytes = new Uint8Array(buffer),
+    size = 16384;
+  for (let offset = 0; offset < bytes.length; offset += size)
+    unzip.push(bytes.subarray(offset, offset + size), offset + size >= bytes.length);
+}
+
+/** Metadata first, then streamed sheets; only branch 06 + DIS rows stay in memory. */
 export function decodeLuftXlsx(buffer: ArrayBuffer): LuftExport {
   validateSpreadsheetZip(buffer);
-  const names = new Set<string>();
-  const files = unzipSync(new Uint8Array(buffer), {
-    filter: (file) => {
-      const keep =
-        /^xl\/(sharedStrings|styles|workbook)\.xml$/.test(file.name) ||
-        /^xl\/worksheets\/[^/]+\.xml$/.test(file.name);
-      if (keep && names.has(file.name)) throw invalid();
-      if (keep) names.add(file.name);
-      return keep;
-    },
+  const strings = sharedStrings();
+  const expansion = { expanded: 0 };
+  let stylesXml = "",
+    workbookXml = "";
+  readZipXml(buffer, expansion, (name) => {
+    if (name === "xl/sharedStrings.xml")
+      return (text, final) => {
+        strings.parser.write(text);
+        if (final) strings.parser.close();
+      };
+    if (name !== "xl/styles.xml" && name !== "xl/workbook.xml") return;
+    let length = 0;
+    return (text) => {
+      length += text.length;
+      if (length > 4 * 1024 * 1024) throw invalid();
+      if (name === "xl/styles.xml") stylesXml += text;
+      else workbookXml += text;
+    };
   });
-  if (Object.values(files).reduce((sum, bytes) => sum + bytes.byteLength, 0) > 48 * 1024 * 1024)
-    throw invalid();
-  const xml = (name: string) => (files[name] ? strFromU8(files[name]!) : "");
-  const strings = sharedStrings(xml("xl/sharedStrings.xml")),
-    dates = dateFormats(xml("xl/styles.xml")),
-    epoch1904 = workbookUses1904(xml("xl/workbook.xml"));
+  const dates = dateFormats(stylesXml),
+    epoch1904 = workbookUses1904(workbookXml);
   const sheets: LuftSheet[] = [];
-  let cells = 0;
-  for (const name of Object.keys(files).filter((name) =>
-    /^xl\/worksheets\/[^/]+\.xml$/.test(name),
-  )) {
-    const rows = readSheet(xml(name), strings, dates, epoch1904);
-    cells += rows.reduce((sum, row) => sum + row.length, 0);
-    if (cells > 2000000)
-      throw new Error("A planilha excede dois milhões de células. Exporte um período menor.");
-    sheets.push({ name, rows });
-  }
+  const budget = { cells: 0, selected: 0 };
+  readZipXml(buffer, expansion, (name) => {
+    if (!/^xl\/worksheets\/[^/]+\.xml$/.test(name)) return;
+    const sheet = readSheet(strings.result, dates, epoch1904, budget);
+    return (text, final) => {
+      sheet.parser.write(text);
+      if (final) {
+        sheet.parser.close();
+        sheets.push({ name, ...sheet.result() });
+      }
+    };
+  });
   return parseLuft108(sheets);
 }

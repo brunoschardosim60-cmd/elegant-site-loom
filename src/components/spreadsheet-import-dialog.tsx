@@ -20,6 +20,7 @@ import { findLuftCtcOverlaps, luftManifestDays, type LuftExport } from "@/lib/lu
 import { formatManifestDate } from "@/lib/manifest-date";
 import { isAnotherRoute } from "@/lib/conference-routes";
 import { planOccurrenceUpdates } from "@/lib/nf-occurrences";
+import { spreadsheetLimits } from "@/lib/luft-spreadsheet-limits";
 
 export function SpreadsheetImportDialog({
   manifests,
@@ -321,7 +322,8 @@ export function SpreadsheetImportDialog({
                   : filename || "Arraste a planilha 108 ou clique para selecionar"}
               </strong>
               <span className="text-xs text-muted-foreground">
-                XLSX · até 8 MB · Filial 06 + DIS. TRA e outras filiais ficam de fora.
+                XLSX · até {spreadsheetLimits.fileMb} MB · Filial 06 + DIS. TRA e outras filiais
+                ficam de fora.
               </span>
             </span>
           </label>

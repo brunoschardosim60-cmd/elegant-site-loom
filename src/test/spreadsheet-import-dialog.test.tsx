@@ -313,13 +313,13 @@ it("rejects several dropped files and ignores drops during an active read", asyn
   expect(signal.aborted).toBe(false);
 });
 it("announces a rejected file from the reader and does not register it", async () => {
-  mock.read.mockRejectedValueOnce(new Error("Envie o relatório 108 em XLSX, com até 8 MB."));
+  mock.read.mockRejectedValueOnce(new Error("Envie o relatório 108 em XLSX, com até 200 MB."));
   const save = vi.fn();
   render(<SpreadsheetImportDialog manifests={[]} onClose={vi.fn()} onCreate={save} />);
   fireEvent.drop(dropZone(), {
     dataTransfer: { types: ["Files"], files: [new File(["pdf"], "documento.pdf")] },
   });
-  expect(await screen.findByRole("alert")).toHaveTextContent("XLSX, com até 8 MB");
+  expect(await screen.findByRole("alert")).toHaveTextContent("XLSX, com até 200 MB");
   expect(save).not.toHaveBeenCalled();
 });
 it("previews all eligible manifests, filters by driver and requires explicit registration", async () => {
