@@ -187,9 +187,13 @@ function LayoutPreview() {
             onReload={() => setScenario("normal")}
           />
           <ConferenceWorkspace
-            key={scenario === "empty" ? "empty" : "records"}
+            key={scenario === "empty" ? "empty" : scenario === "long" ? "long" : "records"}
             initialState={
-              scenario === "empty" ? { manifests: [], activity: [], issues: [] } : state
+              scenario === "empty"
+                ? { manifests: [], activity: [], issues: [] }
+                : scenario === "long"
+                  ? longState
+                  : state
             }
           />
         </div>
