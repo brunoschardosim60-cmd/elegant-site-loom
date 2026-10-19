@@ -42,6 +42,10 @@ export function SpreadsheetImportDialog({
   const [busy, setBusy] = useState(false);
   const [stopped, setStopped] = useState(false);
   const [error, setError] = useState("");
+  const errorNotice = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (error) errorNotice.current?.scrollIntoView?.({ block: "nearest" });
+  }, [error]);
   const [updateMessage, setUpdateMessage] = useState("");
   const [query, setQuery] = useState("");
   const [dayFilter, setDayFilter] = useState("");
@@ -352,7 +356,7 @@ export function SpreadsheetImportDialog({
           {error && (
             <p
               role="alert"
-              ref={(node) => node?.scrollIntoView({ block: "nearest" })}
+              ref={errorNotice}
               className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"
             >
               {error}

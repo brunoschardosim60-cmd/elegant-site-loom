@@ -35,6 +35,29 @@ beforeEach(() => {
   mock.read.mockReset().mockResolvedValue(data());
 });
 afterEach(cleanup);
+it("reveals a new import error once without pulling the screen on team updates", async () => {
+  const previous = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollIntoView");
+  const scroll = vi.fn();
+  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+    configurable: true,
+    value: scroll,
+  });
+  try {
+    mock.read.mockRejectedValueOnce(new Error("Arquivo inválido para importação"));
+    const props = { onClose: vi.fn(), onCreate: vi.fn() };
+    const mounted = render(<SpreadsheetImportDialog {...props} manifests={[]} />);
+    upload();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Arquivo inválido");
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(scroll).toHaveBeenCalledWith({ block: "nearest" });
+    mounted.rerender(<SpreadsheetImportDialog {...props} manifests={[]} />);
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(props.onCreate).not.toHaveBeenCalled();
+  } finally {
+    if (previous) Object.defineProperty(HTMLElement.prototype, "scrollIntoView", previous);
+    else Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
+  }
+});
 it("offers identical teammate manifests explicitly without preselecting or duplicating them", async () => {
   const draft = data().drafts[0]!;
   const save = vi.fn().mockReturnValue({ ok: true, manifests: [] });
