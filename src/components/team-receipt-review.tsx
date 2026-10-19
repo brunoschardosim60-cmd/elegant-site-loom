@@ -1,3 +1,4 @@
+import { Users } from "lucide-react";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
 import { conferenceTimestamp } from "@/lib/conference-display";
@@ -31,9 +32,10 @@ export function TeamReceiptReview({
           type="button"
           variant="ghost"
           size="sm"
-          className="h-8 max-w-full text-xs text-muted-foreground hover:text-primary"
+          className="h-8 max-w-full gap-1.5 text-xs text-muted-foreground hover:text-primary"
           onClick={onOpen}
         >
+          <Users size={13} aria-hidden="true" />
           Conferências da equipe ({available.length})
         </Button>
       )}
@@ -73,6 +75,13 @@ export function TeamReceiptReview({
                 const sources = [
                   ...new Set(items.map((item) => item.source.email || "Integrante da equipe")),
                 ];
+                const latest = items.reduce<string | undefined>(
+                  (max, item) =>
+                    item.source.receivedAt && (!max || item.source.receivedAt > max)
+                      ? item.source.receivedAt
+                      : max,
+                  undefined,
+                );
                 return (
                   <details key={id} className="rounded-md border p-3" open={groups.size === 1}>
                     <summary className="cursor-pointer text-sm leading-relaxed break-words">
@@ -80,6 +89,7 @@ export function TeamReceiptReview({
                       <span className="mt-1 block text-xs text-muted-foreground">
                         {items.length} {items.length === 1 ? "CTC" : "CTCs"} · Conferido por{" "}
                         {sources.join(", ")}
+                        {latest && <> · {conferenceTimestamp(latest)}</>}
                       </span>
                     </summary>
                     <ul className="mt-3 space-y-3 border-t pt-3">
