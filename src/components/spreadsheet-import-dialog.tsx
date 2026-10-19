@@ -746,10 +746,10 @@ export function SpreadsheetImportDialog({
                     {visible.map((draft) => (
                       <tr
                         className={
-                          draft.id === active
-                            ? "bg-primary/5"
-                            : blocked.has(draft.id)
-                              ? "bg-warning-soft"
+                          blocked.has(draft.id)
+                            ? "bg-warning-soft"
+                            : draft.id === active
+                              ? "bg-primary/5"
                               : ""
                         }
                         key={draft.id}
