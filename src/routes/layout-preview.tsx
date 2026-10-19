@@ -5,8 +5,14 @@ import { AccountPanel } from "@/components/account-auth";
 import { ConferenceWorkspace } from "@/components/conference-workspace";
 
 // Local-only visual preview with fictitious data; never available in production builds.
+// Midday UTC keeps the rendered date identical on the server (UTC) and in the
+// browser (America/Sao_Paulo), avoiding a hydration mismatch in this preview.
 const now = Date.now();
-const day = (n: number) => new Date(now - n * 86400000).toISOString();
+const day = (n: number) => {
+  const date = new Date(now - n * 86400000);
+  date.setUTCHours(15, 0, 0, 0);
+  return date.toISOString();
+};
 const doc = (id: string, ctc: string, nf: string, volumes: number, received: boolean) => ({
   id,
   ctc,
