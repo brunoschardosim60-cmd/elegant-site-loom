@@ -745,6 +745,7 @@ export function SpreadsheetImportDialog({
                   <tbody>
                     {visible.map((draft) => (
                       <tr
+                        data-blocked={blocked.has(draft.id) || undefined}
                         className={
                           blocked.has(draft.id)
                             ? "bg-warning-soft"
