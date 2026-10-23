@@ -10,8 +10,9 @@
  * The @theme inline block maps CSS custom properties to Tailwind utility
  * classes (e.g. --color-primary -> bg-primary, text-primary).
  *
- * The :root and .dark blocks define the actual color values using oklch.
- * All colors MUST use oklch format.
+ * The modern theme uses oklch. The hex declarations immediately before it
+ * are deliberate fallbacks for workstations whose browser does not yet parse
+ * oklch; newer browsers override them with the values below.
  *
  * To add a new semantic color:
  * 1. Add the variable to :root (light value) and .dark (dark value)
@@ -71,6 +72,45 @@
 
 :root {
   --radius: 0.5rem;
+  /* Keep the first-login screen usable on older warehouse workstations. */
+  --background: #f7f8fb;
+  --foreground: #1f3858;
+  --card: #ffffff;
+  --card-foreground: #12233d;
+  --popover: #ffffff;
+  --popover-foreground: #12233d;
+  --primary: #164ca0;
+  --primary-foreground: #ffffff;
+  --secondary: #edf2fb;
+  --secondary-foreground: #1c3555;
+  --muted: #f2f4f7;
+  --muted-foreground: #66768d;
+  --accent: #e8f0fc;
+  --accent-foreground: #1c3555;
+  --destructive: #c93636;
+  --destructive-foreground: #ffffff;
+  --border: #dce4ef;
+  --input: #cbd7e7;
+  --ring: #164ca0;
+  --success: #177b59;
+  --success-soft: #edf9f3;
+  --warning: #996100;
+  --warning-soft: #fff6dc;
+  --overlay: rgb(25 43 61 / 55%);
+  --chart-1: #eb6f32;
+  --chart-2: #168d96;
+  --chart-3: #335876;
+  --chart-4: #d6a416;
+  --chart-5: #d88b14;
+  --sidebar: #073b87;
+  --sidebar-foreground: #f2f6ff;
+  --sidebar-muted: #a9bee0;
+  --sidebar-primary: #ffffff;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #0b4da7;
+  --sidebar-accent-foreground: #f2f6ff;
+  --sidebar-border: #1a5aa9;
+  --sidebar-ring: #a6bfe6;
   --background: oklch(0.975 0.006 250);
   --foreground: oklch(0.25 0.06 260);
   --card: oklch(1 0 0);
