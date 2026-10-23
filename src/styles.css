@@ -960,6 +960,19 @@ h1 { font-size: 22px; }
 /* Luft report review: fixed actions, readable nested table regions. */
 .sheet-import-dialog { background:var(--card); }
 .sheet-import-body { overscroll-behavior:contain; scrollbar-gutter:stable; }
+.sheet-import-header-icon { background:var(--muted); }
+.sheet-upload {
+  border-color:var(--border);
+  background:var(--card);
+  transition:background-color .15s ease, border-color .15s ease, box-shadow .15s ease;
+}
+.sheet-upload:not([data-busy]):hover { background:var(--muted); }
+.sheet-upload:focus-within,
+.sheet-upload[data-dragging] {
+  border-color:var(--primary);
+  background:var(--card);
+  box-shadow:0 0 0 2px var(--card), 0 0 0 4px var(--primary);
+}
 .sheet-upload strong { overflow-wrap:anywhere; line-height:1.6; }
 .sheet-import-metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:14px 0; }
 .sheet-import-metrics > div { border-right:1px solid var(--border); padding-right:12px; }

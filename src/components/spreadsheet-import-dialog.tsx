@@ -283,7 +283,7 @@ export function SpreadsheetImportDialog({
       >
         <DialogHeader className="sheet-import-header shrink-0 border-b px-5 py-4 sm:px-6">
           <div className="flex items-center gap-3">
-            <span className="rounded-lg bg-primary/10 p-2.5 text-primary">
+            <span className="sheet-import-header-icon rounded-lg p-2.5 text-primary">
               <FileSpreadsheet size={25} />
             </span>
             <div className="min-w-0">
@@ -301,7 +301,8 @@ export function SpreadsheetImportDialog({
             onDragLeave={leaveFile}
             onDrop={dropFile}
             data-dragging={dragging || undefined}
-            className={`focus-within:ring-2 focus-within:ring-primary focus-within:ring-offset-2 sheet-upload flex items-center gap-3 rounded-lg border border-dashed p-4 transition-colors ${busy ? "cursor-wait opacity-60" : "cursor-pointer hover:bg-primary/10"} ${dragging ? "border-primary bg-primary/10 ring-2 ring-primary ring-offset-2" : "border-primary/30 bg-primary/5"}`}
+            data-busy={busy || undefined}
+            className={`sheet-upload flex items-center gap-3 rounded-lg border border-dashed p-4 ${busy ? "cursor-wait opacity-60" : "cursor-pointer"}`}
           >
             <input
               type="file"
