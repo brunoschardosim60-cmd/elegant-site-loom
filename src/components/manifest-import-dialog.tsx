@@ -25,78 +25,17 @@ import { photoFingerprint, uniquePhotoFiles } from "@/lib/photo-files";
 import { LOCAL_HEADER_NOTICE, LOCAL_ROW_NOTICE } from "@/lib/local-photo";
 import type { FindArchived } from "@/lib/conference-archive";
 import { useArchivedManifests } from "@/hooks/use-archived-manifests";
-
-type Draft = ImportDraft & {
-  key: string;
-  filename: string;
-  file?: File;
-  url?: string;
-  text?: string;
-  status: "manual" | "waiting" | "reading" | "read" | "error";
-  kind?: "pre" | "dacte" | "unknown";
-  message?: string;
-  seconds?: number;
-  headerReview?: string[] | undefined;
-  imageRotation?: PhotoFields["imageRotation"];
-  expectedNfs?: number | undefined;
-  expectedRows?: number | undefined;
-  totalVolumes?: number | undefined;
-  edited?: boolean;
-  progress?: string;
-  readingSource?: "local" | undefined;
-};
-const blank = (): Draft => ({
-  key: crypto.randomUUID(),
-  filename: "Cadastro manual",
-  status: "manual",
-  id: "",
-  plate: "",
-  driver: "",
-  rows: [{ ctc: "", nf: "", volumes: "1" }],
-});
-const documentCount = (item: Draft) =>
-  new Set(item.rows.map((row) => row.ctc.trim()).filter((ctc) => /^\d{10}$/.test(ctc))).size;
-const volumeCount = (item: Draft) =>
-  item.rows.reduce(
-    (sum, row) =>
-      sum +
-      (Number.isInteger(Number(row.volumes)) && Number(row.volumes) > 0 ? Number(row.volumes) : 0),
-    0,
-  );
-const reviewCount = (item: Draft) => item.rows.filter((row) => row.review?.length).length;
-const needsReview = (item: Draft) =>
-  reviewManifestTotals(item.rows, item).messages.length > 0 ||
-  item.rows.some((row) => !row.ctc || !row.nf || !row.volumes || !row.client || !row.recipient) ||
-  item.status === "error" ||
-  !!item.headerReview?.some((message) => message !== LOCAL_HEADER_NOTICE) ||
-  !!reviewCount(item);
-const statusText = (item: Draft) =>
-  item.status === "read"
-    ? item.readingSource === "local"
-      ? needsReview(item)
-        ? "Leitura local · campos a conferir"
-        : "Leitura local"
-      : item.edited
-        ? "Ajustado manualmente"
-        : needsReview(item)
-          ? "Conferir campos"
-          : "Leitura concluída"
-    : item.status === "error"
-      ? "Leitura interrompida"
-      : item.status === "reading"
-        ? "Lendo documento"
-        : item.status === "waiting"
-          ? "Aguardando leitura"
-          : "Cadastro manual";
-const hasManualContent = (item: Draft) =>
-  item.id ||
-  item.issueDate ||
-  item.plate ||
-  item.driver ||
-  item.rows.some(
-    (row) =>
-      row.ctc || row.nf || row.client || row.recipient || (row.volumes && row.volumes !== "1"),
-  );
+import {
+  blank,
+  documentCount,
+  hasManualContent,
+  needsReview,
+  reviewCount,
+  statusText,
+  volumeCount,
+  type Draft,
+} from "@/lib/import-draft";
+import { ImportQueue } from "./import-queue";
 
 export function ManifestImportDialog({
   open,
@@ -671,111 +610,20 @@ export function ManifestImportDialog({
           </div>
         )}
         <div className="import-body">
-          <aside className="import-queue" aria-label="Arquivos para importar">
-            <div className="import-queue-heading">
-              <div>
-                <span className="import-eyebrow">Sua lista</span>
-                <h3>
-                  {photoCount ? `${photoCount} ${photoCount === 1 ? "foto" : "fotos"}` : "Novo pré"}
-                </h3>
-              </div>
-              <span className="import-queue-count">{items.length}</span>
-            </div>
-            <div className="import-batch-totals">
-              <span>
-                <strong>{detected}</strong> CTCs
-              </span>
-              <span>
-                <strong>{volumes}</strong> volumes
-              </span>
-            </div>
-            {items.length > 1 && (
-              <label className="form-field import-mobile-select">
-                Documento selecionado
-                <select
-                  aria-label="Selecionar foto do lote"
-                  value={active}
-                  onChange={(event) => selectItem(Number(event.target.value))}
-                >
-                  {items.map((item, i) => (
-                    <option key={item.key} value={i}>
-                      {i + 1}. {item.id || item.filename} ·{" "}
-                      {conflictIndices.has(i) ? "Cadastro duplicado" : statusText(item)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            <div className="import-queue-list">
-              {items.map((item, index) => (
-                <button
-                  type="button"
-                  className="import-queue-item"
-                  key={item.key}
-                  aria-label={`Revisar arquivo ${index + 1}: ${item.id || item.filename}`}
-                  aria-pressed={index === active}
-                  onClick={() => selectItem(index)}
-                >
-                  <div className="import-queue-thumb">
-                    {item.url ? <img src={item.url} alt="" /> : <FileImage size={22} />}
-                    <span>{index + 1}</span>
-                  </div>
-                  <div className="import-queue-copy">
-                    <strong>
-                      {item.id ||
-                        (item.kind === "dacte"
-                          ? "DACTE"
-                          : item.file
-                            ? item.status === "waiting" || item.status === "reading"
-                              ? "Identificando pré…"
-                              : "Pré sem número"
-                            : "Cadastro manual")}
-                    </strong>
-                    <small>{item.driver || item.filename}</small>
-                    <span
-                      className={`import-file-status ${conflictIndices.has(index) || needsReview(item) ? "warning" : item.status === "read" ? "success" : ""}`}
-                    >
-                      {conflictIndices.has(index) ? (
-                        <AlertCircle />
-                      ) : item.status === "reading" ? (
-                        <Loader2 className="animate-spin" />
-                      ) : item.status === "error" ? (
-                        <AlertCircle />
-                      ) : item.status === "read" ? (
-                        <CheckCircle2 />
-                      ) : null}
-                      {conflictIndices.has(index) ? "Cadastro duplicado" : statusText(item)}
-                    </span>
-                    {item.status === "reading" && item.progress && (
-                      <span className="import-queue-progress">{item.progress}</span>
-                    )}
-                    {item.status === "read" && (
-                      <span className="import-queue-numbers">
-                        {documentCount(item)} CTCs · {volumeCount(item)} volumes
-                      </span>
-                    )}
-                  </div>
-                </button>
-              ))}
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="import-manual-button"
-              disabled={busy}
-              onClick={() => {
-                setItems((list) => [...list, blank()]);
-                selectItem(items.length);
-              }}
-            >
-              <Plus size={15} />
-              Adicionar pré manualmente
-            </Button>
-            <p className="import-draft-note">
-              Os documentos só serão salvos ao cadastrar. Fechar descarta os rascunhos e as fotos.
-            </p>
-          </aside>
+          <ImportQueue
+            items={items}
+            active={active}
+            conflictIndices={conflictIndices}
+            photoCount={photoCount}
+            detected={detected}
+            volumes={volumes}
+            busy={busy}
+            onSelect={selectItem}
+            onAddManual={() => {
+              setItems((list) => [...list, blank()]);
+              selectItem(items.length);
+            }}
+          />
           {draft && (
             <form
               className="import-review"

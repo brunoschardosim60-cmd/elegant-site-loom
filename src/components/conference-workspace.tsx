@@ -58,7 +58,8 @@ import {
 } from "@/lib/conference-ownership";
 import { NfOccurrences } from "./nf-occurrences";
 import { planOccurrenceUpdates } from "@/lib/nf-occurrences";
-import { DocumentPagination, documentPageSize } from "./document-pagination";
+import { documentPageSize } from "./document-pagination";
+import { PendingTable } from "./pending-table";
 import { applyDemandImports } from "@/lib/shared-demand-import";
 import { applyImports, type ImportDraft, type ImportOutcome } from "@/lib/manifest-import";
 import type { ConferenceState } from "@/lib/conference-state";
@@ -1066,98 +1067,20 @@ export function ConferenceWorkspace({
                     />
                   ) : view === "missing" ? (
                     missingRows.length ? (
-                      <>
-                        <div
-                          ref={pendingTableRef}
-                          tabIndex={0}
-                          role="region"
-                          aria-label="Tabela de CTCs pendentes"
-                          className="manifest-card pending-table-wrap paged-documents"
-                        >
-                          <table
-                            className="document-table pending-table"
-                            aria-label="CTCs pendentes"
-                          >
-                            <thead>
-                              <tr>
-                                <th>CTC</th>
-                                <th>Pré / Motorista</th>
-                                <th>NF</th>
-                                <th>Vols.</th>
-                                <th>Status</th>
-                                <th>
-                                  <span className="sr-only">Ações</span>
-                                </th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {visibleMissingRows.map(({ manifest, doc, days }) => (
-                                <tr key={`${manifest.id}:${doc.id}`}>
-                                  <td className="ctc-number" data-label="CTC / Cliente">
-                                    <span className="ctc-identifier">{doc.ctc}</span>
-                                    {doc.client && (
-                                      <span className="block text-muted-foreground text-[10px] font-sans mt-1">
-                                        {doc.client}
-                                      </span>
-                                    )}
-                                  </td>
-                                  <td data-label="Pré / Motorista">
-                                    <span className="block font-semibold">{manifest.id}</span>
-                                    <span className="text-muted-foreground">
-                                      {manifest.driver} ·{" "}
-                                      <span className="plate">{manifest.plate}</span>
-                                    </span>
-                                    <span className="block text-muted-foreground text-[10px] mt-1">
-                                      {normalizeIssueDate(manifest.issueDate ?? "")
-                                        ? /^\d{8,12}$/.test(manifest.id)
-                                          ? "Manifestado em"
-                                          : "Emissão"
-                                        : "Cadastro"}{" "}
-                                      {formatManifestDate(manifestReferenceDate(manifest))}
-                                    </span>
-                                  </td>
-                                  <td className="text-muted-foreground" data-label="Nota fiscal">
-                                    <NfOccurrences nf={doc.nf} values={doc.nfOccurrences} />
-                                  </td>
-                                  <td data-label="Volumes">{doc.volumes}</td>
-                                  <td data-label="Status">
-                                    <span
-                                      className={`status-badge ${days >= 2 ? "badge-warning" : "badge-pending"}`}
-                                    >
-                                      <Clock3 size={10} />
-                                      Pendente
-                                    </span>
-                                    <span className="tracking-detail">
-                                      {manifestAgeLabel(manifest, now)}
-                                    </span>
-                                  </td>
-                                  <td data-label="Ações">
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      className="document-action text-muted-foreground"
-                                      disabled={teamReadOnly}
-                                      aria-label={`Marcar CTC ${doc.ctc} como recebido`}
-                                      onClick={() => toggleDocument(manifest, doc.id, true)}
-                                    >
-                                      <Check />
-                                    </Button>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                        <DocumentPagination
-                          total={missingRows.length}
-                          page={pendingPage}
-                          onPageChange={(page) =>
-                            setPendingPagination({ scope: pendingPageScope, page })
-                          }
-                          label="Páginas das pendências"
-                          targetRef={pendingTableRef}
-                        />
-                      </>
+                      <PendingTable
+                        rows={visibleMissingRows}
+                        total={missingRows.length}
+                        page={pendingPage}
+                        onPageChange={(page) =>
+                          setPendingPagination({ scope: pendingPageScope, page })
+                        }
+                        tableRef={pendingTableRef}
+                        now={now}
+                        readOnly={teamReadOnly}
+                        onReceive={(manifest, documentId) =>
+                          toggleDocument(manifest, documentId, true)
+                        }
+                      />
                     ) : (
                       <div className="empty-state">
                         <CheckCheck />
