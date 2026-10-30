@@ -6,7 +6,6 @@
   "scripts": {
     "dev": "node scripts/prepare-ocr-assets.mjs && vite dev",
     "build": "node scripts/prepare-ocr-assets.mjs && vite build",
-    "postbuild": "node scripts/check-gemini-backup.mjs",
     "build:dev": "node scripts/prepare-ocr-assets.mjs && vite build --mode development",
     "preview": "vite preview",
     "lint": "eslint . --max-warnings 0",

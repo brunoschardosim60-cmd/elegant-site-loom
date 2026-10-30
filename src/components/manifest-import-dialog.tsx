@@ -2,7 +2,6 @@ import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import {
   AlertCircle,
   Camera,
-  CheckCheck,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -22,23 +21,19 @@ import type { Manifest } from "@/lib/conference";
 import { reviewManifestTotals } from "@/lib/manifest-review";
 import { findImportConflicts, type ImportDraft, type ImportOutcome } from "@/lib/manifest-import";
 import type { PhotoFields } from "@/lib/photo-fields";
-import type { PhotoReadResult } from "@/lib/photo-reader";
-import { photoReaderStatus } from "@/lib/photo-reader.functions";
 import { photoFingerprint, uniquePhotoFiles } from "@/lib/photo-files";
 import { LOCAL_HEADER_NOTICE, LOCAL_ROW_NOTICE } from "@/lib/local-photo";
 
-type Verification = NonNullable<PhotoFields["verification"]>;
 type Draft = ImportDraft & {
   key: string;
   filename: string;
   file?: File;
   url?: string;
   text?: string;
-  status: "manual" | "waiting" | "reading" | "checking" | "read" | "error";
+  status: "manual" | "waiting" | "reading" | "read" | "error";
   kind?: "pre" | "dacte" | "unknown";
   message?: string;
   seconds?: number;
-  verification?: Verification | undefined;
   headerReview?: string[] | undefined;
   imageRotation?: PhotoFields["imageRotation"];
   expectedNfs?: number | undefined;
@@ -46,9 +41,7 @@ type Draft = ImportDraft & {
   totalVolumes?: number | undefined;
   edited?: boolean;
   progress?: string;
-  readingSource?: "gemini" | "local" | undefined;
-  readingFallback?: boolean | undefined;
-  aiReader?: PhotoFields["aiReader"];
+  readingSource?: "local" | undefined;
 };
 const blank = (): Draft => ({
   key: crypto.randomUUID(),
@@ -73,14 +66,8 @@ const needsReview = (item: Draft) =>
   reviewManifestTotals(item.rows, item).messages.length > 0 ||
   item.rows.some((row) => !row.ctc || !row.nf || !row.volumes || !row.client || !row.recipient) ||
   item.status === "error" ||
-  !!item.headerReview?.some(
-    (message) =>
-      message !== LOCAL_HEADER_NOTICE &&
-      !(item.readingSource === "local" && message.startsWith("Gemini:")),
-  ) ||
-  !!reviewCount(item) ||
-  item.verification?.status === "review" ||
-  (item.readingSource !== "local" && item.verification?.status === "unavailable");
+  !!item.headerReview?.some((message) => message !== LOCAL_HEADER_NOTICE) ||
+  !!reviewCount(item);
 const statusText = (item: Draft) =>
   item.status === "read"
     ? item.readingSource === "local"
@@ -92,15 +79,13 @@ const statusText = (item: Draft) =>
         : needsReview(item)
           ? "Conferir campos"
           : "Leitura concluída"
-    : item.status === "checking"
-      ? "Conferindo por IA"
-      : item.status === "error"
-        ? "Leitura interrompida"
-        : item.status === "reading"
-          ? "Lendo documento"
-          : item.status === "waiting"
-            ? "Aguardando leitura"
-            : "Cadastro manual";
+    : item.status === "error"
+      ? "Leitura interrompida"
+      : item.status === "reading"
+        ? "Lendo documento"
+        : item.status === "waiting"
+          ? "Aguardando leitura"
+          : "Cadastro manual";
 const hasManualContent = (item: Draft) =>
   item.id ||
   item.issueDate ||
@@ -134,39 +119,12 @@ export function ManifestImportDialog({
   const [preparingKey, setPreparingKey] = useState<string | null>(null);
   const [progress, setProgress] = useState("");
   const [error, setError] = useState("");
-  const [reader, setReader] = useState<"checking" | "ai" | "local">("checking");
-  const [aiAvailable, setAiAvailable] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [previewRotation, setPreviewRotation] = useState(0);
   const controller = useRef<AbortController | null>(null);
   const generation = useRef(0);
   const cancelCurrent = useRef<(() => void) | null>(null);
   const urls = useRef<string[]>([]);
-  useEffect(() => {
-    let active = true;
-    const abort = new AbortController();
-    const finish = (configured: boolean) => {
-      if (!active) return;
-      active = false;
-      window.clearTimeout(timer);
-      setAiAvailable(configured);
-      setReader(configured ? "ai" : "local");
-    };
-    // The availability check must never leave uploads disabled indefinitely.
-    // Ignore a late response so it cannot change the reader during an import.
-    const timer = window.setTimeout(() => {
-      finish(false);
-      abort.abort();
-    }, 5000);
-    void photoReaderStatus({ signal: abort.signal })
-      .then((status) => finish(status.configured))
-      .catch(() => finish(false));
-    return () => {
-      active = false;
-      window.clearTimeout(timer);
-      abort.abort();
-    };
-  }, []);
   useEffect(() => {
     if (open && !items.length) setItems([blank()]);
   }, [open, items.length]);
@@ -283,7 +241,7 @@ export function ManifestImportDialog({
     onOpenChange(value);
   }
   async function readFiles(input: FileList | File[] | null, detailed = false, replaceKey?: string) {
-    if (busy || controller.current || reader === "checking") return;
+    if (busy || controller.current) return;
     const selected = Array.from(input ?? []);
     let files = selected.filter((file) => file.type.startsWith("image/"));
     if (!files.length) {
@@ -310,10 +268,6 @@ export function ManifestImportDialog({
     setProgress(replaceKey ? "Preparando a releitura…" : "Verificando fotos repetidas…");
     const previous = items.find((item) => item.key === replaceKey);
     const recoverable = previous?.status === "read" && hasManualContent(previous);
-    const protectedAi =
-      recoverable &&
-      previous.readingSource === "gemini" &&
-      previous.rows.some((row) => /^\d{10}$/.test(row.ctc));
     const preservedMessage =
       "A nova tentativa não melhorou a leitura. Os dados anteriores foram preservados.";
     const preservePrevious = (item: Draft): Draft =>
@@ -326,9 +280,6 @@ export function ManifestImportDialog({
             ...(item.url ? { url: item.url } : {}),
             headerReview: [...new Set([...(previous.headerReview ?? []), preservedMessage])],
             message: preservedMessage,
-            verification: previous.verification
-              ? { ...previous.verification, status: "review" }
-              : undefined,
           }
         : item;
     let additions: Draft[] = [];
@@ -376,11 +327,8 @@ export function ManifestImportDialog({
           url,
           status: "waiting",
           rows: previous?.rows ?? [{ ctc: "", nf: "", volumes: "" }],
-          verification: undefined,
           headerReview: undefined,
           readingSource: undefined,
-          readingFallback: undefined,
-          aiReader: undefined,
           edited: false,
         };
         delete item.sourcePhotoHash;
@@ -403,7 +351,7 @@ export function ManifestImportDialog({
                 ? [
                     {
                       ...item,
-                      status: item.status === "checking" ? ("read" as const) : item.status,
+                      status: item.status,
                     },
                   ]
                 : recoverable
@@ -426,21 +374,16 @@ export function ManifestImportDialog({
               .filter((item) => item.status !== "manual" || hasManualContent(item)).length;
       setItems([...keep.slice(0, position), ...additions, ...keep.slice(position)]);
       setActive(position);
-      const readPrePhotos: typeof import("@/lib/photo-reader").readPhotosWithFallback =
-        reader === "ai"
-          ? (await import("@/lib/photo-reader")).readPhotosWithFallback
-          : (await import("@/lib/photo-ocr")).readPrePhotos;
+      const { readPrePhotos } = await import("@/lib/photo-ocr");
       if (!isCurrent()) return;
       await readPrePhotos(
         files,
-        (index, result: PhotoReadResult) => {
+        (index, result) => {
           if (!isCurrent()) return;
           const key = additions[index]!.key;
           if (finished.has(key)) return;
-          const pendingVerification =
-            "pendingVerification" in result && result.pendingVerification === true;
           retained.add(key);
-          if (!pendingVerification) finished.add(key);
+          finished.add(key);
           setItems((list) =>
             list.map((item) => {
               if (item.key !== key) return item;
@@ -448,20 +391,16 @@ export function ManifestImportDialog({
                 return recoverable
                   ? preservePrevious(item)
                   : { ...item, status: "error", message: result.error };
+              // A reread that finds fewer valid CTCs must not discard the earlier
+              // reading or the corrections made to it.
               const validCtcCount = result.pre.documents.length
                 ? result.pre.documents.filter((row) => /^\d{10}$/.test(row.ctc)).length
                 : result.pre.ctcs.filter((ctc) => /^\d{10}$/.test(ctc)).length;
               if (
-                protectedAi &&
-                ((result.pre.readingSource === "local" &&
-                  (result.pre.readingFallback || pendingVerification)) ||
-                  (result.pre.tableRecovery !== "bands" &&
-                    validCtcCount < previous.rows.filter((row) => /^\d{10}$/.test(row.ctc)).length))
+                recoverable &&
+                validCtcCount < previous.rows.filter((row) => /^\d{10}$/.test(row.ctc)).length
               )
-                return {
-                  ...preservePrevious(item),
-                  status: pendingVerification ? "checking" : "read",
-                };
+                return preservePrevious(item);
               return {
                 ...item,
                 id: result.pre.id || item.id,
@@ -469,19 +408,15 @@ export function ManifestImportDialog({
                 plate: result.pre.plate || item.plate,
                 driver: result.pre.driver || item.driver,
                 kind: result.pre.kind,
-                status: pendingVerification ? "checking" : "read",
+                status: "read",
                 text: result.text,
                 rows: result.pre.documents.length
                   ? result.pre.documents
                   : result.pre.ctcs.length
                     ? result.pre.ctcs.map((ctc) => ({ ctc, nf: "", volumes: "" }))
                     : [{ ctc: "", nf: "", volumes: "" }],
-                verification: result.pre.verification,
                 headerReview: result.pre.headerReview,
-                readingSource:
-                  result.pre.readingSource ?? (reader === "local" ? "local" : "gemini"),
-                readingFallback: result.pre.readingFallback,
-                aiReader: result.pre.aiReader,
+                readingSource: "local",
                 imageRotation: result.pre.imageRotation,
                 expectedNfs: result.pre.expectedNfs,
                 expectedRows: result.pre.expectedRows,
@@ -504,7 +439,7 @@ export function ManifestImportDialog({
               item.key === key
                 ? {
                     ...item,
-                    status: item.status === "checking" ? "checking" : "reading",
+                    status: "reading",
                     progress: message,
                   }
                 : item,
@@ -513,30 +448,6 @@ export function ManifestImportDialog({
         },
         abort.signal,
         detailed,
-        replaceKey && previous?.readingSource === "gemini" && needsReview(previous)
-          ? {
-              kind: previous.kind ?? "pre",
-              id: previous.id,
-              plate: previous.plate,
-              driver: previous.driver,
-              ...(previous.issueDate ? { issueDate: previous.issueDate } : {}),
-              documents: previous.rows.map((row) => ({ ...row, review: row.review ?? [] })),
-              ctcs: [...new Set(previous.rows.map((row) => row.ctc))],
-              ...(previous.aiReader ? { aiReader: previous.aiReader } : {}),
-              ...(previous.imageRotation !== undefined
-                ? { imageRotation: previous.imageRotation }
-                : {}),
-              ...(previous.expectedNfs !== undefined ? { expectedNfs: previous.expectedNfs } : {}),
-              ...(previous.expectedRows !== undefined
-                ? { expectedRows: previous.expectedRows }
-                : {}),
-              ...(previous.totalVolumes !== undefined
-                ? { totalVolumes: previous.totalVolumes }
-                : {}),
-              ...(previous.headerReview ? { headerReview: previous.headerReview } : {}),
-              readingSource: "gemini",
-            }
-          : undefined,
       );
     } catch {
       if (isCurrent())
@@ -554,17 +465,15 @@ export function ManifestImportDialog({
         setProgress("");
         setItems((list) =>
           list.map((item) =>
-            item.status === "checking"
-              ? { ...item, status: "read" }
-              : item.status === "waiting" || item.status === "reading"
-                ? recoverable && additions.some((addition) => addition.key === item.key)
-                  ? preservePrevious(item)
-                  : {
-                      ...item,
-                      status: "error",
-                      message: "Leitura interrompida. Tente ler esta foto novamente.",
-                    }
-                : item,
+            item.status === "waiting" || item.status === "reading"
+              ? recoverable && additions.some((addition) => addition.key === item.key)
+                ? preservePrevious(item)
+                : {
+                    ...item,
+                    status: "error",
+                    message: "Leitura interrompida. Tente ler esta foto novamente.",
+                  }
+              : item,
           ),
         );
       }
@@ -608,8 +517,7 @@ export function ManifestImportDialog({
     if (!remaining.length) closeDialog(false);
   }
   const waiting = draft?.status === "waiting" || draft?.status === "reading";
-  const checking = draft?.status === "checking";
-  const fieldsDisabled = waiting || checking || draft?.key === preparingKey;
+  const fieldsDisabled = waiting || draft?.key === preparingKey;
   const filled =
     draft?.rows.filter(
       (row) => row.ctc && row.nf && Number(row.volumes) > 0 && row.client && row.recipient,
@@ -620,26 +528,9 @@ export function ManifestImportDialog({
   ).length;
   const detected = items.reduce((sum, item) => sum + documentCount(item), 0);
   const volumes = items.reduce((sum, item) => sum + volumeCount(item), 0);
-  const locked = busy || reader === "checking";
-  const verifiedTitle =
-    draft?.kind === "dacte" ? "Números conferidos" : "Cabeçalho e números conferidos";
-  const verifiedDescription = `A conferência adicional confirmou ${draft?.verification?.checkedFields ?? 0} campos: ${draft?.kind === "dacte" ? "CTC, NF e volumes" : "pré, placa, motorista, CTC, NF e volumes"}. Confira os nomes dos clientes e destinatários.`;
-  const verificationPassed =
-    !draft?.edited &&
-    (draft?.verification?.status === "matched" ||
-      (draft?.verification?.status === "single" &&
-        !draft.headerReview?.length &&
-        !draft.rows.some((row) => row.review?.length)));
+  const locked = busy;
   const headerMessages =
-    draft?.headerReview?.filter(
-      (message) =>
-        draft.readingSource !== "local" ||
-        (message !== LOCAL_HEADER_NOTICE && !message.startsWith("Gemini:")),
-    ) ?? [];
-  const providerMessages =
-    draft?.readingSource === "local"
-      ? (draft.headerReview?.filter((message) => message.startsWith("Gemini:")) ?? [])
-      : [];
+    draft?.headerReview?.filter((message) => message !== LOCAL_HEADER_NOTICE) ?? [];
   const ctcTotalMismatch = !!draft?.expectedRows && draft.expectedRows !== documentCount(draft);
   const nfCount = draft ? reviewManifestTotals(draft.rows, draft).nfs : 0;
   const nfTotalMismatch = !!draft?.expectedNfs && draft.expectedNfs !== nfCount;
@@ -727,39 +618,16 @@ export function ManifestImportDialog({
           </div>
           <div className="import-reader-settings">
             <span className="import-reader-badge">
-              <span className={reader === "checking" ? "import-dot checking" : "import-dot"} />
-              {reader === "ai"
-                ? "IA + reserva local"
-                : reader === "checking"
-                  ? "Preparando leitor…"
-                  : "Leitura local"}
+              <span className="import-dot" />
+              Leitura local
             </span>
             <details>
-              <summary>Opções de leitura</summary>
+              <summary>Sobre a leitura</summary>
               <div className="import-reader-options">
-                <label className="form-field">
-                  Leitor
-                  <select
-                    aria-label="Leitor de fotos"
-                    disabled={locked}
-                    value={reader}
-                    onChange={(e) => setReader(e.target.value as "ai" | "local")}
-                  >
-                    <option value="checking" disabled>
-                      Verificando leitor…
-                    </option>
-                    <option value="ai" disabled={!aiAvailable}>
-                      IA + reserva local{!aiAvailable && " (indisponível)"}
-                    </option>
-                    <option value="local">Leitura no navegador</option>
-                  </select>
-                </label>
                 <p>
-                  {reader === "ai"
-                    ? "O Gemini lê a foto; se ele falhar, o leitor no navegador assume. Buscamos concluir cada foto em até 15 segundos. Fotos difíceis podem levar mais tempo; a leitura continua e você pode usar Parar. Fotos repetidas são ignoradas. Confira os campos sinalizados antes de cadastrar."
-                    : reader === "checking"
-                      ? "Verificando disponibilidade da IA…"
-                      : "Campos vazios ou incertos ficam sinalizados individualmente. Revise os dados antes de cadastrar, com atenção aos campos sinalizados."}
+                  As fotos são lidas no próprio navegador e não são enviadas a nenhum serviço
+                  externo. Campos vazios ou incertos ficam sinalizados individualmente; revise os
+                  dados antes de cadastrar.
                 </p>
               </div>
             </details>
@@ -863,7 +731,7 @@ export function ManifestImportDialog({
                     >
                       {conflictIndices.has(index) ? (
                         <AlertCircle />
-                      ) : item.status === "reading" || item.status === "checking" ? (
+                      ) : item.status === "reading" ? (
                         <Loader2 className="animate-spin" />
                       ) : item.status === "error" ? (
                         <AlertCircle />
@@ -872,10 +740,10 @@ export function ManifestImportDialog({
                       ) : null}
                       {conflictIndices.has(index) ? "Cadastro duplicado" : statusText(item)}
                     </span>
-                    {(item.status === "reading" || item.status === "checking") && item.progress && (
+                    {item.status === "reading" && item.progress && (
                       <span className="import-queue-progress">{item.progress}</span>
                     )}
-                    {(item.status === "read" || item.status === "checking") && (
+                    {item.status === "read" && (
                       <span className="import-queue-numbers">
                         {documentCount(item)} CTCs · {volumeCount(item)} volumes
                       </span>
@@ -968,89 +836,28 @@ export function ManifestImportDialog({
                 >
                   <AlertCircle size={19} />
                   <div>
-                    <strong>
-                      {checking
-                        ? "Leitura local · conferindo por IA"
-                        : draft.readingFallback
-                          ? "Leitura local de reserva"
-                          : "Leitura local"}
-                    </strong>
+                    <strong>Leitura local</strong>
                     <p>
-                      {checking
-                        ? "Os campos locais já estão preenchidos. A IA está conferindo a foto; aguarde a conclusão ou pare para revisar a leitura local."
-                        : "Leitura feita no navegador, sem conferência independente por IA. Revise os dados antes de cadastrar; campos incertos estão sinalizados."}
+                      Leitura feita no navegador. Revise os dados antes de cadastrar; campos
+                      incertos estão sinalizados.
                     </p>
                     {headerMessages.map((message) => (
                       <p key={message}>{message}</p>
                     ))}
-                    {!!providerMessages.length && (
-                      <details className="import-provider-details">
-                        <summary>Por que a IA não conferiu</summary>
-                        {providerMessages.map((message) => (
-                          <p key={message}>{message}</p>
-                        ))}
-                      </details>
-                    )}
                   </div>
                 </div>
               ) : (
-                <>
-                  {draft.verification && (
-                    <div
-                      className={`import-alert ${verificationPassed ? "verified" : "warning"}`}
-                      role="status"
-                    >
-                      {verificationPassed ? (
-                        draft.verification.status === "matched" ? (
-                          <CheckCheck size={19} />
-                        ) : (
-                          <CheckCircle2 size={19} />
-                        )
-                      ) : (
-                        <AlertCircle size={19} />
-                      )}
-                      <div>
-                        <strong>
-                          {draft.edited
-                            ? "Dados ajustados manualmente"
-                            : draft.verification.status === "single"
-                              ? "Leitura por IA concluída"
-                              : draft.verification.status === "matched"
-                                ? verifiedTitle
-                                : draft.verification.status === "review"
-                                  ? draft.verification.conflicts > 0
-                                    ? "As leituras encontraram diferenças"
-                                    : "Há campos para conferir"
-                                  : "Leitura sem conferência independente"}
-                        </strong>
-                        <p>
-                          {draft.edited
-                            ? "A validação automática corresponde à leitura original. Confira também os campos que você alterou."
-                            : draft.verification.status === "single"
-                              ? "A IA leu a foto uma vez. O formato dos campos e os totais disponíveis foram validados automaticamente. Revise os dados antes de cadastrar."
-                              : draft.verification.status === "matched"
-                                ? verifiedDescription
-                                : draft.verification.status === "review"
-                                  ? draft.verification.conflicts > 0
-                                    ? `${draft.verification.conflicts} divergência(s). Confira os campos sinalizados na foto.`
-                                    : "Confira os avisos e os campos sinalizados na foto."
-                                  : "Os dados foram extraídos sem conferência independente. Revise os campos antes de cadastrar."}
-                        </p>
-                      </div>
+                !!headerMessages.length && (
+                  <div className="import-alert warning" role="status">
+                    <AlertCircle size={18} />
+                    <div>
+                      <strong>Conferir os dados do pré</strong>
+                      {headerMessages.map((message) => (
+                        <p key={message}>{message}</p>
+                      ))}
                     </div>
-                  )}
-                  {!!headerMessages.length && (
-                    <div className="import-alert warning" role="status">
-                      <AlertCircle size={18} />
-                      <div>
-                        <strong>Conferir os dados do pré</strong>
-                        {headerMessages.map((message) => (
-                          <p key={message}>{message}</p>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </>
+                  </div>
+                )
               )}
               <div className={`import-review-columns ${draft.url ? "with-photo" : ""}`}>
                 <section className="import-details-panel">
@@ -1142,7 +949,7 @@ export function ManifestImportDialog({
                       estiver legível, deixe em branco.
                     </p>
                   )}
-                  {(draft.status === "read" || checking) && (
+                  {draft.status === "read" && (
                     <div
                       className="import-document-totals"
                       role="group"
@@ -1266,11 +1073,6 @@ export function ManifestImportDialog({
                 </div>
               ) : (
                 <>
-                  {draft.readingSource === "gemini" && draft.aiReader === "lite" && (
-                    <p className="text-xs text-muted-foreground" role="status">
-                      Conferência por Flash Lite
-                    </p>
-                  )}
                   <ManifestDocumentsEditor
                     rows={draft.rows}
                     onChange={(rows) => update({ rows })}
@@ -1306,9 +1108,7 @@ export function ManifestImportDialog({
                     <ScanLine size={15} />
                     {draft.status === "error"
                       ? "Tentar ler novamente"
-                      : needsReview(draft) && draft.readingSource === "gemini"
-                        ? "Reler campos sinalizados"
-                        : "Reler detalhes desta foto"}
+                      : "Reler detalhes desta foto"}
                   </Button>
                   {draft.text && (
                     <details className="import-raw-text">

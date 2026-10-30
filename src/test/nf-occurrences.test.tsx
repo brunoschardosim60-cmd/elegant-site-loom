@@ -7,9 +7,6 @@ import { conferenceStateSchema } from "@/lib/conference-state";
 import { applyManifestEdit } from "@/lib/manifest-edit";
 import { ConferenceWorkspace } from "@/components/conference-workspace";
 import { NfOccurrences } from "@/components/nf-occurrences";
-vi.mock("@/lib/photo-reader.functions", () => ({
-  photoReaderStatus: async () => ({ configured: false }),
-}));
 afterEach(cleanup);
 it("renders hostile imported occurrence descriptions as plain text without creating executable markup", () => {
   const attack = '<img src=x onerror="alert(1)"><script>alert(1)</script>';

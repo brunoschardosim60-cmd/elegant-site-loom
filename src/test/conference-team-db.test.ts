@@ -14,7 +14,6 @@ type RpcResults = {
   invite_conference_member: ConferenceTeam;
   cancel_conference_invite: ConferenceTeam;
   get_conference_audit: AuditEntry[];
-  conference_reader_owner: string | null;
   save_conference: number;
   save_team_conference: { revision: number; data: ConferenceState };
 };
@@ -167,7 +166,6 @@ it("preserves the owner records and shares only with invited confirmed accounts,
   );
   await as(3);
   expect((await call("get_conference_team", [true])).teamId).toBe(teamId);
-  expect(await call("conference_reader_owner")).toBe("person1@example.com");
   await as(6);
   const fourth = await call("get_conference_team", [true]);
   expect(fourth.teamId).toBe(teamId);
@@ -175,7 +173,6 @@ it("preserves the owner records and shares only with invited confirmed accounts,
   await as(4);
   expect((await call("get_conference_team")).teamId).not.toBe(teamId);
   expect((await call("get_conference_team")).data.manifests).toEqual([]);
-  expect(await call("conference_reader_owner")).toBe("person4@example.com");
   await as(5);
   await expect(call("get_conference_team")).rejects.toThrow("Confirme");
 });

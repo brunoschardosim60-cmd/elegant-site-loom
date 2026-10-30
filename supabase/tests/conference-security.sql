@@ -34,7 +34,6 @@ select public.get_conference_team(true);
 select public.save_team_conference('{"manifests":[],"activity":[],"issues":[]}',
  '{"manifests":[{"id":"DI00123456789","driver":"Fixture","plate":"ABC1234","date":"2026-10-13","documents":[{"id":"fixture-doc","ctc":"0000000001","nf":"123-1","volumes":1,"received":false}]}],"activity":[],"issues":[]}');
 do $$ begin
-  if public.conference_reader_owner()<>'confere-owner@example.invalid' then raise exception 'Wrong team owner'; end if;
   begin
     perform public.save_conference(1,'{}'); raise exception 'Legacy shared write allowed';
   exception when others then if sqlerrm<>'CONFERENCE_TEAM_RELOAD' then raise; end if; end;
@@ -53,7 +52,6 @@ do $$ begin
   begin perform * from public.conference_states; raise exception 'Anonymous read'; exception when insufficient_privilege then null; end;
   begin perform public.get_conference_team(false); raise exception 'Anonymous team'; exception when insufficient_privilege then null; end;
   begin perform public.get_conference_audit(); raise exception 'Anonymous audit'; exception when insufficient_privilege then null; end;
-  begin perform public.conference_reader_owner(); raise exception 'Anonymous reader lookup'; exception when insufficient_privilege then null; end;
 end $$;
 reset role;
 select 'PASS: team membership, shared saves, account isolation, immutable audit, stale/legacy writes and anonymous access' as security_tests;

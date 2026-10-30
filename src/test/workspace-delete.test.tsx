@@ -4,9 +4,6 @@ import { ConferenceWorkspace } from "@/components/conference-workspace";
 import type { ConferenceState } from "@/lib/conference-state";
 import { applyImports, findImportConflicts, type ImportDraft } from "@/lib/manifest-import";
 
-vi.mock("@/lib/photo-reader.functions", () => ({
-  photoReaderStatus: async () => ({ configured: false }),
-}));
 afterEach(cleanup);
 
 function fixture(): ConferenceState {

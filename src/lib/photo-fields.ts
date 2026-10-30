@@ -25,11 +25,8 @@ export type PhotoFields = ReturnType<typeof parsePreText> & {
   totalVolumes?: number;
   headerReview?: string[];
   issueDate?: string;
-  readingSource?: "gemini" | "local";
+  readingSource?: "local";
   imageRotation?: 0 | 90 | 180 | 270;
-  tableRecovery?: "bands";
-  aiReader?: "normal" | "lite";
-  readingFallback?: boolean;
   verification?: {
     status: "single" | "matched" | "review" | "unavailable";
     checkedFields: number;
