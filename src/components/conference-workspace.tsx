@@ -60,6 +60,7 @@ import { NfOccurrences } from "./nf-occurrences";
 import { planOccurrenceUpdates } from "@/lib/nf-occurrences";
 import { documentPageSize } from "./document-pagination";
 import { PendingTable } from "./pending-table";
+import { ScanForm } from "./scan-form";
 import { applyDemandImports } from "@/lib/shared-demand-import";
 import { applyImports, type ImportDraft, type ImportOutcome } from "@/lib/manifest-import";
 import type { ConferenceState } from "@/lib/conference-state";
@@ -166,7 +167,7 @@ export function ConferenceWorkspace({
     setTrackingStatus("all");
     searchInput.current?.focus({ preventScroll: true });
   }
-  const [code, setCode] = useState("");
+  const [scanClear, setScanClear] = useState(0);
   const scanner = useRef<HTMLInputElement>(null);
   const [activity, setActivity] = useState(initialState?.activity ?? initialActivity);
   const [issues, setIssues] = useState<Activity[]>(initialState?.issues ?? []);
@@ -230,7 +231,7 @@ export function ConferenceWorkspace({
     setFocusedManifest(null);
     setFilter("all");
     setTrackingStatus("all");
-    setCode("");
+    setScanClear((n) => n + 1);
     setReceiptReview(null);
     setReceiptReviewUpdated(false);
   }, [scope]);
@@ -304,11 +305,11 @@ export function ConferenceWorkspace({
     setNotices((items) => [...items.slice(-2), { id, text, warning }]);
     window.setTimeout(() => setNotices((items) => items.filter((item) => item.id !== id)), 4000);
   }
-  function scan(event: FormEvent) {
-    event.preventDefault();
-    if (teamReadOnly) return;
+  /** Handles a submitted code; returns false when the scanner is not accepting input. */
+  function scan(input: string): boolean {
+    if (teamReadOnly) return false;
     if (
-      !code.trim() ||
+      !input ||
       blocked ||
       newOpen ||
       sheetOpen ||
@@ -316,10 +317,12 @@ export function ConferenceWorkspace({
       editingManifest ||
       pendingDeleteId.current
     )
-      return;
-    const input = code.trim();
-    setCode("");
+      return false;
     scanner.current?.focus({ preventScroll: true });
+    handleScan(input);
+    return true;
+  }
+  function handleScan(input: string) {
     if (/^DI/i.test(input)) {
       const manifest = current.current.find(
         (item) => item.id.toUpperCase() === input.toUpperCase(),
@@ -536,7 +539,7 @@ export function ConferenceWorkspace({
     update(current.current.filter((item) => item.id !== manifestId));
     setFocusedManifest((focused) => (focused?.id === manifestId ? null : focused));
     setQuery((value) => (value.trim().toUpperCase() === manifestId.toUpperCase() ? "" : value));
-    setCode("");
+    setScanClear((n) => n + 1);
     log(
       "Pré-manifesto excluído",
       `${manifest.id} · ${manifest.driver} · ${manifest.documents.length} CTC(s)`,
@@ -913,41 +916,19 @@ export function ConferenceWorkspace({
                     Aguardando CTC
                   </p>
                 </div>
-                <form className="scan-form" onSubmit={scan}>
-                  <Barcode />
-                  <input
-                    ref={scanner}
-                    aria-label="Código do CTC"
-                    className="scan-input"
-                    placeholder="Bipe ou digite o código do CTC…"
-                    value={code}
-                    onChange={(event) => setCode(event.target.value)}
-                    autoComplete="off"
-                    disabled={
-                      !!blocked ||
-                      newOpen ||
-                      sheetOpen ||
-                      !!receiptReview ||
-                      !!deleteId ||
-                      !!editingManifest
-                    }
-                  />
-                  <Button
-                    type="submit"
-                    size="sm"
-                    disabled={
-                      !code.trim() ||
-                      !!blocked ||
-                      newOpen ||
-                      sheetOpen ||
-                      !!receiptReview ||
-                      !!deleteId ||
-                      !!editingManifest
-                    }
-                  >
-                    Conferir <ArrowRight size={13} />
-                  </Button>
-                </form>
+                <ScanForm
+                  inputRef={scanner}
+                  clearSignal={scanClear}
+                  onScan={scan}
+                  disabled={
+                    !!blocked ||
+                    newOpen ||
+                    sheetOpen ||
+                    !!receiptReview ||
+                    !!deleteId ||
+                    !!editingManifest
+                  }
+                />
               </section>
             )}
             <div className={`content-grid ${view === "tracking" ? "content-grid-tracking" : ""}`}>
