@@ -136,7 +136,21 @@ export type TeamSyncView = {
   error: string;
   conflict: boolean;
   pending: boolean;
+  /** A transient network failure is being retried automatically. */
+  reconnecting?: boolean;
 };
+
+/** Automatic attempts (5, 10, 20 s apart) before a network failure is shown as an error. */
+export const TRANSIENT_RETRIES = 3;
+/** Network-level failures that a later identical request can fix. Never business errors. */
+export function isTransientFailure(message: string) {
+  return (
+    !/CONFERENCE_|Equipe não autorizada|Authentication required/.test(message) &&
+    /failed to fetch|networkerror|network request failed|load failed|fetch failed|abort|timed? ?out|econn|enotfound|socket|502|503|504|bad gateway|service unavailable|gateway time|jwt expired|PGRST301/i.test(
+      message,
+    )
+  );
+}
 export class TeamSync {
   private base: ConferenceState;
   private local: ConferenceState;
@@ -146,6 +160,9 @@ export class TeamSync {
   private collision = false;
   private refreshRetryAt = 0;
   private refreshFailures = 0;
+  private reconnecting = false;
+  private saveFailures = 0;
+  private saveRetry: ReturnType<typeof setTimeout> | undefined;
   // The v2 RPC settles archived manifests a stale device still holds; databases
   // without the archive migration only have the original RPC.
   private saveRpc = "save_team_conference_v2";
@@ -166,12 +183,17 @@ export class TeamSync {
           ? this.pending()
             ? "Alterações ainda não salvas"
             : "Sincronização interrompida"
-          : this.busy && this.pending()
-            ? "Salvando…"
-            : "Todos os dados salvos",
+          : this.reconnecting
+            ? this.pending()
+              ? "Sem conexão · as alterações serão salvas ao reconectar"
+              : "Sem conexão · tentando novamente…"
+            : this.busy && this.pending()
+              ? "Salvando…"
+              : "Todos os dados salvos",
         error: this.failure,
         conflict: this.collision,
         pending: this.pending(),
+        reconnecting: this.reconnecting && !this.failure,
       });
   }
   pending() {
@@ -179,6 +201,7 @@ export class TeamSync {
   }
   stop() {
     this.stopped = true;
+    if (this.saveRetry) clearTimeout(this.saveRetry);
   }
   change(state: ConferenceState) {
     if (this.stopped) return;
@@ -191,12 +214,35 @@ export class TeamSync {
     this.collision = false;
     this.refreshRetryAt = 0;
     this.refreshFailures = 0;
+    this.saveFailures = 0;
+    this.reconnecting = false;
     this.emit();
     if (this.pending()) void this.flush();
     else void this.refresh();
   }
   private fail(error: unknown, refreshing = false) {
     const message = String((error as { message?: string })?.message ?? error);
+    // A dropped connection, a timeout or a restarting server is retried quietly:
+    // reads are harmless, and the save RPC merges a repeated save safely.
+    if (isTransientFailure(message)) {
+      const attempt = refreshing ? this.refreshFailures++ : this.saveFailures++;
+      const delay = 5000 * 2 ** Math.min(attempt, 3);
+      if (attempt < TRANSIENT_RETRIES) {
+        this.collision = false;
+        this.failure = "";
+        this.reconnecting = true;
+        if (refreshing) this.refreshRetryAt = Date.now() + delay;
+        else {
+          if (this.saveRetry) clearTimeout(this.saveRetry);
+          this.saveRetry = setTimeout(() => {
+            this.saveRetry = undefined;
+            void this.flush();
+          }, delay);
+        }
+        return;
+      }
+    }
+    this.reconnecting = false;
     this.collision = /CONFERENCE_CONFLICT|CONFERENCE_DUPLICATE|CONFERENCE_TEAM_CHANGED/.test(
       message,
     );
@@ -214,7 +260,7 @@ export class TeamSync {
           ? "Outra pessoa já cadastrou esse pré, CTC ou foto. Nenhuma duplicata foi salva. Gere o PDF se precisar guardar as alterações locais e recarregue os dados."
           : this.collision
             ? "O mesmo campo foi alterado por outra pessoa ou o registro foi excluído. Gere o PDF para guardar as alterações locais antes de recarregar."
-            : "Não foi possível sincronizar. Mantenha esta página aberta e tente novamente.";
+            : "Sem conexão com o banco há mais de 30 segundos. Mantenha esta página aberta: as alterações continuam na tela e serão enviadas ao tentar novamente.";
   }
   async flush() {
     if (this.stopped || this.busy || this.failure || !this.pending()) return;
@@ -236,6 +282,8 @@ export class TeamSync {
         this.local = mergeConference(sent, this.local, committed.data);
         this.base = committed.data;
         this.team = { ...this.team, ...committed };
+        this.saveFailures = 0;
+        this.reconnecting = false;
         this.emit();
       }
     } catch (error) {
@@ -250,7 +298,8 @@ export class TeamSync {
       this.stopped ||
       this.busy ||
       (this.failure &&
-        (this.collision || !this.refreshRetryAt || (!force && Date.now() < this.refreshRetryAt)))
+        (this.collision || !this.refreshRetryAt || (!force && Date.now() < this.refreshRetryAt))) ||
+      (this.reconnecting && !force && Date.now() < this.refreshRetryAt)
     )
       return;
     this.busy = true;
@@ -288,10 +337,12 @@ export class TeamSync {
         this.collision = false;
         this.refreshRetryAt = 0;
         this.refreshFailures = 0;
+        this.reconnecting = false;
       }
       this.busy = false;
       this.emit();
-      if (!this.failure) void this.flush();
+      // Retry pending saves only once the database answered again.
+      if (succeeded && !this.failure) void this.flush();
     }
   }
 }

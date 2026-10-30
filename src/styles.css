@@ -816,6 +816,7 @@ h1 { font-size: 22px; }
 .account-sync-saved { color:var(--success); }
 .account-sync-pending { color:var(--primary); }
 .account-sync-error { color:var(--destructive); }
+.account-sync-reconnecting { color:var(--warning); }
 .account-save-error { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:10px 12px; border:1px solid #c4c0f3; border-radius:8px; background:#fff5f4; color:var(--destructive); }
 .account-save-error > svg { flex-shrink:0; }
 .account-save-error p { flex:1; min-width:180px; }

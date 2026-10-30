@@ -38,6 +38,8 @@ type Props = {
   pending: boolean;
   error: string;
   conflict: boolean;
+  /** A dropped connection is being retried automatically; not an error. */
+  reconnecting?: boolean;
   invitation?: boolean;
   teamView?: boolean;
   signingOut?: boolean;
@@ -54,6 +56,7 @@ export function AccountStatusBar({
   pending,
   error,
   conflict,
+  reconnecting = false,
   invitation,
   teamView = false,
   signingOut = false,
@@ -70,11 +73,11 @@ export function AccountStatusBar({
         <span
           role={error ? undefined : "status"}
           aria-live={error ? "off" : "polite"}
-          className={`account-sync-status ${error ? "account-sync-error" : pending ? "account-sync-pending" : "account-sync-saved"}`}
+          className={`account-sync-status ${error ? "account-sync-error" : reconnecting ? "account-sync-reconnecting" : pending ? "account-sync-pending" : "account-sync-saved"}`}
         >
           {error ? (
             <AlertCircle aria-hidden="true" size={14} />
-          ) : pending ? (
+          ) : pending || reconnecting ? (
             <Loader2 aria-hidden="true" size={14} className="animate-spin" />
           ) : (
             <CheckCircle2 aria-hidden="true" size={14} />

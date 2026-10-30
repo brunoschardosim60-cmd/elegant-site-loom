@@ -6,7 +6,7 @@ import { getSupabaseClient } from "@/lib/supabase-client";
 import type { ConferenceState } from "@/lib/conference-state";
 import { AccountPanel, Login, PasswordReset } from "./account-auth";
 import { passwordRecoveryLocation, setPasswordRecoveryMarker } from "@/lib/password-recovery";
-import { TeamSync, teamSchema, type TeamSyncView } from "@/lib/conference-team";
+import { isTransientFailure, TeamSync, teamSchema, type TeamSyncView } from "@/lib/conference-team";
 import { TeamPanel } from "./team-panel";
 import { teamRequest } from "@/lib/team-request";
 import type { WorkspaceScope } from "@/lib/conference-ownership";
@@ -184,7 +184,25 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
   );
   useEffect(() => {
     let active = true;
-    Promise.resolve(teamRequest(client, "get_conference_team", { accept_invitation: false }))
+    // A cold server or a brief network drop must not greet the user with an error:
+    // retry transient failures twice (2 s, then 5 s) before showing one.
+    const load = async (): Promise<{ data: unknown; error: { message?: string } | null }> => {
+      for (const wait of [2000, 5000, 0]) {
+        try {
+          const result = await teamRequest(client, "get_conference_team", {
+            accept_invitation: false,
+          });
+          if (!result.error || !wait || !isTransientFailure(result.error.message ?? ""))
+            return result;
+        } catch (error) {
+          if (!wait || !isTransientFailure(String((error as Error)?.message ?? error))) throw error;
+        }
+        await new Promise((done) => setTimeout(done, wait));
+        if (!active) break;
+      }
+      return { data: null, error: { message: "cancelled" } };
+    };
+    load()
       .then(({ data, error }) => {
         if (!active) return;
         if (error) {
@@ -298,6 +316,7 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
           pending={view.pending}
           error={view.error}
           conflict={view.conflict}
+          reconnecting={view.reconnecting === true}
           invitation={!!view.team.invitation}
           teamView={scope === "team"}
           onTeam={() => {

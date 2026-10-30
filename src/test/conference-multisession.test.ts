@@ -51,7 +51,8 @@ async function rpc(user: number, name: string, args: Record<string, unknown> = {
       })
     ).json();
   } catch {
-    return { data: null, error: { message: "network" } };
+    // Same shape supabase-js returns when fetch itself fails.
+    return { data: null, error: { message: "TypeError: fetch failed" } };
   }
 }
 beforeAll(async () => {
@@ -483,8 +484,11 @@ it("retries a lost response after commit without duplicate audit or undoing anot
   loseResponseFor = 1;
   sessions[0]!.change(receive(views[0]!.state, 0));
   sessions[1]!.change(receive(views[1]!.state, 1));
-  await vi.waitFor(() => expect(views[0]!.error).toContain("Não foi possível sincronizar"));
+  // A lost response is a transport failure: retried quietly, never shown in red.
+  await vi.waitFor(() => expect(views[0]!.reconnecting).toBe(true));
+  expect(views[0]!.error).toBe("");
   await vi.waitFor(() => expect(views[1]!.pending).toBe(false));
+  // Retry now instead of waiting for the automatic 5 s back-off.
   sessions[0]!.retry();
   await settle(sessions, views);
   expect(
