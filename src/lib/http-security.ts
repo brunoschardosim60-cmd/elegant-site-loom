@@ -66,6 +66,8 @@ export function securityHeaders(
   // Internal system: search engines must not index any response.
   headers.set("X-Robots-Tag", "noindex, nofollow");
   if (production) {
+    // Browsers that saw the site once refuse plain HTTP for two years.
+    headers.set("Strict-Transport-Security", "max-age=63072000; includeSubDomains");
     const supabase = new URL(databaseUrl);
     const csp = [
       "default-src 'self'",
