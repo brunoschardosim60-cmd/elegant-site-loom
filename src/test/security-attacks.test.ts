@@ -267,23 +267,15 @@ it("keeps SQL metacharacters in imported names as data without executing them", 
   expect(saved.data.manifests[0]!.driver).toBe(driver);
   expect((await rpc("get_conference_team")).data.manifests).toHaveLength(1);
 });
-it("shares an atomic photo budget across requests, denies counter tampering and renews only after the window expires", async () => {
+it("no longer exposes the removed server-side photo AI entry points", async () => {
   await login(1);
-  for (let n = 0; n < 80; n++) expect(await rpc("consume_conference_reader_quota")).toBe(true);
-  expect(await rpc("consume_conference_reader_quota")).toBe(false);
-  await expect(attack("update public.conference_reader_limits set requests=1")).rejects.toThrow(
-    "permission denied",
-  );
-  await login(2);
-  await rpc("get_conference_team", [true]);
-  expect(await rpc("consume_conference_reader_quota")).toBe(true);
+  await expect(rpc("consume_conference_reader_quota")).rejects.toThrow();
+  await expect(rpc("conference_reader_owner")).rejects.toThrow();
   await login(1, "postgres");
-  await db.query(
-    "update public.conference_reader_limits set window_started=now()-interval '11 minutes' where user_id=$1",
-    [uid(1)],
+  const leftovers = await db.query(
+    "select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('consume_conference_reader_quota','conference_reader_owner') union all select 1 from pg_tables where schemaname='public' and tablename='conference_reader_limits'",
   );
-  await login(1);
-  expect(await rpc("consume_conference_reader_quota")).toBe(true);
+  expect(leftovers.rows).toHaveLength(0);
 });
 it("reproduces canceled-invitation acceptance in the former code and blocks the same lock-wait interleaving after the fix", async () => {
   await login(1, "postgres");

@@ -1,9 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { ConferenceWorkspace } from "@/components/conference-workspace";
-vi.mock("@/lib/photo-reader.functions", () => ({
-  photoReaderStatus: vi.fn(async () => ({ configured: false })),
-}));
 afterEach(cleanup);
 it("discards an unsaved import when closed and opens a blank form", async () => {
   render(<ConferenceWorkspace />);

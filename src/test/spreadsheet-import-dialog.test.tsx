@@ -48,7 +48,8 @@ it("reveals a new import error once without pulling the screen on team updates",
     const mounted = render(<SpreadsheetImportDialog {...props} manifests={[]} />);
     upload();
     expect(await screen.findByRole("alert")).toHaveTextContent("Arquivo inválido");
-    expect(scroll).toHaveBeenCalledTimes(1);
+    // The scroll runs in a passive effect, which React may flush after the alert paints.
+    await waitFor(() => expect(scroll).toHaveBeenCalledTimes(1));
     expect(scroll).toHaveBeenCalledWith({ block: "nearest" });
     mounted.rerender(<SpreadsheetImportDialog {...props} manifests={[]} />);
     expect(scroll).toHaveBeenCalledTimes(1);

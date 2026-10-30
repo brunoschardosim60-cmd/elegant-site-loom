@@ -14,9 +14,6 @@ vi.mock("@/lib/supabase-client", () => ({
     rpc: mocks.rpc,
   }),
 }));
-vi.mock("@/lib/photo-reader.functions", () => ({
-  photoReaderStatus: async () => ({ configured: true }),
-}));
 const saved = {
   manifests: [
     {

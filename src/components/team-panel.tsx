@@ -95,28 +95,6 @@ export function TeamPanel({
       setBusy(false);
     }
   }
-  const [providerChecks, setProviderChecks] = useState<
-    { key: string; model: string; status: string }[]
-  >([]);
-  async function testProviders() {
-    if (busy) return;
-    setBusy(true);
-    setMessage("");
-    try {
-      const {
-        data: { session },
-      } = await client.auth.getSession();
-      if (!session) throw new Error("session");
-      const { checkPhotoProviders } = await import("@/lib/provider-health.functions");
-      const result = await checkPhotoProviders({ data: { accessToken: session.access_token } });
-      setProviderChecks(result.checks);
-      setMessage(result.error || "Teste concluído. A cota pode mudar durante o dia.");
-    } catch {
-      setMessage("Não foi possível concluir o diagnóstico. Tente novamente mais tarde.");
-    } finally {
-      setBusy(false);
-    }
-  }
   useEffect(() => {
     if (open) {
       setMessage("");
@@ -395,32 +373,6 @@ export function TeamPanel({
               </Button>
             )}
           </div>
-        )}
-        {team.owner && tab === "members" && (
-          <details className="text-xs text-muted-foreground">
-            <summary className="cursor-pointer">Diagnóstico do leitor</summary>
-            <p className="my-2">
-              Testa as chaves configuradas no servidor, sem enviar fotos ou cadastrar dados. Consome
-              uma solicitação pequena por modelo e chave.
-            </p>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={busy}
-              onClick={() => void testProviders()}
-            >
-              {busy ? "Testando…" : "Testar disponibilidade da IA"}
-            </Button>
-            {providerChecks.length > 0 && (
-              <ul className="mt-2 grid gap-1">
-                {providerChecks.map((check) => (
-                  <li key={`${check.key}-${check.model}`}>
-                    {check.key} · {check.model}: <strong>{check.status}</strong>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </details>
         )}
         {message && (
           <p role="status" className="text-xs">

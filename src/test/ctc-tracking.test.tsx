@@ -6,9 +6,6 @@ import { conferenceTimestamp, selectTrackingRows } from "@/lib/ctc-tracking";
 import type { ConferenceState } from "@/lib/conference-state";
 
 const mocks = vi.hoisted(() => ({ pdf: vi.fn() }));
-vi.mock("@/lib/photo-reader.functions", () => ({
-  photoReaderStatus: async () => ({ configured: false }),
-}));
 vi.mock("@/lib/conference-pdf", () => ({ exportConferencePdf: mocks.pdf }));
 afterEach(() => {
   cleanup();
