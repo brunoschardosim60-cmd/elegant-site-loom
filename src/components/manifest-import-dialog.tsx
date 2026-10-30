@@ -23,6 +23,8 @@ import { findImportConflicts, type ImportDraft, type ImportOutcome } from "@/lib
 import type { PhotoFields } from "@/lib/photo-fields";
 import { photoFingerprint, uniquePhotoFiles } from "@/lib/photo-files";
 import { LOCAL_HEADER_NOTICE, LOCAL_ROW_NOTICE } from "@/lib/local-photo";
+import type { FindArchived } from "@/lib/conference-archive";
+import { useArchivedManifests } from "@/hooks/use-archived-manifests";
 
 type Draft = ImportDraft & {
   key: string;
@@ -102,8 +104,10 @@ export function ManifestImportDialog({
   manifests,
   onCreate,
   initialId,
+  findArchived,
 }: {
   initialId?: string;
+  findArchived?: FindArchived | undefined;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   manifests: Manifest[];
@@ -148,7 +152,9 @@ export function ManifestImportDialog({
     [],
   );
   const draft = items[active];
-  const conflicts = findImportConflicts(manifests, items);
+  const archived = useArchivedManifests(findArchived, items);
+  const conflictSources = archived.length ? [...manifests, ...archived] : manifests;
+  const conflicts = findImportConflicts(conflictSources, items);
   const draftConflicts = conflicts.filter((conflict) => conflict.index === active);
   const manifestConflicts = [
     ...new Set(
@@ -481,7 +487,7 @@ export function ManifestImportDialog({
   }
   function save(all: boolean) {
     if (busy) return;
-    const conflict = findImportConflicts(manifests, items).find(
+    const conflict = findImportConflicts(conflictSources, items).find(
       (item) => all || item.index === active,
     );
     if (conflict) {

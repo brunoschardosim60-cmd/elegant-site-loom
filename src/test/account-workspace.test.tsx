@@ -44,7 +44,13 @@ beforeEach(() => {
     error: null,
   }));
   mocks.rpc.mockImplementation((name, args) =>
-    name.startsWith("get_conference_") ? mocks.read(args) : mocks.save(args),
+    name === "archive_conference_manifests"
+      ? Promise.resolve({ data: 0, error: null })
+      : name === "find_archived_conference_manifests"
+        ? Promise.resolve({ data: [], error: null })
+        : name.startsWith("get_conference_")
+          ? mocks.read(args)
+          : mocks.save(args),
   );
 });
 afterEach(() => {

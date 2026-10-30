@@ -62,36 +62,35 @@ const documentSchema = z.object({
     .max(300)
     .optional(),
 });
+export const manifestSchema = z.object({
+  id: z.string(),
+  createdBy: z.guid().optional(),
+  demandUserIds: z.array(z.guid()).max(1000).optional(),
+  createdByEmail: z.string().email().optional(),
+  updatedBy: z.guid().optional(),
+  updatedByEmail: z.string().email().optional(),
+  updatedAt: z.string().optional(),
+  driver: z.string(),
+  plate: z.string(),
+  date: z.string(),
+  issueDate: z
+    .string()
+    .refine((value) => normalizeIssueDate(value) === value, "Data de emissão inválida")
+    .optional(),
+  issueTime: z
+    .string()
+    .refine((value) => normalizeIssueTime(value) === value)
+    .optional(),
+  previousIds: z.array(z.string().regex(manifestIdPattern)).optional(),
+  expectedRows: z.number().int().min(0).max(300).optional(),
+  totalVolumes: z.number().int().min(0).max(1000000).optional(),
+  totalsReviewed: z.boolean().optional(),
+  sourcePhotoHashes: z.array(z.string().regex(/^[a-f0-9]{64}$/i)).optional(),
+  documents: z.array(documentSchema),
+  finishedAt: z.string().optional(),
+});
 export const conferenceStateSchema = z.object({
-  manifests: z.array(
-    z.object({
-      id: z.string(),
-      createdBy: z.guid().optional(),
-      demandUserIds: z.array(z.guid()).max(1000).optional(),
-      createdByEmail: z.string().email().optional(),
-      updatedBy: z.guid().optional(),
-      updatedByEmail: z.string().email().optional(),
-      updatedAt: z.string().optional(),
-      driver: z.string(),
-      plate: z.string(),
-      date: z.string(),
-      issueDate: z
-        .string()
-        .refine((value) => normalizeIssueDate(value) === value, "Data de emissão inválida")
-        .optional(),
-      issueTime: z
-        .string()
-        .refine((value) => normalizeIssueTime(value) === value)
-        .optional(),
-      previousIds: z.array(z.string().regex(manifestIdPattern)).optional(),
-      expectedRows: z.number().int().min(0).max(300).optional(),
-      totalVolumes: z.number().int().min(0).max(1000000).optional(),
-      totalsReviewed: z.boolean().optional(),
-      sourcePhotoHashes: z.array(z.string().regex(/^[a-f0-9]{64}$/i)).optional(),
-      documents: z.array(documentSchema),
-      finishedAt: z.string().optional(),
-    }),
-  ),
+  manifests: z.array(manifestSchema),
   activity: z.array(activitySchema),
   issues: z.array(activitySchema),
 });

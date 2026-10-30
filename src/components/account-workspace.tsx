@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { type SupabaseClient, type Session } from "@supabase/supabase-js";
 import { AccountFeedback, AccountStatusBar } from "./account-status";
 import { ConferenceWorkspace } from "./conference-workspace";
@@ -10,6 +10,16 @@ import { TeamSync, teamSchema, type TeamSyncView } from "@/lib/conference-team";
 import { TeamPanel } from "./team-panel";
 import { teamRequest } from "@/lib/team-request";
 import type { WorkspaceScope } from "@/lib/conference-ownership";
+import {
+  ARCHIVE_AFTER_DAYS,
+  ARCHIVE_EARLY_DAYS,
+  ARCHIVE_WARNING_BYTES,
+  archiveFinished,
+  conferenceBytes,
+  findArchived,
+  type ArchiveQuery,
+} from "@/lib/conference-archive";
+import { Button } from "./ui/button";
 
 export function AccountWorkspace() {
   const [client, setClient] = useState<SupabaseClient>();
@@ -162,6 +172,16 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
   const [signOutError, setSignOutError] = useState("");
   const signOutPending = useRef(false);
   const sync = useRef<TeamSync | undefined>(undefined);
+  const [archiving, setArchiving] = useState(false);
+  const [archiveMessage, setArchiveMessage] = useState("");
+  const request = useCallback(
+    (name: string, args: Record<string, unknown>) => teamRequest(client, name, args),
+    [client],
+  );
+  const lookupArchive = useCallback(
+    (query: ArchiveQuery) => findArchived(request, query),
+    [request],
+  );
   useEffect(() => {
     let active = true;
     Promise.resolve(teamRequest(client, "get_conference_team", { accept_invitation: false }))
@@ -176,13 +196,9 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
           setLoadError("Os dados salvos precisam de revisão. Nenhum dado foi substituído.");
           return;
         }
-        sync.current = new TeamSync(
-          parsed.data,
-          (name, args) => teamRequest(client, name, args),
-          (next) => {
-            if (active) setView(next);
-          },
-        );
+        sync.current = new TeamSync(parsed.data, request, (next) => {
+          if (active) setView(next);
+        });
         setView({
           team: parsed.data,
           state: parsed.data.data,
@@ -191,6 +207,9 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
           conflict: false,
           pending: false,
         });
+        // Keep the live row small: finished manifests leave it after a waiting
+        // period. Idempotent on the server; the next poll picks up the change.
+        archiveFinished(request, ARCHIVE_AFTER_DAYS).catch(() => {});
       })
       .catch(() => {
         if (active)
@@ -220,9 +239,27 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
       window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", refresh);
     };
-  }, [client, session.user.id]);
+  }, [client, request, session.user.id]);
   function changed(snapshot: ConferenceState) {
     sync.current?.change(snapshot);
+  }
+  async function archiveEarly() {
+    if (archiving) return;
+    setArchiving(true);
+    setArchiveMessage("");
+    try {
+      const moved = await archiveFinished(request, ARCHIVE_EARLY_DAYS);
+      setArchiveMessage(
+        moved
+          ? `${moved} pré(s) finalizado(s) arquivado(s). Eles continuam disponíveis no Rastreamento.`
+          : `Nenhum pré finalizado há mais de ${ARCHIVE_EARLY_DAYS} dias para arquivar.`,
+      );
+      void sync.current?.refresh(true);
+    } catch {
+      setArchiveMessage("Não foi possível arquivar agora. Tente novamente em instantes.");
+    } finally {
+      setArchiving(false);
+    }
   }
   async function signOut() {
     if (signOutPending.current || sync.current?.pending()) return;
@@ -251,30 +288,60 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
         <AccountFeedback message="Carregando seus cadastros…" />
       </AccountPanel>
     );
+  const liveBytes = conferenceBytes(view.state);
   return (
     <div className="account-shell">
-      <AccountStatusBar
-        email={session.user.email || ""}
-        status={view.status}
-        pending={view.pending}
-        error={view.error}
-        conflict={view.conflict}
-        invitation={!!view.team.invitation}
-        teamView={scope === "team"}
-        onTeam={() => {
-          setScope((current) => (current === "team" ? "mine" : "team"));
-          if (view.team.invitation) {
-            setAuditPre("");
-            setTeamOpen(true);
-          }
-          void sync.current?.refresh(true);
-        }}
-        signingOut={signingOut}
-        signOutError={signOutError}
-        onSignOut={() => void signOut()}
-        onRetry={() => sync.current?.retry()}
-        onReload={() => window.location.reload()}
-      />
+      <div className="account-top">
+        <AccountStatusBar
+          email={session.user.email || ""}
+          status={view.status}
+          pending={view.pending}
+          error={view.error}
+          conflict={view.conflict}
+          invitation={!!view.team.invitation}
+          teamView={scope === "team"}
+          onTeam={() => {
+            setScope((current) => (current === "team" ? "mine" : "team"));
+            if (view.team.invitation) {
+              setAuditPre("");
+              setTeamOpen(true);
+            }
+            void sync.current?.refresh(true);
+          }}
+          signingOut={signingOut}
+          signOutError={signOutError}
+          onSignOut={() => void signOut()}
+          onRetry={() => sync.current?.retry()}
+          onReload={() => window.location.reload()}
+        />
+        {liveBytes > ARCHIVE_WARNING_BYTES && (
+          <div className="archive-warning" role="status">
+            <div>
+              <strong>
+                Os cadastros em andamento estão perto do limite do banco (
+                {(liveBytes / 1_000_000).toFixed(1).replace(".", ",")} de 5 MB).
+              </strong>
+              <p>
+                Prés finalizados há mais de {ARCHIVE_AFTER_DAYS} dias são arquivados
+                automaticamente. Para liberar espaço agora, arquive os finalizados há mais de{" "}
+                {ARCHIVE_EARLY_DAYS} dias; eles continuam consultáveis no Rastreamento.
+              </p>
+              {archiveMessage && <p>{archiveMessage}</p>}
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={archiving}
+              onClick={() => void archiveEarly()}
+            >
+              {archiving
+                ? "Arquivando…"
+                : `Arquivar finalizados há mais de ${ARCHIVE_EARLY_DAYS} dias`}
+            </Button>
+          </div>
+        )}
+      </div>
       <div className="account-workspace-content" inert={signingOut || undefined}>
         <ConferenceWorkspace
           initialState={view.state}
@@ -295,6 +362,7 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
             setAuditPre(id);
             setTeamOpen(true);
           }}
+          findArchived={lookupArchive}
         />
       </div>
       <TeamPanel

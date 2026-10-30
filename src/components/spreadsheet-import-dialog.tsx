@@ -21,6 +21,8 @@ import { formatManifestDate } from "@/lib/manifest-date";
 import { isAnotherRoute } from "@/lib/conference-routes";
 import { planOccurrenceUpdates } from "@/lib/nf-occurrences";
 import { spreadsheetLimits } from "@/lib/luft-spreadsheet-limits";
+import type { FindArchived } from "@/lib/conference-archive";
+import { useArchivedManifests } from "@/hooks/use-archived-manifests";
 
 export function SpreadsheetImportDialog({
   manifests,
@@ -29,8 +31,10 @@ export function SpreadsheetImportDialog({
   onUpdateOccurrences,
   demandOwner,
   sharedDemands = false,
+  findArchived,
 }: {
   manifests: Manifest[];
+  findArchived?: FindArchived | undefined;
   demandOwner?: DemandOwner | undefined;
   sharedDemands?: boolean;
   onClose: () => void;
@@ -180,17 +184,22 @@ export function SpreadsheetImportDialog({
       return null;
     }
   }, [result, manifests, drafts]);
+  const archived = useArchivedManifests(findArchived, drafts);
+  const conflictSources = useMemo(
+    () => (archived.length ? [...manifests, ...archived] : manifests),
+    [manifests, archived],
+  );
   const conflicts = useMemo(
     () =>
       drafts.flatMap((draft, index) => {
         const status = demandImportStatus(manifests, draft, demandOwner, sharedDemands);
         if (status.kind === "link") return [];
-        const conflicts = findImportConflicts(manifests, [draft]);
+        const conflicts = findImportConflicts(conflictSources, [draft]);
         return status.message
           ? [{ kind: "manifest" as const, index, message: status.message }]
           : conflicts.map((conflict) => ({ ...conflict, index }));
       }),
-    [manifests, drafts, demandOwner, sharedDemands],
+    [manifests, drafts, demandOwner, sharedDemands, conflictSources],
   );
   const overlaps = useMemo(() => findLuftCtcOverlaps(drafts), [drafts]);
   const remanifestations = useMemo(() => {

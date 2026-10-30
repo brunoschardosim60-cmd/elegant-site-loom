@@ -20,8 +20,11 @@ export function CtcTracking({
   now,
   onAuditManifest,
   personal = false,
+  archivedIds,
 }: {
   rows: TrackingRow[];
+  /** Manifests shown from the archive (finished and out of the live list). */
+  archivedIds?: Set<string>;
   status: TrackingStatus;
   onStatusChange: (value: TrackingStatus) => void;
   scope: string;
@@ -102,6 +105,9 @@ export function CtcTracking({
                     </td>
                     <td data-label="Pré / Motorista">
                       <strong>{manifest.id}</strong>
+                      {archivedIds?.has(manifest.id) && (
+                        <span className="tracking-detail">Arquivado</span>
+                      )}
                       <span className="tracking-detail">
                         {manifest.driver} · <span className="plate">{manifest.plate}</span>
                       </span>

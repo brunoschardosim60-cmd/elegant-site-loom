@@ -35,6 +35,9 @@ const routes: Record<string, string[]> = {
   get_conference_team: ["accept_invitation"],
   get_conference_revision: [],
   save_team_conference: ["base_data", "next_data"],
+  save_team_conference_v2: ["base_data", "next_data"],
+  archive_conference_manifests: ["min_days"],
+  find_archived_conference_manifests: ["manifest_ids", "ctc_numbers", "hashes"],
   invite_conference_member: ["member_email"],
   get_conference_audit: ["pre_id", "before_id"],
 };
@@ -78,6 +81,8 @@ beforeAll(async () => {
     "20261017020000_security_scalar_types.sql",
     "20261018010000_shared_personal_demands.sql",
     "20261018020000_personal_receipt_acceptance.sql",
+    "20261030010000_remove_photo_ai.sql",
+    "20261030020000_conference_archive.sql",
   ])
     await db.exec(await readFile(`supabase/migrations/${migration}`, "utf8"));
   server = createServer(async (request, response) => {
@@ -90,7 +95,7 @@ beforeAll(async () => {
       const { name, args } = JSON.parse(Buffer.concat(chunks).toString());
       if (!Object.hasOwn(routes, name)) throw new Error("unknown RPC");
       const params = routes[name]!.map((k) => args[k] ?? null);
-      saving = name === "save_team_conference";
+      saving = name.startsWith("save_team_conference");
       if (saving) {
         peak = Math.max(peak, ++inflight);
         await new Promise((done) => setTimeout(done, 30));
@@ -140,6 +145,7 @@ beforeEach(async () => {
     uid(1),
   ]);
   await db.exec("delete from public.conference_audit");
+  await db.exec("delete from public.conference_archive");
 });
 afterAll(async () => {
   await new Promise<void>((done) => server?.close(() => done()));
@@ -584,4 +590,38 @@ it("three clients converge when a route is remanifested while two unrelated CTCs
   expect(
     (await rpc(3, "save_team_conference", { base_data: stale, next_data: bad })).error?.message,
   ).toContain("CONFERENCE_CONFLICT");
+});
+
+it("archiving a long-finished pre does not disturb a device that has not refreshed yet", async () => {
+  const finishedAt = new Date(Date.now() - 40 * 86400000).toISOString();
+  const old = {
+    ...pre(9),
+    issueDate: "2026-08-01",
+    finishedAt,
+    documents: pre(9).documents.map((doc) => ({ ...doc, received: true, receivedAt: finishedAt })),
+  };
+  await db.query("update public.conference_states set data=$1 where user_id=$2", [
+    { ...emptyConference, manifests: [pre(), old] },
+    uid(1),
+  ]);
+  const { sessions, views } = await clients();
+  expect((await rpc(2, "archive_conference_manifests", { min_days: 30 })).data).toBe(1);
+  // Device 1 still holds the archived pre and scans a CTC of the open one.
+  expect(views[0]!.state.manifests.map((m) => m.id)).toContain(old.id);
+  sessions[0]!.change(receive(views[0]!.state, 0));
+  await settle(sessions, views);
+  for (const view of views) {
+    expect(view.error).toBe("");
+    expect(view.conflict).toBe(false);
+    expect(view.state.manifests.map((m) => m.id)).toEqual([pre().id]);
+    expect(view.state.manifests[0]!.documents[0]!.received).toBe(true);
+  }
+  const found = await rpc(3, "find_archived_conference_manifests", {
+    manifest_ids: [],
+    ctc_numbers: [old.documents[0]!.ctc],
+    hashes: [],
+  });
+  expect((found.data as { manifest: { id: string } }[]).map((item) => item.manifest.id)).toEqual([
+    old.id,
+  ]);
 });

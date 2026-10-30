@@ -214,6 +214,11 @@
 .workspace { display: grid; grid-template-columns: 224px minmax(0, 1fr); height: 100dvh; min-height: 0; overflow: hidden; }
 .account-shell > .workspace, .account-workspace-content > .workspace { height: 100%; }
 .account-workspace-content { height: 100%; min-height: 0; }
+.account-top { min-width: 0; }
+.archive-warning { display: flex; align-items: center; gap: 16px; padding: 10px 20px; background: var(--warning-soft); border-bottom: 1px solid var(--border); font-size: 12px; line-height: 1.5; }
+.archive-warning > div { flex: 1; min-width: 0; }
+.archive-warning p { color: var(--muted-foreground); margin-top: 2px; }
+@media (max-width: 760px) { .archive-warning { flex-direction: column; align-items: stretch; padding: 10px 16px; } }
 .sidebar { background: var(--sidebar); color: var(--sidebar-foreground); padding: 34px 20px 22px; display: flex; flex-direction: column; width: 224px; height: 100%; min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; z-index: 20; }
 .sidebar > * { flex-shrink: 0; }
 .brand { display: flex; align-items: center; gap: 10px; font-size: 28px; font-weight: 800; }

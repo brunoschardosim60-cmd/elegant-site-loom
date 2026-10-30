@@ -591,6 +591,33 @@ it("warns inside the pre and CTC fields before saving, includes the original dri
   expect(create.mock.calls[0]![0][0]!.rows[0]).not.toHaveProperty("review");
 });
 
+it("flags a pre and CTC that already exist only in the archive before saving", async () => {
+  const archived = registeredManifest();
+  const findArchived = vi.fn(async () => [
+    { manifest: archived, archivedAt: "2026-10-01T00:00:00Z" },
+  ]);
+  const create = vi.fn((_: ImportDraft[]) => ({ ok: true as const, manifests: [] }));
+  render(
+    <ManifestImportDialog
+      open
+      onOpenChange={vi.fn()}
+      manifests={[]}
+      onCreate={create}
+      findArchived={findArchived}
+    />,
+  );
+  fireEvent.change(screen.getByLabelText("Número do pré"), { target: { value: archived.id } });
+  fireEvent.change(screen.getByLabelText("CTC"), { target: { value: archived.documents[0]!.ctc } });
+  const id = screen.getByLabelText("Número do pré");
+  await waitFor(() => expect(id).toHaveAttribute("aria-invalid", "true"), { timeout: 3000 });
+  expect(id).toHaveAccessibleDescription(expect.stringContaining("arquivado"));
+  expect(findArchived).toHaveBeenLastCalledWith(
+    expect.objectContaining({ ids: [archived.id], ctcs: [archived.documents[0]!.ctc] }),
+  );
+  expect(screen.getByRole("button", { name: "Cadastrar pré" })).toBeDisabled();
+  expect(create).not.toHaveBeenCalled();
+});
+
 it("blocks both occurrences of a CTC duplicated between draft photos and allows the batch after correcting one", async () => {
   mocks.read.mockImplementation(async (_files: File[], receive: Parameters<ReadPhotos>[1]) => {
     receive(0, result("DI00000000001", "0000000001", "11-1"));

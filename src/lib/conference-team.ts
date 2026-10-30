@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { missingRpc } from "./conference-archive";
 import { conferenceStateSchema, type ConferenceState } from "./conference-state";
 
 export const teamSchema = z.object({
@@ -145,6 +146,9 @@ export class TeamSync {
   private collision = false;
   private refreshRetryAt = 0;
   private refreshFailures = 0;
+  // The v2 RPC settles archived manifests a stale device still holds; databases
+  // without the archive migration only have the original RPC.
+  private saveRpc = "save_team_conference_v2";
   constructor(
     private team: ConferenceTeam,
     private rpc: Rpc,
@@ -219,11 +223,14 @@ export class TeamSync {
     try {
       while (!this.stopped && this.pending()) {
         const sent = this.local;
-        const result = await this.rpc("save_team_conference", {
-          base_data: this.base,
-          next_data: sent,
-        });
+        const args = { base_data: this.base, next_data: sent };
+        let result = await this.rpc(this.saveRpc, args);
         if (this.stopped) return;
+        if (this.saveRpc !== "save_team_conference" && missingRpc(result.error)) {
+          this.saveRpc = "save_team_conference";
+          result = await this.rpc(this.saveRpc, args);
+          if (this.stopped) return;
+        }
         if (result.error) throw result.error;
         const committed = savedTeamSchema.parse(result.data);
         this.local = mergeConference(sent, this.local, committed.data);

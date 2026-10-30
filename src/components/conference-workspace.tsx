@@ -62,6 +62,7 @@ import { DocumentPagination, documentPageSize } from "./document-pagination";
 import { applyDemandImports } from "@/lib/shared-demand-import";
 import { applyImports, type ImportDraft, type ImportOutcome } from "@/lib/manifest-import";
 import type { ConferenceState } from "@/lib/conference-state";
+import type { FindArchived } from "@/lib/conference-archive";
 import {
   activityTimestamp,
   conferenceTimestamp,
@@ -113,6 +114,7 @@ export function ConferenceWorkspace({
   scope: controlledScope,
   onScopeChange,
   onManageTeam,
+  findArchived,
 }: {
   initialState?: ConferenceState;
   externalState?: ConferenceState;
@@ -125,6 +127,8 @@ export function ConferenceWorkspace({
   scope?: WorkspaceScope;
   onScopeChange?: ((scope: WorkspaceScope) => void) | undefined;
   onManageTeam?: (() => void) | undefined;
+  /** Looks up manifests moved to the archive; absent in standalone use. */
+  findArchived?: FindArchived | undefined;
 } = {}) {
   const [manifests, setManifests] = useState<Manifest[]>(initialState?.manifests ?? []);
   const current = useRef(manifests);
@@ -183,6 +187,23 @@ export function ConferenceWorkspace({
   }, [externalState]);
   const [notices, setNotices] = useState<Notice[]>([]);
   const [blocked, setBlocked] = useState<string | null>(null);
+  const [archivedTracking, setArchivedTracking] = useState<{
+    ctc: string;
+    manifests: Manifest[];
+  }>({ ctc: "", manifests: [] });
+  useEffect(() => {
+    const ctc = view === "tracking" ? query.trim() : "";
+    if (!findArchived || !/^\d{10}$/.test(ctc)) return;
+    let active = true;
+    findArchived({ ctcs: [ctc] })
+      .then((found) => {
+        if (active) setArchivedTracking({ ctc, manifests: found.map((item) => item.manifest) });
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [findArchived, view, query]);
   const [newOpen, setNewOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [receiptReview, setReceiptReview] = useState<TeamReceiptCandidate[] | null>(null);
@@ -332,8 +353,23 @@ export function ConferenceWorkspace({
     }
     const matches = findCurrentMatches(current.current, reading.number);
     if (!matches.length) {
-      setBlocked(`O CTC ${reading.number} não está em nenhum pré-manifesto cadastrado.`);
+      const missingMessage = `O CTC ${reading.number} não está em nenhum pré-manifesto cadastrado.`;
+      setBlocked(missingMessage);
       log("CTC sem pré-manifesto", `CTC ${reading.number}`, true);
+      void findArchived?.({ ctcs: [reading.number] })
+        .then((found) => {
+          const latest = found[0];
+          if (!latest) return;
+          const finished = latest.manifest.finishedAt
+            ? ` finalizado em ${formatManifestDate(latest.manifest.finishedAt.slice(0, 10))} e`
+            : "";
+          setBlocked((shown) =>
+            shown === missingMessage
+              ? `O CTC ${reading.number} pertence ao pré ${latest.manifest.id} (${latest.manifest.driver}),${finished} arquivado. Ele não está entre os prés em andamento.`
+              : shown,
+          );
+        })
+        .catch(() => {});
       return;
     }
     if (matches.length > 1) {
@@ -513,15 +549,23 @@ export function ConferenceWorkspace({
   const pending = presented.filter((item) => !item.finishedAt && !item.routeResolved);
   const finished = presented.filter((item) => item.finishedAt || item.routeResolved);
   const documents = presented.flatMap((item) => item.documents);
+  const trackingCtc = view === "tracking" && /^\d{10}$/.test(query.trim()) ? query.trim() : "";
+  const trackingArchive =
+    trackingCtc && archivedTracking.ctc === trackingCtc ? archivedTracking.manifests : [];
   const trackingRows =
     view === "tracking"
-      ? selectTrackingRows(presented, {
-          query,
-          filter,
-          status: trackingStatus,
-          now,
-          routesPresented: true,
-        })
+      ? selectTrackingRows(
+          trackingArchive.length
+            ? selectOwnedRoutes([...manifests, ...trackingArchive], demandOwner)
+            : presented,
+          {
+            query,
+            filter,
+            status: trackingStatus,
+            now,
+            routesPresented: true,
+          },
+        )
       : [];
   const missing = pending.flatMap((item) => item.documents).filter(isPendingDocument);
   const age = (manifest: Manifest) => manifestAgeDays(manifest, now);
@@ -1012,6 +1056,7 @@ export function ConferenceWorkspace({
                   {view === "tracking" ? (
                     <CtcTracking
                       rows={trackingRows}
+                      archivedIds={new Set(trackingArchive.map((item) => item.id))}
                       status={trackingStatus}
                       onStatusChange={setTrackingStatus}
                       scope={JSON.stringify([query, filter, trackingStatus])}
@@ -1306,6 +1351,7 @@ export function ConferenceWorkspace({
             demandOwner={accountEmail ? { email: accountEmail, userId: accountId } : undefined}
             sharedDemands={sharedDemands}
             onUpdateOccurrences={updateOccurrences}
+            findArchived={findArchived}
           />
         )}
         {newOpen && (
@@ -1318,6 +1364,7 @@ export function ConferenceWorkspace({
             manifests={manifests}
             onCreate={importDrafts}
             initialId={prefillId}
+            findArchived={findArchived}
           />
         )}
         {editingManifest && (
