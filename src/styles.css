@@ -1,6 +1,7 @@
 @import "tailwindcss" source(none);
 @source "../src";
 @import "tw-animate-css";
+@import "@fontsource-variable/manrope";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -20,8 +21,8 @@
  */
 
 @theme inline {
-  --font-sans: "Manrope", sans-serif;
-  --font-display: "Manrope", sans-serif;
+  --font-sans: "Manrope Variable", "Manrope", sans-serif;
+  --font-display: "Manrope Variable", "Manrope", sans-serif;
   --color-sidebar-muted: var(--sidebar-muted);
   --color-success: var(--success);
   --color-success-soft: var(--success-soft);
