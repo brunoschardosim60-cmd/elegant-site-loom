@@ -63,6 +63,8 @@ export function securityHeaders(
   );
   headers.set("Cross-Origin-Resource-Policy", "same-origin");
   headers.set("Cache-Control", "private, no-store");
+  // Internal system: search engines must not index any response.
+  headers.set("X-Robots-Tag", "noindex, nofollow");
   if (production) {
     const supabase = new URL(databaseUrl);
     const csp = [
