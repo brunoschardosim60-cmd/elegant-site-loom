@@ -4,7 +4,7 @@ import { conferenceStateSchema, type ConferenceState } from "./conference-state"
 export const teamSchema = z.object({
   sharedDemands: z.boolean().optional(),
   personalReceipts: z.boolean().optional(),
-  teamId: z.string().uuid(),
+  teamId: z.guid(),
   name: z.string(),
   owner: z.boolean(),
   revision: z.number().int().nonnegative(),
@@ -12,7 +12,7 @@ export const teamSchema = z.object({
   members: z.array(
     z.object({
       email: z.string(),
-      userId: z.string().uuid().optional(),
+      userId: z.guid().optional(),
       owner: z.boolean(),
       pending: z.boolean(),
     }),
@@ -254,7 +254,7 @@ export class TeamSync {
         if (this.stopped) return;
         if (version.error) throw version.error;
         const stamp = z
-          .object({ teamId: z.string().uuid(), revision: z.number().int().nonnegative() })
+          .object({ teamId: z.guid(), revision: z.number().int().nonnegative() })
           .parse(version.data);
         if (stamp.teamId !== this.team.teamId) throw new Error("CONFERENCE_TEAM_CHANGED");
         if (stamp.revision === this.team.revision) {

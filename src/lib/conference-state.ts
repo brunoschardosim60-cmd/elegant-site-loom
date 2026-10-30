@@ -4,7 +4,7 @@ import { normalizeIssueDate, normalizeIssueTime } from "./manifest-date";
 import { normalizeReportGeneratedAt } from "./nf-occurrence-date";
 
 const activitySchema = z.object({
-  id: z.union([z.number(), z.string().uuid()]),
+  id: z.union([z.number(), z.guid()]),
   title: z.string(),
   description: z.string(),
   time: z.string(),
@@ -20,16 +20,16 @@ const documentSchema = z.object({
   volumes: z.number().int().positive(),
   received: z.boolean(),
   receivedAt: z.string().optional(),
-  receivedBy: z.string().uuid().optional(),
+  receivedBy: z.guid().optional(),
   receivedByEmail: z.string().email().optional(),
   receiptChecks: z
     .array(
       z.object({
-        id: z.string().uuid(),
+        id: z.guid(),
         received: z.boolean(),
         receivedAt: z.string().optional(),
         email: z.string().email().optional(),
-        acceptedFrom: z.string().uuid().optional(),
+        acceptedFrom: z.guid().optional(),
         sourceReceivedAt: z.string().optional(),
         documentVersion: z.string().optional(),
         legacy: z.boolean().optional(),
@@ -66,10 +66,10 @@ export const conferenceStateSchema = z.object({
   manifests: z.array(
     z.object({
       id: z.string(),
-      createdBy: z.string().uuid().optional(),
-      demandUserIds: z.array(z.string().uuid()).max(1000).optional(),
+      createdBy: z.guid().optional(),
+      demandUserIds: z.array(z.guid()).max(1000).optional(),
       createdByEmail: z.string().email().optional(),
-      updatedBy: z.string().uuid().optional(),
+      updatedBy: z.guid().optional(),
       updatedByEmail: z.string().email().optional(),
       updatedAt: z.string().optional(),
       driver: z.string(),
