@@ -11,6 +11,7 @@ import {
   manifestReferenceDate,
   normalizeIssueDate,
 } from "@/lib/manifest-date";
+import { CargoTags } from "./cargo-tags";
 
 export function CtcTracking({
   rows,
@@ -95,6 +96,7 @@ export function CtcTracking({
                   >
                     <td data-label="CTC / Nota fiscal" className="ctc-number">
                       <strong className="ctc-identifier">{doc.ctc}</strong>
+                      <CargoTags doc={doc} />
                       <div className="tracking-detail">
                         <NfOccurrences nf={doc.nf} values={doc.nfOccurrences} prefix />
                       </div>

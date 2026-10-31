@@ -5,6 +5,9 @@ import { manifestAgeDays } from "./manifest-date";
 /** A pending CTC this many days after the manifest date counts as late (same as the "old" filter). */
 export const LATE_AFTER_DAYS = 2;
 const PERISHABLE = /PERECIV/i;
+/** Cargo nature from the 108 export marks it perishable (e.g. "PERECIVEL-CONVENCIONAL 48"). */
+export const isPerishable = (doc: { nature?: string | undefined }) =>
+  !!doc.nature && PERISHABLE.test(doc.nature);
 
 export type DriverMetrics = {
   driver: string;
@@ -102,7 +105,7 @@ export function conferenceMetrics(
         driver.pendingValueCents += doc.cargoValueCents;
       }
       result.pendingWeightGrams += doc.weightGrams ?? 0;
-      if (doc.nature && PERISHABLE.test(doc.nature)) result.perishablePending++;
+      if (isPerishable(doc)) result.perishablePending++;
       const cityName = doc.city?.trim();
       if (cityName) {
         const city = cities.get(cityName) ?? { city: cityName, pending: 0, pendingValueCents: 0 };

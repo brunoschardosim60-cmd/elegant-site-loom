@@ -10,6 +10,7 @@ import {
 } from "@/lib/manifest-date";
 import { DocumentPagination } from "./document-pagination";
 import { NfOccurrences } from "./nf-occurrences";
+import { CargoTags } from "./cargo-tags";
 
 export type PendingRow = { manifest: Manifest; doc: DocumentItem; days: number };
 
@@ -60,6 +61,7 @@ export function PendingTable({
               <tr key={`${manifest.id}:${doc.id}`}>
                 <td className="ctc-number" data-label="CTC / Cliente">
                   <span className="ctc-identifier">{doc.ctc}</span>
+                  <CargoTags doc={doc} />
                   {doc.client && (
                     <span className="block text-muted-foreground text-[10px] font-sans mt-1">
                       {doc.client}

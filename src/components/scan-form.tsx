@@ -1,5 +1,6 @@
-import { useState, type RefObject } from "react";
-import { ArrowRight, Barcode } from "lucide-react";
+import { useEffect, useState, type RefObject } from "react";
+import { ArrowRight, Barcode, Volume2, VolumeX } from "lucide-react";
+import { scanSoundEnabled, setScanSoundEnabled } from "@/lib/scan-sound";
 import { Button } from "@/components/ui/button";
 
 /**
@@ -21,6 +22,9 @@ export function ScanForm({
 }) {
   const [code, setCode] = useState("");
   const [clearedAt, setClearedAt] = useState(clearSignal);
+  // Read after mount: the server render has no access to the saved choice.
+  const [sound, setSound] = useState(true);
+  useEffect(() => setSound(scanSoundEnabled()), []);
   if (clearedAt !== clearSignal) {
     setClearedAt(clearSignal);
     setCode("");
@@ -47,6 +51,21 @@ export function ScanForm({
       />
       <Button type="submit" size="sm" disabled={!code.trim() || disabled}>
         Conferir <ArrowRight size={13} />
+      </Button>
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        className="scan-sound-toggle"
+        aria-pressed={sound}
+        aria-label={sound ? "Desligar som do bipe" : "Ligar som do bipe"}
+        title={sound ? "Som do bipe ligado" : "Som do bipe desligado"}
+        onClick={() => {
+          setScanSoundEnabled(!sound);
+          setSound(!sound);
+        }}
+      >
+        {sound ? <Volume2 /> : <VolumeX />}
       </Button>
     </form>
   );
