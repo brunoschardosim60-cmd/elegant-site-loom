@@ -2,6 +2,7 @@ import { z } from "zod";
 import { missingRpc } from "./conference-archive";
 import { conferenceStateSchema, type ConferenceState } from "./conference-state";
 
+const memberRoleSchema = z.enum(["owner", "admin", "conferente", "leitura"]);
 export const teamSchema = z.object({
   sharedDemands: z.boolean().optional(),
   personalReceipts: z.boolean().optional(),
@@ -16,10 +17,30 @@ export const teamSchema = z.object({
       userId: z.guid().optional(),
       owner: z.boolean(),
       pending: z.boolean(),
+      role: memberRoleSchema.optional(),
     }),
   ),
   invitation: z.object({ ownerEmail: z.string() }).nullable().optional(),
+  /** Caller's role; absent on databases without the roles migration. */
+  role: memberRoleSchema.optional(),
+  /** Which rows of the 108 export belong to this team. */
+  settings: z
+    .object({ branches: z.array(z.string()).min(1), reasons: z.array(z.string()).min(1) })
+    .optional(),
 });
+export type MemberRole = z.infer<typeof memberRoleSchema>;
+export const roleLabels: Record<MemberRole, string> = {
+  owner: "Responsável",
+  admin: "Administrador",
+  conferente: "Conferente",
+  leitura: "Só leitura",
+};
+/** Owners and administrators manage people and the import filter. */
+export const canManageTeam = (team: { owner: boolean; role?: MemberRole | undefined }) =>
+  team.owner || team.role === "admin";
+/** Read-only members may look but not change anything. */
+export const isReadOnlyMember = (team: { role?: MemberRole | undefined }) =>
+  team.role === "leitura";
 export type ConferenceTeam = z.infer<typeof teamSchema>;
 const savedTeamSchema = z.object({
   revision: z.number().int().nonnegative(),
@@ -254,13 +275,15 @@ export class TeamSync {
         : 0;
     this.failure = /CONFERENCE_TEAM_CHANGED/.test(message)
       ? "Sua equipe mudou nesta sessão. Gere o PDF se precisar guardar alterações locais e recarregue para abrir os dados da equipe atual. Nenhum dado foi transferido automaticamente."
-      : /CONFERENCE_TOTALS_REVIEW/.test(message)
-        ? "Os totais diferem do cabeçalho. Revise o pré antes de salvar. As alterações locais foram preservadas."
-        : /CONFERENCE_DUPLICATE/.test(message)
-          ? "Outra pessoa já cadastrou esse pré, CTC ou foto. Nenhuma duplicata foi salva. Gere o PDF se precisar guardar as alterações locais e recarregue os dados."
-          : this.collision
-            ? "O mesmo campo foi alterado por outra pessoa ou o registro foi excluído. Gere o PDF para guardar as alterações locais antes de recarregar."
-            : "Sem conexão com o banco há mais de 30 segundos. Mantenha esta página aberta: as alterações continuam na tela e serão enviadas ao tentar novamente.";
+      : /CONFERENCE_READ_ONLY/.test(message)
+        ? "Sua conta é só de leitura nesta equipe. As alterações não foram salvas; peça ao responsável para mudar seu papel."
+        : /CONFERENCE_TOTALS_REVIEW/.test(message)
+          ? "Os totais diferem do cabeçalho. Revise o pré antes de salvar. As alterações locais foram preservadas."
+          : /CONFERENCE_DUPLICATE/.test(message)
+            ? "Outra pessoa já cadastrou esse pré, CTC ou foto. Nenhuma duplicata foi salva. Gere o PDF se precisar guardar as alterações locais e recarregue os dados."
+            : this.collision
+              ? "O mesmo campo foi alterado por outra pessoa ou o registro foi excluído. Gere o PDF para guardar as alterações locais antes de recarregar."
+              : "Sem conexão com o banco há mais de 30 segundos. Mantenha esta página aberta: as alterações continuam na tela e serão enviadas ao tentar novamente.";
   }
   async flush() {
     if (this.stopped || this.busy || this.failure || !this.pending()) return;

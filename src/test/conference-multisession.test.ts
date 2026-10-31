@@ -84,8 +84,12 @@ beforeAll(async () => {
     "20261018020000_personal_receipt_acceptance.sql",
     "20261030010000_remove_photo_ai.sql",
     "20261030020000_conference_archive.sql",
+    "20261030030000_roles_settings_monitoring.sql",
   ])
     await db.exec(await readFile(`supabase/migrations/${migration}`, "utf8"));
+  await db.exec(
+    "insert into public.conference_owner_allowlist(email) values ('device1@example.invalid')",
+  );
   server = createServer(async (request, response) => {
     const user = Number(request.headers["x-test-user"]);
     let saving = false;
@@ -243,8 +247,8 @@ it("keeps personal confirmations independent, accepts a peer explicitly, and doe
     original.receiptChecks![0],
   );
   expect(
-    (await rpc(3, "save_team_conference", { base_data: views[2]!.state, next_data: stale })).error
-      ?.message,
+    (await rpc(3, "save_team_conference_v2", { base_data: views[2]!.state, next_data: stale }))
+      .error?.message,
   ).toContain("CONFERENCE_CONFLICT");
   expect(
     (await audit()).some(
@@ -318,7 +322,7 @@ it("invalidates approval suggestions after the NF changes, without losing the hi
     oldReceipt,
   );
   expect(
-    (await rpc(3, "save_team_conference", { base_data: staleBase, next_data: staleAcceptance }))
+    (await rpc(3, "save_team_conference_v2", { base_data: staleBase, next_data: staleAcceptance }))
       .error?.message,
   ).toContain("CONFERENCE_CONFLICT");
   sessions.forEach((session) => session.stop());
@@ -558,7 +562,7 @@ it("three clients converge when a route is remanifested while two unrelated CTCs
   const setup = (await rpc(1, "get_conference_team")).data.data as ConferenceState;
   expect(
     (
-      await rpc(1, "save_team_conference", {
+      await rpc(1, "save_team_conference_v2", {
         base_data: setup,
         next_data: { ...setup, manifests: [...setup.manifests, original] },
       })
@@ -592,7 +596,7 @@ it("three clients converge when a route is remanifested while two unrelated CTCs
   const bad = structuredClone(stale);
   bad.manifests[1]!.documents[0]!.received = true;
   expect(
-    (await rpc(3, "save_team_conference", { base_data: stale, next_data: bad })).error?.message,
+    (await rpc(3, "save_team_conference_v2", { base_data: stale, next_data: bad })).error?.message,
   ).toContain("CONFERENCE_CONFLICT");
 });
 

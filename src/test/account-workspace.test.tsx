@@ -168,3 +168,20 @@ it("updates another persons receipt without remounting the scanner or losing its
   expect(scanner).toHaveValue("00000");
   expect(mocks.save).not.toHaveBeenCalled();
 });
+
+it("explains invitation-only access instead of an error when the account was not invited", async () => {
+  mocks.read.mockResolvedValue({ data: null, error: { message: "CONFERENCE_NOT_INVITED" } });
+  render(<AccountWorkspace />);
+  expect(await screen.findByText("Sua conta ainda não tem acesso")).toBeInTheDocument();
+  expect(screen.getByText("account@example.com")).toBeInTheDocument();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(mocks.read).toHaveBeenCalledOnce();
+});
+
+it("hides the scanner and blocks changes for a read-only member", async () => {
+  mocks.read.mockResolvedValue({ data: { ...team(), owner: false, role: "leitura" }, error: null });
+  render(<AccountWorkspace />);
+  await screen.findByText("DI00123456789");
+  expect(screen.queryByRole("textbox", { name: "Código do CTC" })).not.toBeInTheDocument();
+  expect(mocks.save).not.toHaveBeenCalled();
+});

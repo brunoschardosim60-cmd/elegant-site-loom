@@ -6,7 +6,13 @@ import { getSupabaseClient } from "@/lib/supabase-client";
 import type { ConferenceState } from "@/lib/conference-state";
 import { AccountPanel, Login, PasswordReset } from "./account-auth";
 import { passwordRecoveryLocation, setPasswordRecoveryMarker } from "@/lib/password-recovery";
-import { isTransientFailure, TeamSync, teamSchema, type TeamSyncView } from "@/lib/conference-team";
+import {
+  isReadOnlyMember,
+  isTransientFailure,
+  TeamSync,
+  teamSchema,
+  type TeamSyncView,
+} from "@/lib/conference-team";
 import { TeamPanel } from "./team-panel";
 import { teamRequest } from "@/lib/team-request";
 import type { WorkspaceScope } from "@/lib/conference-ownership";
@@ -20,6 +26,7 @@ import {
   type ArchiveQuery,
 } from "@/lib/conference-archive";
 import { Button } from "./ui/button";
+import { watchErrors } from "@/lib/error-report";
 
 export function AccountWorkspace() {
   const [client, setClient] = useState<SupabaseClient>();
@@ -165,6 +172,7 @@ export function AccountWorkspace() {
 function SavedWorkspace({ client, session }: { client: SupabaseClient; session: Session }) {
   const [view, setView] = useState<TeamSyncView>();
   const [loadError, setLoadError] = useState("");
+  const [notInvited, setNotInvited] = useState(false);
   const [teamOpen, setTeamOpen] = useState(false);
   const [scope, setScope] = useState<WorkspaceScope>("mine");
   const [auditPre, setAuditPre] = useState("");
@@ -178,6 +186,8 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
     (name: string, args: Record<string, unknown>) => teamRequest(client, name, args),
     [client],
   );
+  // Uncaught browser errors go to the database log (report_client_error).
+  useEffect(() => watchErrors(request), [request]);
   const lookupArchive = useCallback(
     (query: ArchiveQuery) => findArchived(request, query),
     [request],
@@ -206,7 +216,9 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
       .then(({ data, error }) => {
         if (!active) return;
         if (error) {
-          setLoadError("Não foi possível carregar seus cadastros. Nenhum dado foi substituído.");
+          if (/CONFERENCE_NOT_INVITED/.test(error.message ?? "")) setNotInvited(true);
+          else
+            setLoadError("Não foi possível carregar seus cadastros. Nenhum dado foi substituído.");
           return;
         }
         const parsed = teamSchema.safeParse(data);
@@ -294,6 +306,26 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
       setSigningOut(false);
     }
   }
+  if (notInvited)
+    return (
+      <AccountPanel>
+        <div className="grid gap-3 text-sm" role="status">
+          <strong>Sua conta ainda não tem acesso</strong>
+          <p className="text-muted-foreground">
+            O confere. funciona por convite. Peça ao responsável pela sua equipe para incluir o
+            e-mail <strong>{session.user.email}</strong> em Equipe e depois entre de novo.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" onClick={() => window.location.reload()}>
+              Já fui convidado
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => void signOut()}>
+              Sair da conta
+            </Button>
+          </div>
+        </div>
+      </AccountPanel>
+    );
   if (loadError)
     return (
       <AccountPanel>
@@ -382,6 +414,8 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
             setTeamOpen(true);
           }}
           findArchived={lookupArchive}
+          readOnly={isReadOnlyMember(view.team)}
+          importFilter={view.team.settings}
         />
       </div>
       <TeamPanel
@@ -392,6 +426,7 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
         onRefresh={() => void sync.current?.refresh(true)}
         selectedPre={auditPre}
         canJoin={!view.pending}
+        accountId={session.user.id}
       />
     </div>
   );

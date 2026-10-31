@@ -1,8 +1,10 @@
 import { decodeLuftXlsx } from "./decode-luft-xlsx";
 
-self.onmessage = (event: MessageEvent<ArrayBuffer>) => {
+import type { LuftFilter } from "./luft-spreadsheet";
+
+self.onmessage = (event: MessageEvent<{ bytes: ArrayBuffer; filter?: LuftFilter }>) => {
   try {
-    self.postMessage({ ok: true, result: decodeLuftXlsx(event.data) });
+    self.postMessage({ ok: true, result: decodeLuftXlsx(event.data.bytes, event.data.filter) });
   } catch (error) {
     self.postMessage({
       ok: false,

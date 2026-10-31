@@ -69,7 +69,12 @@ checks(migration, applied, detail) as (values
   ('20261030020000_conference_archive',
     to_regclass('public.conference_archive') is not null
       and exists(select 1 from has_fn where name = 'save_team_conference_v2(jsonb,jsonb)'),
-    'arquivo de prés finalizados')
+    'arquivo de prés finalizados'),
+  ('20261030030000_roles_settings_monitoring',
+    to_regclass('public.conference_owner_allowlist') is not null
+      and to_regclass('public.conference_client_errors') is not null
+      and exists(select 1 from has_fn where name = 'set_conference_settings(text[],text[])'),
+    'papéis, cadastro por convite, filial configurável e registro de erros')
 )
 select migration as "migração",
   case when applied then 'aplicada' else 'FALTANDO' end as "situação",

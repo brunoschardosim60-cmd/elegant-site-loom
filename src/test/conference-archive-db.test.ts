@@ -87,11 +87,13 @@ beforeAll(async () => {
       uid(n),
       `archive-${n}@example.invalid`,
     ]);
+  await db.exec(
+    "insert into public.conference_owner_allowlist(email) values ('archive-1@example.invalid'),('archive-3@example.invalid')",
+  );
 }, 30000);
 beforeEach(async () => {
   await db.exec("reset role; begin");
   await login(1);
-  await rpc("save_conference", [0, empty]);
   await team();
   await rpc("invite_conference_member", ["archive-2@example.invalid"]);
   await login(2);
@@ -144,7 +146,6 @@ it("lets a teammate archive and hides the archive from other teams", async () =>
     await rpc<Archived>("find_archived_conference_manifests", [["DI0000000001"], [], []]),
   ).toHaveLength(1);
   await login(3);
-  await rpc("save_conference", [0, empty]);
   await team();
   expect(
     await rpc<Archived>("find_archived_conference_manifests", [["DI0000000001"], [], []]),
@@ -166,6 +167,12 @@ it("shows why the v2 save exists: the original RPC reports the same stale save a
   await rpc("archive_conference_manifests");
   const next = structuredClone(stale);
   next.manifests.find((m) => m.id === "DI0000000003")!.documents[0]!.received = true;
+  // The original RPC is closed to clients now; reopen it inside this rolled-back test.
+  await login(1, "postgres");
+  await db.exec(
+    "grant execute on function public.save_team_conference(jsonb,jsonb) to authenticated",
+  );
+  await login(1);
   await expect(rpc("save_team_conference", [stale, next])).rejects.toThrow("CONFERENCE_CONFLICT");
 });
 

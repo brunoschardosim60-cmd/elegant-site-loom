@@ -3,8 +3,13 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
-import type { ConferenceTeam } from "@/lib/conference-team";
 import { teamRequest } from "@/lib/team-request";
+import {
+  canManageTeam,
+  roleLabels,
+  type ConferenceTeam,
+  type MemberRole,
+} from "@/lib/conference-team";
 import { ActionActor } from "./action-actor";
 
 const auditSchema = z.array(
@@ -59,6 +64,7 @@ export function TeamPanel({
   onRefresh,
   selectedPre = "",
   canJoin = true,
+  accountId,
 }: {
   client: SupabaseClient;
   team: ConferenceTeam;
@@ -67,6 +73,8 @@ export function TeamPanel({
   onRefresh: () => void;
   selectedPre?: string;
   canJoin?: boolean;
+  /** Signed-in account, so nobody is offered to remove themselves. */
+  accountId?: string | undefined;
 }) {
   const [tab, setTab] = useState<"members" | "history">("members");
   const [email, setEmail] = useState("");
@@ -178,6 +186,43 @@ export function TeamPanel({
       setBusy(false);
     }
   }
+  const manage = canManageTeam(team);
+  const [branches, setBranches] = useState("");
+  const [reasons, setReasons] = useState("");
+  useEffect(() => {
+    if (!open) return;
+    setBranches((team.settings?.branches ?? ["06"]).join(", "));
+    setReasons((team.settings?.reasons ?? ["DIS"]).join(", "));
+  }, [open, team.settings]);
+  async function act(name: string, args: Record<string, unknown>, done: string) {
+    if (busy) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const result = await teamRequest(client, name, args);
+      if (result.error) throw result.error;
+      setMessage(done);
+      onRefresh();
+    } catch (error) {
+      const reason = String((error as { message?: string }).message);
+      setMessage(
+        /Somente o responsável|não encontrado/.test(reason)
+          ? reason
+          : /CONFERENCE_INVALID/.test(reason)
+            ? "Use códigos de 1 a 8 letras ou números, separados por vírgula."
+            : /function|PGRST202/.test(reason)
+              ? "Esta função precisa da atualização do banco de dados."
+              : "Não foi possível atualizar a equipe. Tente novamente.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  const codes = (value: string) =>
+    value
+      .split(/[,;\s]+/)
+      .map((code) => code.trim())
+      .filter(Boolean);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[85dvh] overflow-y-auto">
@@ -228,10 +273,59 @@ export function TeamPanel({
                   className="flex flex-wrap items-center gap-2 rounded-lg border p-3"
                 >
                   <span className="break-all mr-auto">{m.email}</span>
-                  <span className="text-muted-foreground">
-                    {m.owner ? "Responsável" : m.pending ? "Aguardando entrada" : "Integrante"}
-                  </span>
-                  {team.owner && m.pending && (
+                  {team.owner && !m.owner && !m.pending && m.role ? (
+                    <select
+                      className="filter-select"
+                      aria-label={`Papel de ${m.email}`}
+                      value={m.role}
+                      disabled={busy}
+                      onChange={(e) =>
+                        void act(
+                          "set_conference_member_role",
+                          { member_email: m.email, new_role: e.target.value },
+                          "Papel atualizado.",
+                        )
+                      }
+                    >
+                      {(["admin", "conferente", "leitura"] as MemberRole[]).map((role) => (
+                        <option key={role} value={role}>
+                          {roleLabels[role]}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span className="text-muted-foreground">
+                      {m.pending
+                        ? "Aguardando entrada"
+                        : m.role
+                          ? roleLabels[m.role]
+                          : m.owner
+                            ? "Responsável"
+                            : "Integrante"}
+                    </span>
+                  )}
+                  {manage &&
+                    !m.owner &&
+                    !m.pending &&
+                    m.userId &&
+                    (team.owner || m.role !== "admin") &&
+                    m.userId !== accountId && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() =>
+                          void act(
+                            "remove_conference_member",
+                            { member_email: m.email },
+                            "Acesso removido.",
+                          )
+                        }
+                      >
+                        Remover
+                      </Button>
+                    )}
+                  {manage && m.pending && (
                     <Button
                       size="sm"
                       variant="ghost"
@@ -244,7 +338,7 @@ export function TeamPanel({
                 </li>
               ))}
             </ul>
-            {team.owner && (
+            {manage && (
               <form
                 className="grid gap-2"
                 onSubmit={(e) => {
@@ -273,6 +367,60 @@ export function TeamPanel({
                   pessoa.
                 </p>
               </form>
+            )}
+            {manage && team.settings && (
+              <form
+                className="grid gap-2 rounded-lg border p-3"
+                aria-label="Configuração da planilha 108"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void act(
+                    "set_conference_settings",
+                    { branch_codes: codes(branches), reason_codes: codes(reasons) },
+                    "Configuração da planilha salva. Vale para as próximas importações.",
+                  );
+                }}
+              >
+                <strong className="text-xs">Planilha 108: linhas desta equipe</strong>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <label className="form-field">
+                    Filiais
+                    <input
+                      value={branches}
+                      onChange={(e) => setBranches(e.target.value)}
+                      disabled={busy}
+                      placeholder="06, 12"
+                    />
+                  </label>
+                  <label className="form-field">
+                    Motivos
+                    <input
+                      value={reasons}
+                      onChange={(e) => setReasons(e.target.value)}
+                      disabled={busy}
+                      placeholder="DIS"
+                    />
+                  </label>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="justify-self-start"
+                  disabled={busy || !codes(branches).length || !codes(reasons).length}
+                >
+                  Salvar configuração
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  A importação usa só as linhas com estas filiais (coluna Filial) e motivos (coluna
+                  Motivo). Separe por vírgula.
+                </p>
+              </form>
+            )}
+            {team.role && (
+              <p className="text-xs text-muted-foreground">
+                Papéis: o responsável e os administradores convidam e removem pessoas; conferentes
+                cadastram e conferem; só leitura apenas consulta. Só o responsável muda papéis.
+              </p>
             )}
             <p className="text-xs text-muted-foreground">
               Os registros anteriores do responsável continuam nesta equipe. Dados pessoais de outra

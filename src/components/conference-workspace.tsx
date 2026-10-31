@@ -65,6 +65,7 @@ import { applyDemandImports } from "@/lib/shared-demand-import";
 import { applyImports, type ImportDraft, type ImportOutcome } from "@/lib/manifest-import";
 import type { ConferenceState } from "@/lib/conference-state";
 import type { FindArchived } from "@/lib/conference-archive";
+import { describeLuftFilter, type LuftFilter } from "@/lib/luft-spreadsheet";
 import {
   activityTimestamp,
   conferenceTimestamp,
@@ -117,6 +118,8 @@ export function ConferenceWorkspace({
   onScopeChange,
   onManageTeam,
   findArchived,
+  readOnly = false,
+  importFilter,
 }: {
   initialState?: ConferenceState;
   externalState?: ConferenceState;
@@ -131,6 +134,10 @@ export function ConferenceWorkspace({
   onManageTeam?: (() => void) | undefined;
   /** Looks up manifests moved to the archive; absent in standalone use. */
   findArchived?: FindArchived | undefined;
+  /** The account's role only allows reading this team's records. */
+  readOnly?: boolean;
+  /** The team's 108 filter (branches and reasons). */
+  importFilter?: LuftFilter | undefined;
 } = {}) {
   const [manifests, setManifests] = useState<Manifest[]>(initialState?.manifests ?? []);
   const current = useRef(manifests);
@@ -138,7 +145,7 @@ export function ConferenceWorkspace({
   const [localScope, setLocalScope] = useState<WorkspaceScope>(accountEmail ? "mine" : "team");
   const scope = controlledScope ?? localScope;
   const scopeOrigin = useRef(scope);
-  const teamReadOnly = !!accountEmail && scope === "team";
+  const teamReadOnly = readOnly || (!!accountEmail && scope === "team");
   const demandOwner =
     scope === "mine" && accountEmail ? { email: accountEmail, userId: accountId } : undefined;
   function changeScope(next: WorkspaceScope) {
@@ -633,7 +640,7 @@ export function ConferenceWorkspace({
       log(
         "Documentos importados",
         drafts.every((draft) => isExportManifest(draft.id))
-          ? `${drafts.length} manifesto(s) da planilha 108 · filial 06 / DIS`
+          ? `${drafts.length} manifesto(s) da planilha 108 · ${describeLuftFilter(importFilter)}`
           : `${drafts.length} foto(s) / pré(s) revisados`,
       );
       notify(
@@ -1256,6 +1263,7 @@ export function ConferenceWorkspace({
             sharedDemands={sharedDemands}
             onUpdateOccurrences={updateOccurrences}
             findArchived={findArchived}
+            filter={importFilter}
           />
         )}
         {newOpen && (

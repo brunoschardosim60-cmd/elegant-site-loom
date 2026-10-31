@@ -26,7 +26,13 @@ export default defineConfig(async ({ command }) => {
     const { nitro } = await import("nitro/vite");
     // Nitro detects the hosting platform (e.g. Vercel) from the build environment;
     // the default preset only applies to local builds.
-    plugins.push(nitro({ defaultPreset: "cloudflare-module" }));
+    plugins.push(
+      nitro({
+        defaultPreset: "cloudflare-module",
+        // Run server code in São Paulo, next to the users and the Supabase database.
+        vercel: { functions: { regions: ["gru1"] } },
+      }),
+    );
   }
   plugins.push(viteReact());
   return {

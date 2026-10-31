@@ -52,11 +52,27 @@ export const isLuft108Header = (row: SheetCell[]) =>
 export const luftColumnIndex = (row: SheetCell[], name: string) =>
   row.findIndex((cell) => normalized(cell) === normalized(name));
 
-export const isLuft108Demand = (branch: SheetCell | undefined, reason: SheetCell | undefined) =>
-  ["06", "6"].includes(normalized(branch)) && normalized(reason) === "DIS";
+/** Which rows of the 108 export belong to the team (team settings; default 06/DIS). */
+export type LuftFilter = { branches: string[]; reasons: string[] };
+export const defaultLuftFilter: LuftFilter = { branches: ["06"], reasons: ["DIS"] };
+/** Branch codes compare as numbers when numeric: Excel may store 06 as 6. */
+const branchKey = (value: string) => (/^\d+$/.test(value) ? String(Number(value)) : value);
+export const isLuft108Demand = (
+  branch: SheetCell | undefined,
+  reason: SheetCell | undefined,
+  filter: LuftFilter = defaultLuftFilter,
+) =>
+  filter.branches.some((code) => branchKey(normalized(code)) === branchKey(normalized(branch))) &&
+  filter.reasons.some((code) => normalized(code) === normalized(reason));
+/** "filial 06 / DIS" or "filiais 06, 12 / DIS, TRA", for messages. */
+export const describeLuftFilter = (filter: LuftFilter = defaultLuftFilter) =>
+  `${filter.branches.length > 1 ? "filiais" : "filial"} ${filter.branches.join(", ")} / ${filter.reasons.join(", ")}`;
 
 /** Literal cell values only. No OCR substitutions, inferred series or guessed zeros. */
-export function parseLuft108(sheets: LuftSheet[]): LuftExport {
+export function parseLuft108(
+  sheets: LuftSheet[],
+  filter: LuftFilter = defaultLuftFilter,
+): LuftExport {
   const matching = sheets.filter((sheet) => isLuft108Header(sheet.rows[0] ?? []));
   if (matching.length > 1)
     throw new Error(
@@ -123,7 +139,7 @@ export function parseLuft108(sheets: LuftSheet[]): LuftExport {
     if (cells.every((cell) => cell === null || cell === "")) continue;
     const at = (field: (typeof fields)[number]) => cells[indexes[field]];
     // Excel may store branch 06 as the integer 6, but CTC and manifest zeros are never guessed.
-    if (!isLuft108Demand(at("Filial"), at("Motivo"))) {
+    if (!isLuft108Demand(at("Filial"), at("Motivo"), filter)) {
       ignored++;
       continue;
     }
@@ -251,7 +267,7 @@ export function parseLuft108(sheets: LuftSheet[]): LuftExport {
       errors.push(`Manifesto ${draft.id}: excede o limite de CTCs ou volumes por cadastro.`);
   if (!selectedRows)
     throw new Error(
-      "Nenhuma linha da filial 06 com motivo DIS foi encontrada. TRA e outras filiais não são importados.",
+      `Nenhuma linha da ${describeLuftFilter(filter)} foi encontrada. Confira a configuração da equipe ou o período exportado.`,
     );
   return { drafts, ignored, repeated, selectedRows, errors };
 }
