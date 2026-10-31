@@ -188,3 +188,40 @@ it("records browser errors with size and rate limits, and keeps them unreadable 
   await login(1, "anon");
   await expect(rpc("report_client_error", ["anon"])).rejects.toThrow("permission denied");
 });
+
+it("saves and returns the 108 cargo details through the save RPC", async () => {
+  const base = (await rpc("get_conference_team")).data;
+  const cargo = {
+    ...manifest("26180001", "0000000001"),
+    checker: "SADI",
+    documents: [
+      {
+        ...manifest("26180001", "0000000001").documents[0]!,
+        cargoValueCents: 3944160,
+        weightGrams: 83160,
+        nature: "MAT.LAB",
+        city: "PORTO ALEGRE",
+      },
+    ],
+  };
+  const saved = await rpc<{ data: ConferenceState }>("save_team_conference_v2", [
+    base,
+    { ...base, manifests: [cargo] },
+  ]);
+  expect(saved.data.manifests[0]).toMatchObject({ checker: "SADI" });
+  expect(saved.data.manifests[0]!.documents[0]).toMatchObject({
+    cargoValueCents: 3944160,
+    weightGrams: 83160,
+    nature: "MAT.LAB",
+    city: "PORTO ALEGRE",
+  });
+  await expect(
+    rpc("save_team_conference_v2", [
+      saved.data,
+      {
+        ...saved.data,
+        manifests: [{ ...cargo, documents: [{ ...cargo.documents[0]!, cargoValueCents: -5 }] }],
+      },
+    ]),
+  ).rejects.toThrow("CONFERENCE_INVALID");
+});

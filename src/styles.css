@@ -953,3 +953,13 @@ h1 { font-size: 22px; }
 .legal-footer a:hover { color: var(--primary); }
 @media (max-width: 760px) { .legal-page { padding: 16px 16px 40px; } .legal-page article { padding: 24px 20px; } .legal-page h1 { font-size: 23px; } }
 
+/* Indicators view */
+.metrics-view { display: grid; gap: 16px; }
+.metrics-view .metric-value { font-size: 24px; }
+.metrics-table-wrap { overflow-x: auto; }
+.metrics-table caption { text-align: left; font-weight: 700; font-size: 12px; padding: 14px 16px 6px; }
+.metrics-table th, .metrics-table td { padding: 9px 16px; }
+.metrics-table td:not(:first-child), .metrics-table th:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+.metrics-table tr[data-late="true"] td:nth-child(3) { color: var(--warning); font-weight: 700; }
+@media (max-width: 760px) { .metrics-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+

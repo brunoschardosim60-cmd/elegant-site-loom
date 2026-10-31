@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
+  BarChart3,
   Loader2,
   ArrowRight,
   Barcode,
@@ -60,6 +61,7 @@ import { NfOccurrences } from "./nf-occurrences";
 import { planOccurrenceUpdates } from "@/lib/nf-occurrences";
 import { documentPageSize } from "./document-pagination";
 import { PendingTable } from "./pending-table";
+import { ConferenceMetricsView } from "./conference-metrics";
 import { ScanForm } from "./scan-form";
 import { applyDemandImports } from "@/lib/shared-demand-import";
 import { applyImports, type ImportDraft, type ImportOutcome } from "@/lib/manifest-import";
@@ -80,7 +82,7 @@ import {
   normalizeIssueDate,
 } from "@/lib/manifest-date";
 
-type View = "pending" | "missing" | "finished" | "issues" | "tracking";
+type View = "pending" | "missing" | "finished" | "issues" | "tracking" | "metrics";
 type Activity = {
   id: number | string;
   title: string;
@@ -97,6 +99,7 @@ const titles: Record<View, string> = {
   finished: "Manifestos finalizados",
   issues: "Ocorrências da conferência",
   tracking: "Rastreamento de CTCs",
+  metrics: "Indicadores da operação",
 };
 const timeNow = () =>
   new Date().toLocaleTimeString("pt-BR", {
@@ -243,7 +246,7 @@ export function ConferenceWorkspace({
     setReceiptReviewUpdated(false);
   }, [scope]);
   async function exportPdf() {
-    if (pdfBusy) return;
+    if (pdfBusy || view === "metrics") return;
     setPdfBusy(true);
     try {
       const { exportConferencePdf } = await import("@/lib/conference-pdf");
@@ -687,6 +690,7 @@ export function ConferenceWorkspace({
     { view: "missing" as const, label: "Pendências", count: missing.length, Icon: Clock3 },
     { view: "finished" as const, label: "Finalizados", count: finished.length, Icon: FileCheck2 },
     { view: "tracking" as const, label: "Rastreamento", count: documents.length, Icon: Search },
+    { view: "metrics" as const, label: "Indicadores", count: 0, Icon: BarChart3 },
     {
       view: "issues" as const,
       label: "Ocorrências",
@@ -742,7 +746,7 @@ export function ConferenceWorkspace({
                   >
                     <Icon />
                     <span className="workspace-sidebar-nav-label">{label}</span>
-                    {(target !== "issues" || count > 0) && (
+                    {target !== "metrics" && (target !== "issues" || count > 0) && (
                       <span className="nav-count">{count}</span>
                     )}
                   </Button>
@@ -754,7 +758,7 @@ export function ConferenceWorkspace({
                   className="workspace-sidebar-tooltip"
                 >
                   {label}
-                  {target !== "issues" || count > 0 ? ` · ${count}` : ""}
+                  {target !== "metrics" && (target !== "issues" || count > 0) ? ` · ${count}` : ""}
                 </TooltipContent>
               </Tooltip>
             ))}
@@ -950,8 +954,10 @@ export function ConferenceWorkspace({
                           ? "Conferências concluídas"
                           : view === "tracking"
                             ? "Consulta de documentos"
-                            : "Ocorrências"}
-                    <span className="section-count">
+                            : view === "metrics"
+                              ? "Indicadores"
+                              : "Ocorrências"}
+                    <span className="section-count" hidden={view === "metrics"}>
                       {view === "issues"
                         ? issues.length
                         : view === "missing"
@@ -985,6 +991,7 @@ export function ConferenceWorkspace({
                     size="sm"
                     onClick={() => void exportPdf()}
                     disabled={pdfBusy}
+                    hidden={view === "metrics"}
                     className="text-[11px]"
                   >
                     {pdfBusy ? (
@@ -995,7 +1002,7 @@ export function ConferenceWorkspace({
                     {pdfBusy ? "Gerando PDF…" : "PDF"}
                   </Button>
                 </div>
-                {view !== "issues" && (
+                {view !== "issues" && view !== "metrics" && (
                   <div className="list-tools">
                     <div className="search-wrap">
                       <Search />
@@ -1042,7 +1049,9 @@ export function ConferenceWorkspace({
                   </div>
                 )}
                 <div className="manifest-list">
-                  {view === "tracking" ? (
+                  {view === "metrics" ? (
+                    <ConferenceMetricsView manifests={presented} now={now} />
+                  ) : view === "tracking" ? (
                     <CtcTracking
                       rows={trackingRows}
                       archivedIds={new Set(trackingArchive.map((item) => item.id))}

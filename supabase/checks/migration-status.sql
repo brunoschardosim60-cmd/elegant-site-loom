@@ -74,7 +74,10 @@ checks(migration, applied, detail) as (values
     to_regclass('public.conference_owner_allowlist') is not null
       and to_regclass('public.conference_client_errors') is not null
       and exists(select 1 from has_fn where name = 'set_conference_settings(text[],text[])'),
-    'papéis, cadastro por convite, filial configurável e registro de erros')
+    'papéis, cadastro por convite, filial configurável e registro de erros'),
+  ('20261030040000_cargo_details',
+    exists(select 1 from fn where sig = 'conference_validate_input(jsonb)' and def like '%cargoValueCents%'),
+    'valor, peso, natureza, cidade e conferente da planilha')
 )
 select migration as "migração",
   case when applied then 'aplicada' else 'FALTANDO' end as "situação",

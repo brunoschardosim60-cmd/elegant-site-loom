@@ -61,6 +61,10 @@ const documentSchema = z.object({
     .array(z.string().refine((value) => normalizeIssueDate(value) === value))
     .max(300)
     .optional(),
+  cargoValueCents: z.number().int().nonnegative().optional(),
+  weightGrams: z.number().int().nonnegative().optional(),
+  nature: z.string().max(120).optional(),
+  city: z.string().max(120).optional(),
 });
 export const manifestSchema = z.object({
   id: z.string(),
@@ -85,6 +89,7 @@ export const manifestSchema = z.object({
   expectedRows: z.number().int().min(0).max(300).optional(),
   totalVolumes: z.number().int().min(0).max(1000000).optional(),
   totalsReviewed: z.boolean().optional(),
+  checker: z.string().max(120).optional(),
   sourcePhotoHashes: z.array(z.string().regex(/^[a-f0-9]{64}$/i)).optional(),
   documents: z.array(documentSchema),
   finishedAt: z.string().optional(),

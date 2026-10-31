@@ -68,6 +68,19 @@ export const isLuft108Demand = (
 export const describeLuftFilter = (filter: LuftFilter = defaultLuftFilter) =>
   `${filter.branches.length > 1 ? "filiais" : "filial"} ${filter.branches.join(", ")} / ${filter.reasons.join(", ")}`;
 
+/** A decimal amount (number or "1.234,56"/"1234.56" text) as an integer of the unit × factor. */
+function scaled(cell: SheetCell | undefined, factor: number): number | undefined {
+  let value = typeof cell === "number" ? cell : NaN;
+  if (typeof cell === "string") {
+    const text = cell.trim();
+    const plain = /,\d{1,3}$/.test(text) ? text.replace(/\./g, "").replace(",", ".") : text;
+    if (/^\d+(\.\d+)?$/.test(plain)) value = Number(plain);
+  }
+  if (!Number.isFinite(value) || value < 0) return undefined;
+  const result = Math.round(value * factor);
+  return Number.isSafeInteger(result) ? result : undefined;
+}
+
 /** Literal cell values only. No OCR substitutions, inferred series or guessed zeros. */
 export function parseLuft108(
   sheets: LuftSheet[],
@@ -105,6 +118,16 @@ export function parseLuft108(
     throw new Error(
       "As colunas de última ocorrência estão repetidas. Gere novamente o relatório 108.",
     );
+  // Optional cargo details; a missing or repeated column is simply not read.
+  const optional = (name: string) => {
+    const found = headers.flatMap((cell, at) => (normalized(cell) === name ? [at] : []));
+    return found.length === 1 ? found[0]! : -1;
+  };
+  const valueIndex = optional("VALOR MERC"),
+    weightIndex = optional("PESO"),
+    natureIndex = optional("NATUREZA"),
+    cityIndex = optional("CIDADE ENTREGA"),
+    checkerIndex = optional("CONFERENTE");
   const timeIndex = headers.findIndex((cell) => normalized(cell) === "HORAEMISSAO");
   const deliveryIndex = headers.findIndex((cell) => normalized(cell) === "PREV ENTREGA");
   if (
@@ -239,12 +262,36 @@ export function parseLuft108(
       fail(`o manifesto ${id} tem motorista, placa ou data conflitantes`);
       continue;
     }
+    const cargoValueCents = scaled(valueIndex >= 0 ? cells[valueIndex] : null, 100);
+    const weightGrams = scaled(weightIndex >= 0 ? cells[weightIndex] : null, 1000);
+    const nature =
+      natureIndex >= 0
+        ? String(cells[natureIndex] ?? "")
+            .trim()
+            .slice(0, 120)
+        : "";
+    const city =
+      cityIndex >= 0
+        ? String(cells[cityIndex] ?? "")
+            .trim()
+            .slice(0, 120)
+        : "";
+    if (!draft.checker && checkerIndex >= 0) {
+      const checker = String(cells[checkerIndex] ?? "")
+        .trim()
+        .slice(0, 120);
+      if (checker) draft.checker = checker;
+    }
     draft.rows.push({
       ctc,
       nf: `${nf}-${series}`,
       volumes: String(volumes),
       client,
       recipient,
+      ...(cargoValueCents !== undefined ? { cargoValueCents } : {}),
+      ...(weightGrams !== undefined ? { weightGrams } : {}),
+      ...(nature ? { nature } : {}),
+      ...(city ? { city } : {}),
       ...(deliveryDate ? { deliveryDate } : {}),
       ...(occurrenceCode ? { occurrenceCode } : {}),
       ...(occurrenceDescription ? { occurrenceDescription } : {}),
