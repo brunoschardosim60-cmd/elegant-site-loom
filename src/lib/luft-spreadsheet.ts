@@ -52,11 +52,40 @@ export const isLuft108Header = (row: SheetCell[]) =>
 export const luftColumnIndex = (row: SheetCell[], name: string) =>
   row.findIndex((cell) => normalized(cell) === normalized(name));
 
-export const isLuft108Demand = (branch: SheetCell | undefined, reason: SheetCell | undefined) =>
-  ["06", "6"].includes(normalized(branch)) && normalized(reason) === "DIS";
+/** Which rows of the 108 export belong to the team (team settings; default 06/DIS). */
+export type LuftFilter = { branches: string[]; reasons: string[] };
+export const defaultLuftFilter: LuftFilter = { branches: ["06"], reasons: ["DIS"] };
+/** Branch codes compare as numbers when numeric: Excel may store 06 as 6. */
+const branchKey = (value: string) => (/^\d+$/.test(value) ? String(Number(value)) : value);
+export const isLuft108Demand = (
+  branch: SheetCell | undefined,
+  reason: SheetCell | undefined,
+  filter: LuftFilter = defaultLuftFilter,
+) =>
+  filter.branches.some((code) => branchKey(normalized(code)) === branchKey(normalized(branch))) &&
+  filter.reasons.some((code) => normalized(code) === normalized(reason));
+/** "filial 06 / DIS" or "filiais 06, 12 / DIS, TRA", for messages. */
+export const describeLuftFilter = (filter: LuftFilter = defaultLuftFilter) =>
+  `${filter.branches.length > 1 ? "filiais" : "filial"} ${filter.branches.join(", ")} / ${filter.reasons.join(", ")}`;
+
+/** A decimal amount (number or "1.234,56"/"1234.56" text) as an integer of the unit × factor. */
+function scaled(cell: SheetCell | undefined, factor: number): number | undefined {
+  let value = typeof cell === "number" ? cell : NaN;
+  if (typeof cell === "string") {
+    const text = cell.trim();
+    const plain = /,\d{1,3}$/.test(text) ? text.replace(/\./g, "").replace(",", ".") : text;
+    if (/^\d+(\.\d+)?$/.test(plain)) value = Number(plain);
+  }
+  if (!Number.isFinite(value) || value < 0) return undefined;
+  const result = Math.round(value * factor);
+  return Number.isSafeInteger(result) ? result : undefined;
+}
 
 /** Literal cell values only. No OCR substitutions, inferred series or guessed zeros. */
-export function parseLuft108(sheets: LuftSheet[]): LuftExport {
+export function parseLuft108(
+  sheets: LuftSheet[],
+  filter: LuftFilter = defaultLuftFilter,
+): LuftExport {
   const matching = sheets.filter((sheet) => isLuft108Header(sheet.rows[0] ?? []));
   if (matching.length > 1)
     throw new Error(
@@ -89,6 +118,16 @@ export function parseLuft108(sheets: LuftSheet[]): LuftExport {
     throw new Error(
       "As colunas de última ocorrência estão repetidas. Gere novamente o relatório 108.",
     );
+  // Optional cargo details; a missing or repeated column is simply not read.
+  const optional = (name: string) => {
+    const found = headers.flatMap((cell, at) => (normalized(cell) === name ? [at] : []));
+    return found.length === 1 ? found[0]! : -1;
+  };
+  const valueIndex = optional("VALOR MERC"),
+    weightIndex = optional("PESO"),
+    natureIndex = optional("NATUREZA"),
+    cityIndex = optional("CIDADE ENTREGA"),
+    checkerIndex = optional("CONFERENTE");
   const timeIndex = headers.findIndex((cell) => normalized(cell) === "HORAEMISSAO");
   const deliveryIndex = headers.findIndex((cell) => normalized(cell) === "PREV ENTREGA");
   if (
@@ -123,7 +162,7 @@ export function parseLuft108(sheets: LuftSheet[]): LuftExport {
     if (cells.every((cell) => cell === null || cell === "")) continue;
     const at = (field: (typeof fields)[number]) => cells[indexes[field]];
     // Excel may store branch 06 as the integer 6, but CTC and manifest zeros are never guessed.
-    if (!isLuft108Demand(at("Filial"), at("Motivo"))) {
+    if (!isLuft108Demand(at("Filial"), at("Motivo"), filter)) {
       ignored++;
       continue;
     }
@@ -223,12 +262,36 @@ export function parseLuft108(sheets: LuftSheet[]): LuftExport {
       fail(`o manifesto ${id} tem motorista, placa ou data conflitantes`);
       continue;
     }
+    const cargoValueCents = scaled(valueIndex >= 0 ? cells[valueIndex] : null, 100);
+    const weightGrams = scaled(weightIndex >= 0 ? cells[weightIndex] : null, 1000);
+    const nature =
+      natureIndex >= 0
+        ? String(cells[natureIndex] ?? "")
+            .trim()
+            .slice(0, 120)
+        : "";
+    const city =
+      cityIndex >= 0
+        ? String(cells[cityIndex] ?? "")
+            .trim()
+            .slice(0, 120)
+        : "";
+    if (!draft.checker && checkerIndex >= 0) {
+      const checker = String(cells[checkerIndex] ?? "")
+        .trim()
+        .slice(0, 120);
+      if (checker) draft.checker = checker;
+    }
     draft.rows.push({
       ctc,
       nf: `${nf}-${series}`,
       volumes: String(volumes),
       client,
       recipient,
+      ...(cargoValueCents !== undefined ? { cargoValueCents } : {}),
+      ...(weightGrams !== undefined ? { weightGrams } : {}),
+      ...(nature ? { nature } : {}),
+      ...(city ? { city } : {}),
       ...(deliveryDate ? { deliveryDate } : {}),
       ...(occurrenceCode ? { occurrenceCode } : {}),
       ...(occurrenceDescription ? { occurrenceDescription } : {}),
@@ -251,7 +314,7 @@ export function parseLuft108(sheets: LuftSheet[]): LuftExport {
       errors.push(`Manifesto ${draft.id}: excede o limite de CTCs ou volumes por cadastro.`);
   if (!selectedRows)
     throw new Error(
-      "Nenhuma linha da filial 06 com motivo DIS foi encontrada. TRA e outras filiais não são importados.",
+      `Nenhuma linha da ${describeLuftFilter(filter)} foi encontrada. Confira a configuração da equipe ou o período exportado.`,
     );
   return { drafts, ignored, repeated, selectedRows, errors };
 }

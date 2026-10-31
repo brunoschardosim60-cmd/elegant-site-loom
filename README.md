@@ -1,89 +1,61 @@
-# Elegant Site Loom
+# confere.
 
-Controle de retorno de CTCs e pré-manifestos, com importação da planilha 108, leitura de fotos no próprio navegador (OCR local) e cadastros compartilhados por equipe no Supabase.
+Conferência de CTCs e pré-manifestos para operações de transporte. A equipe cadastra os pré-manifestos (pela planilha 108 ou por foto), bipa os CTCs que retornam, acompanha as pendências por motorista e gera relatórios em PDF. Cada ação fica registrada com autor e horário.
 
-## Dados e acesso
+## O que o sistema faz
 
-- Login por e-mail e senha, com confirmação de e-mail pelo Supabase.
-- A tela de entrada oferece **Esqueci minha senha**. O Supabase envia um link para a origem do site; essa origem deve estar autorizada em Authentication → URL Configuration. O aplicativo mantém a tela de recuperação enquanto a sessão do link é validada e permite definir e confirmar uma nova senha. Links inválidos/expirados oferecem nova solicitação, mesmo quando há outra sessão aberta. Nenhuma senha é guardada nos cadastros; a confirmação do envio não revela se o e-mail possui conta.
-- Cadastros, conferências, atividades e ocorrências ficam em `conference_states`. Os dados anteriores do responsável são preservados. Equipes com acesso por convite compartilham essa mesma conferência por RPCs que verificam a participação; todas as tabelas mantêm RLS, sem leitura pública ou gravação direta pelos clientes.
-- Em **Equipe**, o responsável inclui os e-mails dos integrantes. Eles criam e confirmam suas próprias contas, entram pelo mesmo endereço do site e aceitam o convite em **Equipe**. A entrada na equipe exige essa ação explícita e o e-mail confirmado; outros usuários recebem uma conferência separada. Não é enviado e-mail automático nem importado o histórico pessoal de outra conta. Convites pendentes podem ser cancelados.
-- Telas visíveis consultam a revisão a cada dois segundos; só baixam os dados completos quando mudam. Voltar à aba também atualiza. Bipes, buscas e rascunhos de importação continuam montados. O salvamento trava a equipe no banco e combina apenas os campos alterados desde a base: CTCs diferentes e prés diferentes podem ser alterados ao mesmo tempo. Bipes repetidos são idempotentes. Duplicatas de pré, CTC e impressão digital de foto são rejeitadas no servidor, inclusive quando dois dispositivos cadastram simultaneamente.
-- Alterações incompatíveis no mesmo campo e exclusão contra edição são rejeitadas, preservando as mudanças locais para PDF e revisão. Falhas de rede oferecem nova tentativa e saídas com alterações não salvas são protegidas. Requisições de sincronização têm limite de 15 segundos. Não há garantia de trabalho offline com a página fechada.
-- O status no topo confirma quando o banco terminou de salvar. Falhas mantêm os dados na tela e oferecem nova tentativa.
-- Cada pré, aberto ou finalizado, oferece **Excluir pré**. A confirmação identifica pré, motorista, placa, CTCs e volumes, com foco inicial em Cancelar. Confirmar remove somente esse pré, seus documentos e a impressão digital da foto; preserva os outros cadastros e o histórico, registrando a exclusão nas atividades. A mudança usa o mesmo salvamento com revisão no Supabase; confira o status de salvamento. O leitor fica bloqueado durante a confirmação e o arquivo pode ser importado novamente após a exclusão.
-- Fotos e rascunhos de importação não são armazenados no banco; fechar o formulário os descarta.
-- Falhas transitórias ao consultar atualizações da equipe são tentadas novamente com espera progressiva de 5 a 60 segundos. A reconexão combina os dados remotos antes de salvar alterações locais. Falhas de gravação e conflitos reais continuam exigindo ação explícita, sem reenvio automático.
-- A emissão do pré é guardada em `issueDate` (`YYYY-MM-DD`), separada da data de cadastro. Cartões, pendências, ordenação e PDF usam a emissão quando disponível; registros antigos continuam identificados pela data de cadastro. A idade considera dias do calendário de Brasília. A data pode ser corrigida na importação e nos prés cadastrados.
-- A configuração publicável do projeto está em `src/lib/supabase-config.ts`. `SUPABASE_URL` e `SUPABASE_PUBLISHABLE_KEY` podem substituí-la no servidor. Nunca use uma chave secret/service-role nessa configuração.
-- A leitura de fotos roda inteiramente no navegador (OCR local com Tesseract). Nenhuma foto, texto lido ou rascunho é enviado a serviços externos de IA, e o servidor não guarda chaves de IA.
-- Migrações: aplique todos os arquivos de `supabase/migrations/` em ordem de nome (data). Publicar o código não executa as migrações automaticamente. A mais recente, `20261030010000_remove_photo_ai.sql`, remove as funções e a tabela que só serviam à antiga leitura por IA. Testes transacionais de permissões: `supabase/tests/conference-security.sql` (fixtures desfeitas com rollback).
+- **Importação da planilha 108:** lê o XLSX no navegador e cadastra os manifestos do período escolhido.
+- **Leitura de fotos:** o OCR roda no próprio aparelho. As fotos não são enviadas nem guardadas, e os campos incertos ficam sinalizados para revisão.
+- **Conferência por bipe:** com leitor de código de barras ou digitando o CTC. Um CTC repetido não conta duas vezes.
+- **Equipe e papéis:** os integrantes entram só por convite e trabalham na mesma base ao mesmo tempo. Papéis: responsável, administrador, conferente e só leitura. Conflitos de edição nunca sobrescrevem o trabalho de outra pessoa.
+- **Filial configurável:** cada equipe escolhe quais filiais e motivos da planilha 108 importa (padrão: 06 / DIS).
+- **Indicadores:** taxa de devolução, valor de mercadoria com CTC pendente, atrasados, perecíveis e tempo até a devolução, por motorista e por cidade.
+- **Rastreamento, PDF e Excel:** busca CTCs, inclusive nos prés arquivados, e exporta a seleção.
+- **Bipe sonoro:** sons diferentes para conferido, pré finalizado, aviso e erro.
+- **Histórico:** auditoria imutável de cadastros, conferências, alterações e exclusões.
+- **Arquivo automático:** prés finalizados há mais de 30 dias saem da lista de trabalho e continuam consultáveis.
 
-O botão discreto **Histórico** de cada pré e a aba **Equipe → Histórico de ações** mostram cadastro, inclusão/alteração de CTC e NF, conferência/desfazer, finalização/reabertura, edição e exclusão. O banco atribui e-mail, identidade e horário da transação; o navegador não pode escrever nem alterar a auditoria. O histórico pode ser filtrado e paginado, incluindo prés excluídos. Cadastros anteriores à ativação não recebem autoria retroativa. As atividades resumidas da tela usam UUID para evitar colisão entre dispositivos.
+## Tecnologia
 
-**Rastreamento** consulta os CTCs dos prés abertos e finalizados, com busca, filtro de status, data/hora da conferência em Brasília e PDF da seleção. Uma busca de dez dígitos corresponde ao CTC exato, preservando zeros. A tela exibe até 50 registros por página; a busca e o PDF abrangem todos os registros selecionados. Consultar não marca documentos como recebidos. Registros antigos sem `receivedAt` mostram “Horário não registrado”.
+React 19 e TanStack Start (SSR), Supabase (PostgreSQL, autenticação e regras de acesso por linha), Tesseract.js para o OCR local e Vercel para hospedagem. Nenhum serviço de IA ou CDN externa é usado em tempo de execução.
 
-## Leitura e revisão
+## Rodar localmente
 
-- O PDF usa A4 na horizontal, agrupa os prés por motorista e mostra placa, CTC, NF, volumes, cliente/laboratório, destinatário e situação. Respeita a tela, a busca e o filtro selecionados; tabelas longas repetem os cabeçalhos, com numeração de páginas e horário de Brasília. A exportação CSV e a análise manual de divergências por IA foram removidas.
-- O menu lateral pode ser recolhido no desktop, mantendo ícones, contagens e dicas acessíveis. A navegação e o leitor permanecem montados, sem perder o que foi digitado. No celular, permanece a navegação horizontal.
-
-- Fotos são uma alternativa à planilha 108: o OCR local lê a foto no navegador e sinaliza campos vazios ou incertos para revisão. A planilha 108 também é lida no navegador, sem chamadas pagas.
-- Duas fotos são processadas por vez. Quinze segundos é uma meta, sem cancelar a foto nesse ponto; há um limite técnico de 45 segundos por foto para evitar travamentos. Esses limites não prometem precisão ou conclusão de toda foto nesse prazo.
-- A importação valida formatos, duplicatas, CTCs distintos, quantidade de NFs e soma dos volumes. As contagens de CTC, NF e volumes aparecem na revisão, e totais diferentes exigem confirmação explícita. Totais iguais não comprovam os dígitos nem a associação correta entre colunas.
-- O botão **Reler detalhes desta foto** faz uma leitura local mais detalhada da mesma foto, preservando a posição do arquivo e as edições dos outros rascunhos. Se a nova leitura encontrar menos CTCs válidos, os dados anteriores e as correções manuais são preservados.
-- O botão **Parar** e os prazos abortam os workers de leitura; callbacks tardios são ignorados. Fotos repetidas são ignoradas e nada é salvo antes do cadastro explícito.
-
-- Durante a leitura, os campos ficam bloqueados. O botão **Parar** invalida imediatamente a execução e libera a interface, sem aguardar uma promessa travada. Resultados concluídos permanecem disponíveis; fotos sem resultado saem da fila. Progresso tardio não altera o formulário nem uma nova leitura. Fechar descarta todos os rascunhos e fotos.
-- Avisos de NF, volumes, CTC, laboratório e destinatário aparecem junto à respectiva caixa, com indicação visual e descrição acessível. Não há um bloco genérico acima de cada CTC.
-- Fotos idênticas no lote ou já presentes no formulário são ignoradas usando SHA-256 em memória. O cálculo roda em um grupo paralelo limitado (duas fotos no celular; até quatro em computadores compatíveis) e preserva a ordem original, para começar o OCR mais cedo sem carregar todas as imagens na memória ao mesmo tempo. Ao cadastrar, apenas a impressão digital do arquivo fica em `sourcePhotoHashes` no pré, junto aos dados da conta. Reenviar o mesmo arquivo, mesmo renomeado ou em outro dispositivo, identifica o pré já cadastrado antes de iniciar o OCR. Fotos antigas sem essa impressão digital ainda precisam ser lidas para identificar seu pré. Fechar sem cadastrar descarta os rascunhos; fotos, texto bruto e resultados não cadastrados não são persistidos. Uma releitura explícita do rascunho continua disponível.
-- A importação sinaliza o pré ou CTC repetido junto ao campo, incluindo conflitos com outros arquivos do lote e prés finalizados. A função de cadastro repete essa validação e rejeita o lote inteiro em caso de conflito. Cada novo CTC de 10 dígitos fica vinculado a um único pré; o aviso identifica o pré e motorista existentes. Conflitos de registros antigos bloqueiam o bipe, sem marcar nenhum documento; bipes repetidos de um CTC já conferido não aumentam a contagem.
-- Um DACTE pode ser vinculado a um pré novo do mesmo lote independentemente da ordem das fotos. O cadastro cria os prés antes de adicionar os DACTEs, mantendo a indicação do arquivo original se houver erro. A conferência manual usa o estado mais recente para preservar marcações feitas por bipes rápidos.
-- O OCR local usa um caminho rápido primeiro no celular (foto de até 3000 px) e só sobe para a versão de 3840 px quando encontra linha/campo ausente ou divergência de totais. Fotos cujos campos principais foram lidos corretamente não repetem a página inteira nem decodificam a foto para tons de cinza sem necessidade. Em casos suspeitos, faz recortes agrupados de CTCs, NFs e volumes, com tentativas adicionais de recuperação. Também recompõe CTCs divididos em tokens numéricos adjacentes na mesma linha e coluna; não combina fragmentos entre linhas. A associação usa posições para que uma célula ausente não desloque as seguintes, e uma segunda releitura não desfaz um volume já recuperado por uma tentativa melhor. Pode haver erros mesmo com formatos e totais corretos; mudanças e campos não confirmados continuam para revisão. Não há cadastro automático nem promessa de exatidão de 100%.
-
-This project was built with [Lovable](https://lovable.dev).
-
-## Build with Lovable
-
-Continue developing this project in the [Lovable editor](https://lovable.dev/projects/0c2d18b1-bafd-47c8-aa61-ab10fdedeb3f).
-
-- **Ship faster**: describe what you want to build and Lovable handles the code.
-- **Stay in sync**: every change made in Lovable is committed straight to this repository.
-- **Full ownership**: this code is yours. Push to `main` on GitHub and your changes sync back into Lovable, ready for your next prompt.
-
-## Development
-
-Prefer working locally? You need Node.js and npm — [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating).
+Requer [Bun](https://bun.sh) 1.2+ e Node.js 22+.
 
 ```sh
-git clone <this-repository-url>
-cd <repository-name>
-npm i
-npm run dev
+bun install
+bun run dev        # servidor de desenvolvimento
+bun run test       # todos os testes, incluindo banco em PostgreSQL embutido
+bun run build      # build de produção
 ```
 
-## Validação com sessões simultâneas
+## Publicar
 
-`src/test/conference-multisession.test.ts` usa três instâncias independentes de `TeamSync`, requisições HTTP sobrepostas e as migrações reais em PostgreSQL/PGlite isolado. Verifica recebimentos distintos, bipe repetido, importações diferentes, duplicatas de pré/CTC, conflito de NF, exclusão versus recebimento e resposta perdida após commit. Confere convergência, auditoria autenticada e finalização única, incluindo uma equipe com quatro integrantes. PGlite serializa as transações; este teste não substitui uma carga em múltiplas conexões PostgreSQL nem três aparelhos físicos. Não usa contas, chaves ou cadastros de produção.
+1. **Banco:** rode `supabase/checks/migration-status.sql` no editor SQL do Supabase (só lê, não altera nada) e aplique, em ordem de nome, as migrações marcadas como FALTANDO. Ordem com o deploy:
+   - até `20261030020000_conference_archive.sql`: aplique antes ou depois do deploy, tanto faz;
+   - publique o app;
+   - depois aplique `20261030030000_roles_settings_monitoring.sql` e `20261030040000_cargo_details.sql`. A primeira fecha as funções antigas de salvamento, que versões anteriores do app ainda usam.
+2. **Quem pode criar uma equipe nova:** o cadastro agora é só por convite. Quem já tem equipe continua entrando normalmente. Para liberar um novo responsável de equipe, rode no editor SQL:
+   ```sql
+   insert into public.conference_owner_allowlist(email, note) values ('pessoa@empresa.com.br', 'Filial 06');
+   ```
+3. **Variáveis na Vercel:**
+   - `SUPABASE_URL` e `SUPABASE_PUBLISHABLE_KEY` são opcionais e substituem os valores de `src/lib/supabase-config.ts`. Use somente a chave _publishable_, nunca a _service role_.
+   - `VITE_SITE_URL` é o endereço público (ex.: `https://confere.empresa.com.br`). Serve para a imagem de pré-visualização aparecer no WhatsApp.
+4. **Supabase → Authentication → URL Configuration:** autorize o endereço do site, para o link de "Esqueci minha senha" funcionar.
+5. **LGPD:** preencha `src/lib/legal-config.ts` (empresa, CNPJ, encarregado, região do banco, prazo de guarda) e peça ao jurídico da empresa para revisar `/privacidade` e `/termos`. Enquanto não forem preenchidos, os campos aparecem destacados nas páginas.
+6. **Monitoramento:**
+   - Cadastre `https://<seu-site>/healthz` num monitor de disponibilidade (UptimeRobot, Better Stack ou similar), com aviso por e-mail. Ele responde `{"ok":true}` sem tocar no banco.
+   - Erros que aparecem na tela dos usuários ficam em `conference_client_errors` (90 dias). Para ver os recentes:
+     ```sql
+     select occurred_at, message, page from public.conference_client_errors order by occurred_at desc limit 50;
+     ```
 
-A verificação automática do repositório executa TypeScript, todos os testes e o build de produção. Abrange OCR local, importação, cancelamento, persistência e concorrência.
+As funções do servidor rodam em São Paulo (`gru1`), configurado em `vite.config.ts`.
 
-O OCR local relê células numéricas antes de repetir a página inteira quando todas as linhas estão presentes. Recortes de volumes acompanham a perspectiva da linha de CTC/NF e ficam antes de Chk; recortes de NF preservam a largura da coluna mesmo quando o reconhecimento inicial perde dígitos. Se duas segmentações encontram linhas complementares, apenas CTCs literais de linhas físicas ausentes são unidos. Uma linha ocupada não recebe outro identificador, e um mesmo CTC pode manter suas várias NFs.
+## Documentação
 
-O número do pré também pode ser recuperado localmente de seu código de barras Code 39 ou Code 128, limitado ao cabeçalho da própria página. Chaves fiscais e números sem prefixo DI são recusados. Se o código estiver ilegível, a leitura impressa continua disponível com aviso quando as tentativas diferem; não se completam zeros. O leitor é carregado sob demanda, e DACTEs não passam por essa recuperação de pré.
-
-Para avaliar velocidade e acerto, use o mesmo arquivo e a mesma orientação, confira cada CTC, NF e volume contra a foto e registre as falhas. Uma soma correta ou uma única foto com bom resultado não substitui a revisão das células.
-
-A leitura local separa os glifos observados DI dos dígitos do pré para recuperar zeros na própria imagem. A soma de um volume faltante exige uma tabela completa pelas contagens de CTCs e NFs e quantidades positivas; o valor calculado fica sinalizado. Não são separados números concatenados, múltiplas NFs nem chaves fiscais.
-
-## Importação do relatório 108 da Luft
-
-O botão **Importar planilha** lê um XLSX por vez no navegador, em um Web Worker cancelável. Não envia a planilha a serviços externos nem persiste arquivos ou rascunhos. O filtro é fixo em **Filial 06 + Motivo DIS**; transferências TRA e outras filiais são descartadas. A prévia mostra o período, as contagens por dia e a data original de cada manifesto. Permite filtrar por dia, buscar motorista, placa ou manifesto e escolher os manifestos antes de cadastrar. Filtrar não altera a seleção; “Selecionar resultados” substitui a seleção pelos resultados visíveis.
-
-O identificador é o número literal do **manifesto** exportado, com 8 a 12 dígitos e zeros preservados. Não inventa DI nem usa chave MDF-e/CT-e como CTC. Os prés DI históricos continuam válidos. `Dataemissao` representa a emissão do manifesto, não a data do pré original.
-
-As linhas são agrupadas por manifesto e CTC, mantendo NF-série e somando os volumes de cada NF uma única vez. Repetições com todos os dados operacionais iguais são removidas; conflitos em CTC/NF, motorista, placa ou data bloqueiam o lote. CTCs já cadastrados permanecem bloqueados, com as conferências e horários existentes preservados. Dados inválidos de uma linha elegível impedem cadastro parcial silencioso.
-
-Limites: arquivo de 8 MB, expansão ZIP declarada de 48 MB, 20 mil linhas, 100 colunas, dois milhões de células e 20 segundos no worker. O leitor OpenXML de valores usa SAX/ZIP dentro do worker, sem carregar um motor de Excel. Fórmulas são rejeitadas, não executadas. Mais de uma aba com o esquema 108 é recusada para não omitir dias silenciosamente. Se o arquivo exceder o limite, exporte um período menor.
-
-A migração `20261014030000_export_manifest_ids.sql` aceita IDs numéricos no RPC compartilhado e nos aliases históricos, preservando toda a autenticação, RLS, auditoria e resolução de conflitos. Foi aplicada ao projeto confere em 14/10/2026. Testes de PostgreSQL isolado cobrem salvamento e duplicatas simultâneas dos novos IDs.
+- [Documentação técnica](docs/tecnico.md): regras de dados, sincronização, leitura de fotos e da planilha, testes de concorrência.
+- [Revisão de segurança](docs/security-review-2026-10-17.md)
+- [Regras para quem edita o código](AGENTS.md)

@@ -40,6 +40,15 @@ async function attack(sql: string) {
     throw error;
   }
 }
+/** Data saved by older releases, written directly as the legacy endpoint is closed. */
+async function seedLegacy(n: number, state: unknown) {
+  await login(n, "postgres");
+  await db.query(
+    "insert into public.conference_states(user_id,data) values($1,$2) on conflict(user_id) do update set data=excluded.data",
+    [uid(n), state],
+  );
+  await login(n);
+}
 beforeAll(async () => {
   db = new PGlite();
   await db.exec(
@@ -54,11 +63,14 @@ beforeAll(async () => {
       uid(n),
       `security-${n}@example.invalid`,
     ]);
+  // Accounts 1 and 3 may start teams of their own; 2 joins by invitation.
+  await db.exec(
+    "insert into public.conference_owner_allowlist(email) values ('security-1@example.invalid'),('security-3@example.invalid')",
+  );
 }, 30000);
 beforeEach(async () => {
   await db.exec("reset role; begin");
   await login(1);
-  await rpc("save_conference", [0, empty]);
   await rpc("get_conference_team");
   await rpc("invite_conference_member", ["security-2@example.invalid"]);
 });
@@ -68,68 +80,71 @@ afterEach(async () => {
 afterAll(async () => {
   await db.close();
 });
-it("cannot seed a teammate confirmation through the pre-team legacy endpoint", async () => {
+it("closes the legacy endpoint and drops a forged teammate confirmation sent through the save RPC", async () => {
   await login(3);
-  await rpc("save_conference", [
-    0,
-    {
-      ...empty,
-      manifests: [
-        {
-          id: "06058889",
-          driver: "LEGACY",
-          plate: "ABC1D23",
-          date: "2026-10-17",
-          documents: [
-            {
-              id: "legacy-doc",
-              ctc: "0000000009",
-              nf: "9-1",
-              volumes: 1,
-              received: false,
-              receiptChecks: [
-                {
-                  id: uid(1),
-                  received: true,
-                  email: "security-1@example.invalid",
-                  receivedAt: "2000-01-01T00:00:00Z",
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-  ]);
-  const team = await rpc("get_conference_team");
-  expect(team.data.manifests[0]!.documents[0]!.receiptChecks).toEqual([]);
+  await expect(rpc("save_conference", [0, empty])).rejects.toThrow("permission denied");
+  await expect(rpc("save_team_conference", [empty, empty])).rejects.toThrow("permission denied");
+  const base = (await rpc("get_conference_team")).data;
+  const forged = {
+    ...base,
+    manifests: [
+      {
+        id: "06058889",
+        driver: "FORGED",
+        plate: "ABC1D23",
+        date: "2026-10-17",
+        documents: [
+          {
+            id: "forged-doc",
+            ctc: "0000000009",
+            nf: "9-1",
+            volumes: 1,
+            received: false,
+            receiptChecks: [
+              {
+                id: uid(1),
+                received: true,
+                email: "security-1@example.invalid",
+                receivedAt: "2000-01-01T00:00:00Z",
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+  const saved = await rpc<{ data: ConferenceState }>("save_team_conference_v2", [
+    base,
+    forged,
+  ]).catch((error: Error) => error);
+  if (saved instanceof Error) expect(saved.message).toMatch(/CONFERENCE_/);
+  else
+    expect(
+      saved.data.manifests[0]!.documents[0]!.receiptChecks?.some((check) => check.id === uid(1)),
+    ).toBeFalsy();
 });
 it("backfills an unattributed historical receipt without inventing an authenticated author", async () => {
-  await login(3);
-  await rpc("save_conference", [
-    0,
-    {
-      ...empty,
-      manifests: [
-        {
-          id: "06058890",
-          driver: "LEGACY",
-          plate: "ABC1D23",
-          date: "2026-10-17",
-          documents: [
-            {
-              id: "legacy",
-              ctc: "0000000010",
-              nf: "10-1",
-              volumes: 1,
-              received: true,
-              receivedAt: "2026-10-17T12:00:00Z",
-            },
-          ],
-        },
-      ],
-    },
-  ]);
+  await seedLegacy(3, {
+    ...empty,
+    manifests: [
+      {
+        id: "06058890",
+        driver: "LEGACY",
+        plate: "ABC1D23",
+        date: "2026-10-17",
+        documents: [
+          {
+            id: "legacy",
+            ctc: "0000000010",
+            nf: "10-1",
+            volumes: 1,
+            received: true,
+            receivedAt: "2026-10-17T12:00:00Z",
+          },
+        ],
+      },
+    ],
+  });
   const team = await rpc("get_conference_team"),
     doc = team.data.manifests[0]!.documents[0]!;
   expect(doc.received).toBe(true);
@@ -141,7 +156,7 @@ it("backfills an unattributed historical receipt without inventing an authentica
 });
 it("ignores forged peer reversals and assigns personal receipt authors and times from authentication", async () => {
   const base = (await rpc("get_conference_team")).data;
-  const created = await rpc<{ data: ConferenceState }>("save_team_conference", [
+  const created = await rpc<{ data: ConferenceState }>("save_team_conference_v2", [
     base,
     {
       ...base,
@@ -167,7 +182,7 @@ it("ignores forged peer reversals and assigns personal receipt authors and times
     email: "security-1@example.invalid",
     receivedAt: "1900-01-01",
   });
-  const saved = await rpc<{ data: ConferenceState }>("save_team_conference", [
+  const saved = await rpc<{ data: ConferenceState }>("save_team_conference_v2", [
     created.data,
     forged,
   ]);
@@ -181,7 +196,7 @@ it("ignores forged peer reversals and assigns personal receipt authors and times
 });
 it("only adds the authenticated member, rejects forged links, and preserves links from old browsers", async () => {
   const base = (await rpc("get_conference_team")).data;
-  const created = await rpc<{ data: ConferenceState }>("save_team_conference", [
+  const created = await rpc<{ data: ConferenceState }>("save_team_conference_v2", [
     base,
     {
       ...base,
@@ -200,11 +215,11 @@ it("only adds the authenticated member, rejects forged links, and preserves link
   await rpc("get_conference_team", [true]);
   const forged = structuredClone(created.data);
   forged.manifests[0]!.demandUserIds = [uid(3)];
-  await expect(rpc("save_team_conference", [created.data, forged])).rejects.toThrow(
+  await expect(rpc("save_team_conference_v2", [created.data, forged])).rejects.toThrow(
     "CONFERENCE_INVALID",
   );
   forged.manifests[0]!.demandUserIds = [uid(2)];
-  const linked = await rpc<{ data: ConferenceState }>("save_team_conference", [
+  const linked = await rpc<{ data: ConferenceState }>("save_team_conference_v2", [
     created.data,
     forged,
   ]);
@@ -214,7 +229,7 @@ it("only adds the authenticated member, rejects forged links, and preserves link
   const oldBrowser = structuredClone(linked.data);
   delete oldBrowser.manifests[0]!.demandUserIds;
   oldBrowser.manifests[0]!.driver = "UPDATED";
-  const saved = await rpc<{ data: ConferenceState }>("save_team_conference", [
+  const saved = await rpc<{ data: ConferenceState }>("save_team_conference_v2", [
     oldBrowser,
     oldBrowser,
   ]);
@@ -240,7 +255,7 @@ it("rejects scalar type poisoning that would make the entire team's saved state 
   ];
   for (const candidate of attacks)
     await expect(
-      rpc("save_team_conference", [base, { ...base, manifests: [candidate] }]),
+      rpc("save_team_conference_v2", [base, { ...base, manifests: [candidate] }]),
     ).rejects.toThrow("CONFERENCE_INVALID");
   expect((await rpc("get_conference_team")).data).toEqual(base);
   expect(await rpc("get_conference_audit")).toEqual([]);
@@ -263,7 +278,7 @@ it("keeps SQL metacharacters in imported names as data without executing them", 
       },
     ],
   };
-  const saved = await rpc("save_team_conference", [base, next]);
+  const saved = await rpc("save_team_conference_v2", [base, next]);
   expect(saved.data.manifests[0]!.driver).toBe(driver);
   expect((await rpc("get_conference_team")).data.manifests).toHaveLength(1);
 });
@@ -281,7 +296,7 @@ it("reproduces canceled-invitation acceptance in the former code and blocks the 
   await login(1, "postgres");
   const original = (
     await db.query<{ def: string }>(
-      "select pg_get_functiondef('public.get_conference_team(boolean)'::regprocedure) def",
+      "select pg_get_functiondef('public.conference_team_core(boolean)'::regprocedure) def",
     )
   ).rows[0]!.def;
   const marker = "perform 1 from public.conference_teams where id=tid for update;";
@@ -343,7 +358,7 @@ it("refuses oversized and nested malicious snapshots before merge without modify
       ],
     },
   ])
-    await expect(rpc("save_team_conference", [base, payload])).rejects.toThrow(
+    await expect(rpc("save_team_conference_v2", [base, payload])).rejects.toThrow(
       "CONFERENCE_INVALID",
     );
   expect((await rpc("get_conference_team")).data).toEqual(base);

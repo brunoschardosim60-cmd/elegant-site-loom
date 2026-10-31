@@ -1,12 +1,12 @@
 .import-ctc-editor .import-ctc-fields { align-items: start; }
 .import-ctc-fields .import-remove-ctc { align-self: start; margin-top: 21px; }
-.import-ctc-editor .form-field[data-review="true"] > input { border-color: var(--warning); background: color-mix(in oklch, var(--warning-soft) 45%, var(--card)); }
+.import-ctc-editor .form-field[data-review="true"] > input { border-color: var(--warning); background: #fff9ee; }
 .import-field-warning, .import-inline-review { display: flex; align-items: flex-start; gap: 5px; color: var(--warning); font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; min-width: 0; }
 .import-field-warning > svg, .import-inline-review > svg { flex-shrink: 0; margin-top: 2px; }
 .import-field-warning > span, .import-inline-review > span { display: grid; gap: 3px; min-width: 0; }
 .import-field-warning strong { font-weight: 700; }
 .import-inline-review { margin-top: 12px; }
-.import-dialog .form-field[data-conflict="true"] > input, .import-dialog .form-field[data-conflict="true"] > select, .import-ctc-editor .form-field[data-conflict="true"] > input { border-color: var(--destructive); background: color-mix(in oklch, var(--destructive) 5%, var(--card)); }
+.import-dialog .form-field[data-conflict="true"] > input, .import-dialog .form-field[data-conflict="true"] > select, .import-ctc-editor .form-field[data-conflict="true"] > input { border-color: var(--destructive); background: #fff5f4; }
 .import-field-conflict { color: var(--destructive); }
 .import-manifest-fields { align-items: start; }
 .manifest-edit-dialog > *, .manifest-edit-dialog form { min-width: 0; }

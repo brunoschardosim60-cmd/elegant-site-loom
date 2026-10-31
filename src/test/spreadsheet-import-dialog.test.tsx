@@ -294,7 +294,7 @@ it("highlights a dragged file, keeps the highlight across children and reads a d
   expect(dropZone()).toHaveAttribute("data-dragging", "true");
   fireEvent.drop(dropZone(), { dataTransfer: transfer });
   await screen.findByLabelText("Selecionar manifesto 06052233");
-  expect(mock.read).toHaveBeenCalledExactlyOnceWith(file, expect.any(AbortSignal));
+  expect(mock.read).toHaveBeenCalledExactlyOnceWith(file, expect.any(AbortSignal), undefined);
   expect(dropZone()).not.toHaveAttribute("data-dragging");
   expect(save).not.toHaveBeenCalled();
 });

@@ -57,6 +57,14 @@ export default {
     }
     const protect = (response: Response) =>
       securityHeaders(response, nonce, import.meta.env.PROD, databaseUrl);
+    // Uptime monitors poll this; it touches neither SSR nor the database.
+    if (new URL(request.url).pathname === "/healthz")
+      return protect(
+        Response.json(
+          { ok: true, time: new Date().toISOString() },
+          { headers: { "cache-control": "no-store" } },
+        ),
+      );
     try {
       const prepared = await secureRequest(request, nonce);
       if (prepared instanceof Response) return protect(prepared);

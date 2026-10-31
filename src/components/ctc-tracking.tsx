@@ -11,6 +11,7 @@ import {
   manifestReferenceDate,
   normalizeIssueDate,
 } from "@/lib/manifest-date";
+import { CargoTags } from "./cargo-tags";
 
 export function CtcTracking({
   rows,
@@ -20,8 +21,11 @@ export function CtcTracking({
   now,
   onAuditManifest,
   personal = false,
+  archivedIds,
 }: {
   rows: TrackingRow[];
+  /** Manifests shown from the archive (finished and out of the live list). */
+  archivedIds?: Set<string>;
   status: TrackingStatus;
   onStatusChange: (value: TrackingStatus) => void;
   scope: string;
@@ -92,6 +96,7 @@ export function CtcTracking({
                   >
                     <td data-label="CTC / Nota fiscal" className="ctc-number">
                       <strong className="ctc-identifier">{doc.ctc}</strong>
+                      <CargoTags doc={doc} />
                       <div className="tracking-detail">
                         <NfOccurrences nf={doc.nf} values={doc.nfOccurrences} prefix />
                       </div>
@@ -102,6 +107,9 @@ export function CtcTracking({
                     </td>
                     <td data-label="Pré / Motorista">
                       <strong>{manifest.id}</strong>
+                      {archivedIds?.has(manifest.id) && (
+                        <span className="tracking-detail">Arquivado</span>
+                      )}
                       <span className="tracking-detail">
                         {manifest.driver} · <span className="plate">{manifest.plate}</span>
                       </span>

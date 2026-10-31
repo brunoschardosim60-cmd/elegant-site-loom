@@ -125,7 +125,10 @@ it("retains edits for retry and never resubmits a duplicate automatically", asyn
   const publish = vi.fn<(value: TeamSyncView) => void>(),
     sync = new TeamSync(team(), rpc, publish);
   sync.change(receive(state(), 0));
-  await vi.waitFor(() => expect(publish.mock.lastCall![0].error).toContain("Não foi possível"));
+  // "network" is not a recognised transport failure, so it is reported at once.
+  await vi.waitFor(() =>
+    expect(publish.mock.lastCall![0].error).toContain("Sem conexão com o banco"),
+  );
   expect(sync.pending()).toBe(true);
   sync.retry();
   await vi.waitFor(() => expect(sync.pending()).toBe(false));

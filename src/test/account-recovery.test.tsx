@@ -39,6 +39,18 @@ const client = {
   rpc: mocks.rpc,
 };
 
+/** One load of the saved records; the only other call allowed is the archive housekeeping. */
+function expectSingleLoad() {
+  expect(mocks.rpc).toHaveBeenNthCalledWith(1, "get_conference_team", {
+    accept_invitation: false,
+  });
+  expect(
+    mocks.rpc.mock.calls
+      .map(([name]) => name)
+      .filter((name) => name !== "archive_conference_manifests"),
+  ).toEqual(["get_conference_team"]);
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => {
@@ -287,9 +299,7 @@ it("loads saved records only after a successful password change is explicitly co
   fireEvent.click(screen.getByRole("button", { name: "Continuar" }));
   expect(await screen.findByRole("main", { name: "Conferência carregada" })).toBeInTheDocument();
   expect(new URLSearchParams(window.location.search).has("recovery")).toBe(false);
-  expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith("get_conference_team", {
-    accept_invitation: false,
-  });
+  expectSingleLoad();
 });
 
 it("still reports a genuine initial session error when no newer auth event exists", async () => {
@@ -308,9 +318,7 @@ it("loads the normal saved workspace when there is no recovery event or URL mark
   render(<AccountWorkspace />);
   expect(await screen.findByRole("main", { name: "Conferência carregada" })).toBeInTheDocument();
   expect(mocks.from).not.toHaveBeenCalled();
-  expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith("get_conference_team", {
-    accept_invitation: false,
-  });
+  expectSingleLoad();
   expect(screen.queryByRole("heading", { name: "Definir nova senha" })).not.toBeInTheDocument();
 });
 
@@ -321,9 +329,7 @@ it("loads records after a normal SIGNED_IN event without entering recovery", asy
   expectNoConferenceAccess();
   await emit("SIGNED_IN", session);
   expect(await screen.findByRole("main", { name: "Conferência carregada" })).toBeInTheDocument();
-  expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith("get_conference_team", {
-    accept_invitation: false,
-  });
+  expectSingleLoad();
 });
 
 it("unsubscribes and ignores delayed session or recovery callbacks after unmount", async () => {

@@ -1,5 +1,7 @@
 # Demandas pessoais e equipe
 
+> **Documento histórico.** Descreve o sistema na data do título; partes podem ter mudado desde então. Veja o [README](../README.md) para o estado atual.
+
 - Cada login abre diretamente os manifestos cadastrados por essa conta e suas NFs. A pedido do usuário, foram retirados os botões inferiores Minhas demandas/Equipe e os cartões por integrante. Somente Equipe, na barra da conta, abre a tela normal com toda a lista e totais somados. Essa visão é de consulta; o botão de retorno fica na mesma barra superior.
 - A responsabilidade segue quem cadastrou o manifesto. A autoria de inclusões de CTCs, alterações e conferências continua no histórico autenticado. Um colega pode conferir um documento e atualizar a demanda do criador sem transferir a responsabilidade. A bipagem de um CTC de outra pessoa abre a visão da equipe e usa o registro compartilhado existente.
 - Uma base canônica permanece no Supabase; trocar de visão não grava dados. Importação, validação de duplicatas e bipagem usam todos os cadastros, inclusive os ocultos na visão pessoal. Remanifestações são resolvidas antes da filtragem por criador, preservando a rota mais recente quando pertence a outro integrante. O PDF respeita o escopo pessoal/equipe e mantém o vínculo com as rotas globais.

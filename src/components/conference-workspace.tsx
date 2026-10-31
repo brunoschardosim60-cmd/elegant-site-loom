@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
+  BarChart3,
+  Sheet,
   Loader2,
   ArrowRight,
   Barcode,
@@ -58,10 +60,16 @@ import {
 } from "@/lib/conference-ownership";
 import { NfOccurrences } from "./nf-occurrences";
 import { planOccurrenceUpdates } from "@/lib/nf-occurrences";
-import { DocumentPagination, documentPageSize } from "./document-pagination";
+import { documentPageSize } from "./document-pagination";
+import { PendingTable } from "./pending-table";
+import { ConferenceMetricsView } from "./conference-metrics";
+import { ScanForm } from "./scan-form";
+import { playScanSound } from "@/lib/scan-sound";
 import { applyDemandImports } from "@/lib/shared-demand-import";
 import { applyImports, type ImportDraft, type ImportOutcome } from "@/lib/manifest-import";
 import type { ConferenceState } from "@/lib/conference-state";
+import type { FindArchived } from "@/lib/conference-archive";
+import { describeLuftFilter, type LuftFilter } from "@/lib/luft-spreadsheet";
 import {
   activityTimestamp,
   conferenceTimestamp,
@@ -76,7 +84,7 @@ import {
   normalizeIssueDate,
 } from "@/lib/manifest-date";
 
-type View = "pending" | "missing" | "finished" | "issues" | "tracking";
+type View = "pending" | "missing" | "finished" | "issues" | "tracking" | "metrics";
 type Activity = {
   id: number | string;
   title: string;
@@ -93,6 +101,7 @@ const titles: Record<View, string> = {
   finished: "Manifestos finalizados",
   issues: "Ocorrências da conferência",
   tracking: "Rastreamento de CTCs",
+  metrics: "Indicadores da operação",
 };
 const timeNow = () =>
   new Date().toLocaleTimeString("pt-BR", {
@@ -113,6 +122,9 @@ export function ConferenceWorkspace({
   scope: controlledScope,
   onScopeChange,
   onManageTeam,
+  findArchived,
+  readOnly = false,
+  importFilter,
 }: {
   initialState?: ConferenceState;
   externalState?: ConferenceState;
@@ -125,6 +137,12 @@ export function ConferenceWorkspace({
   scope?: WorkspaceScope;
   onScopeChange?: ((scope: WorkspaceScope) => void) | undefined;
   onManageTeam?: (() => void) | undefined;
+  /** Looks up manifests moved to the archive; absent in standalone use. */
+  findArchived?: FindArchived | undefined;
+  /** The account's role only allows reading this team's records. */
+  readOnly?: boolean;
+  /** The team's 108 filter (branches and reasons). */
+  importFilter?: LuftFilter | undefined;
 } = {}) {
   const [manifests, setManifests] = useState<Manifest[]>(initialState?.manifests ?? []);
   const current = useRef(manifests);
@@ -132,7 +150,7 @@ export function ConferenceWorkspace({
   const [localScope, setLocalScope] = useState<WorkspaceScope>(accountEmail ? "mine" : "team");
   const scope = controlledScope ?? localScope;
   const scopeOrigin = useRef(scope);
-  const teamReadOnly = !!accountEmail && scope === "team";
+  const teamReadOnly = readOnly || (!!accountEmail && scope === "team");
   const demandOwner =
     scope === "mine" && accountEmail ? { email: accountEmail, userId: accountId } : undefined;
   function changeScope(next: WorkspaceScope) {
@@ -149,19 +167,25 @@ export function ConferenceWorkspace({
   const [query, setQuery] = useState("");
   const [focusedManifest, setFocusedManifest] = useState<{ id: string } | null>(null);
   const [filter, setFilter] = useState("all");
+  /** Delivery city in Pendências ("" = all), from the 108 import. */
+  const [city, setCity] = useState("");
   const [trackingStatus, setTrackingStatus] = useState<TrackingStatus>("all");
   const [pendingPagination, setPendingPagination] = useState({ scope: "", page: 0 });
   const searchInput = useRef<HTMLInputElement>(null);
   const pendingTableRef = useRef<HTMLDivElement>(null);
   const filtersActive =
-    !!query.trim() || filter === "old" || (view === "tracking" && trackingStatus !== "all");
+    !!query.trim() ||
+    filter === "old" ||
+    (view === "missing" && !!city) ||
+    (view === "tracking" && trackingStatus !== "all");
   function clearFilters() {
     setQuery("");
     setFilter("all");
+    setCity("");
     setTrackingStatus("all");
     searchInput.current?.focus({ preventScroll: true });
   }
-  const [code, setCode] = useState("");
+  const [scanClear, setScanClear] = useState(0);
   const scanner = useRef<HTMLInputElement>(null);
   const [activity, setActivity] = useState(initialState?.activity ?? initialActivity);
   const [issues, setIssues] = useState<Activity[]>(initialState?.issues ?? []);
@@ -183,6 +207,23 @@ export function ConferenceWorkspace({
   }, [externalState]);
   const [notices, setNotices] = useState<Notice[]>([]);
   const [blocked, setBlocked] = useState<string | null>(null);
+  const [archivedTracking, setArchivedTracking] = useState<{
+    ctc: string;
+    manifests: Manifest[];
+  }>({ ctc: "", manifests: [] });
+  useEffect(() => {
+    const ctc = view === "tracking" ? query.trim() : "";
+    if (!findArchived || !/^\d{10}$/.test(ctc)) return;
+    let active = true;
+    findArchived({ ctcs: [ctc] })
+      .then((found) => {
+        if (active) setArchivedTracking({ ctc, manifests: found.map((item) => item.manifest) });
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [findArchived, view, query]);
   const [newOpen, setNewOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [receiptReview, setReceiptReview] = useState<TeamReceiptCandidate[] | null>(null);
@@ -208,12 +249,33 @@ export function ConferenceWorkspace({
     setFocusedManifest(null);
     setFilter("all");
     setTrackingStatus("all");
-    setCode("");
+    setScanClear((n) => n + 1);
     setReceiptReview(null);
     setReceiptReviewUpdated(false);
   }, [scope]);
+  const [excelBusy, setExcelBusy] = useState(false);
+  async function exportExcel() {
+    if (excelBusy || (view !== "missing" && view !== "tracking")) return;
+    setExcelBusy(true);
+    try {
+      const [{ conferenceSheet, exportFilename }, { downloadXlsx }] = await Promise.all([
+        import("@/lib/conference-export"),
+        import("@/lib/xlsx-writer"),
+      ]);
+      // The same rows, filters and order as the screen.
+      const rows = view === "missing" ? missingRows : trackingRows;
+      const kind = view === "missing" ? "pendencias" : "rastreamento";
+      downloadXlsx(exportFilename(kind), [
+        conferenceSheet(view === "missing" ? "Pendências" : "Rastreamento", rows, now),
+      ]);
+    } catch {
+      notify("Não foi possível gerar a planilha. Tente novamente.", true);
+    } finally {
+      setExcelBusy(false);
+    }
+  }
   async function exportPdf() {
-    if (pdfBusy) return;
+    if (pdfBusy || view === "metrics") return;
     setPdfBusy(true);
     try {
       const { exportConferencePdf } = await import("@/lib/conference-pdf");
@@ -282,11 +344,11 @@ export function ConferenceWorkspace({
     setNotices((items) => [...items.slice(-2), { id, text, warning }]);
     window.setTimeout(() => setNotices((items) => items.filter((item) => item.id !== id)), 4000);
   }
-  function scan(event: FormEvent) {
-    event.preventDefault();
-    if (teamReadOnly) return;
+  /** Handles a submitted code; returns false when the scanner is not accepting input. */
+  function scan(input: string): boolean {
+    if (teamReadOnly) return false;
     if (
-      !code.trim() ||
+      !input ||
       blocked ||
       newOpen ||
       sheetOpen ||
@@ -294,10 +356,12 @@ export function ConferenceWorkspace({
       editingManifest ||
       pendingDeleteId.current
     )
-      return;
-    const input = code.trim();
-    setCode("");
+      return false;
     scanner.current?.focus({ preventScroll: true });
+    handleScan(input);
+    return true;
+  }
+  function handleScan(input: string) {
     if (/^DI/i.test(input)) {
       const manifest = current.current.find(
         (item) => item.id.toUpperCase() === input.toUpperCase(),
@@ -322,21 +386,40 @@ export function ConferenceWorkspace({
     }
     const reading = parseScan(input);
     if (reading.kind === "nfe") {
+      playScanSound("warning");
       notify("Isso é uma NF-e. Bipe somente o CTC.", true);
       log("NF-e não aceita", "Bipe o código de barras do CTC.", true);
       return;
     }
     if (reading.kind === "invalid") {
+      playScanSound("warning");
       notify("Código inválido. Confira e bipe o CTC novamente.", true);
       return;
     }
     const matches = findCurrentMatches(current.current, reading.number);
     if (!matches.length) {
-      setBlocked(`O CTC ${reading.number} não está em nenhum pré-manifesto cadastrado.`);
+      const missingMessage = `O CTC ${reading.number} não está em nenhum pré-manifesto cadastrado.`;
+      playScanSound("error");
+      setBlocked(missingMessage);
       log("CTC sem pré-manifesto", `CTC ${reading.number}`, true);
+      void findArchived?.({ ctcs: [reading.number] })
+        .then((found) => {
+          const latest = found[0];
+          if (!latest) return;
+          const finished = latest.manifest.finishedAt
+            ? ` finalizado em ${formatManifestDate(latest.manifest.finishedAt.slice(0, 10))} e`
+            : "";
+          setBlocked((shown) =>
+            shown === missingMessage
+              ? `O CTC ${reading.number} pertence ao pré ${latest.manifest.id} (${latest.manifest.driver}),${finished} arquivado. Ele não está entre os prés em andamento.`
+              : shown,
+          );
+        })
+        .catch(() => {});
       return;
     }
     if (matches.length > 1) {
+      playScanSound("error");
       setBlocked(
         `O CTC ${reading.number} aparece em mais de um pré. Confira o vínculo desse CTC nos pré-manifestos antes de continuar.`,
       );
@@ -363,6 +446,7 @@ export function ConferenceWorkspace({
     setFocusedManifest({ id: manifest.id });
     const ownDoc = personalReceipts ? personalDocument(doc, accountId) : doc;
     if (ownDoc.received) {
+      playScanSound("warning");
       notify(
         `CTC ${reading.number} já foi bipado${conferenceTimestamp(ownDoc.receivedAt) ? ` em ${conferenceTimestamp(ownDoc.receivedAt)}` : ""}.`,
         true,
@@ -379,6 +463,7 @@ export function ConferenceWorkspace({
       changed,
       personalReceipts ? accountId : undefined,
     ).finishedAt;
+    playScanSound(personallyFinished ? "done" : "ok");
     notify(
       personallyFinished
         ? `Pré de ${manifest.driver.split(" ")[0]} finalizado!`
@@ -499,7 +584,7 @@ export function ConferenceWorkspace({
     update(current.current.filter((item) => item.id !== manifestId));
     setFocusedManifest((focused) => (focused?.id === manifestId ? null : focused));
     setQuery((value) => (value.trim().toUpperCase() === manifestId.toUpperCase() ? "" : value));
-    setCode("");
+    setScanClear((n) => n + 1);
     log(
       "Pré-manifesto excluído",
       `${manifest.id} · ${manifest.driver} · ${manifest.documents.length} CTC(s)`,
@@ -513,15 +598,23 @@ export function ConferenceWorkspace({
   const pending = presented.filter((item) => !item.finishedAt && !item.routeResolved);
   const finished = presented.filter((item) => item.finishedAt || item.routeResolved);
   const documents = presented.flatMap((item) => item.documents);
+  const trackingCtc = view === "tracking" && /^\d{10}$/.test(query.trim()) ? query.trim() : "";
+  const trackingArchive =
+    trackingCtc && archivedTracking.ctc === trackingCtc ? archivedTracking.manifests : [];
   const trackingRows =
     view === "tracking"
-      ? selectTrackingRows(presented, {
-          query,
-          filter,
-          status: trackingStatus,
-          now,
-          routesPresented: true,
-        })
+      ? selectTrackingRows(
+          trackingArchive.length
+            ? selectOwnedRoutes([...manifests, ...trackingArchive], demandOwner)
+            : presented,
+          {
+            query,
+            filter,
+            status: trackingStatus,
+            now,
+            routesPresented: true,
+          },
+        )
       : [];
   const missing = pending.flatMap((item) => item.documents).filter(isPendingDocument);
   const age = (manifest: Manifest) => manifestAgeDays(manifest, now);
@@ -533,6 +626,7 @@ export function ConferenceWorkspace({
     )
     .filter(({ manifest, doc }) => matchesConferenceSearch(manifest, query, doc))
     .filter(({ days }) => filter !== "old" || days >= 2)
+    .filter(({ doc }) => !city || doc.city === city)
     .sort((a, b) =>
       filter === "new"
         ? compareManifestDates(b.manifest, a.manifest)
@@ -542,7 +636,14 @@ export function ConferenceWorkspace({
     .filter((item) => matchesConferenceSearch(item, query))
     .filter((item) => filter !== "old" || age(item) >= 2)
     .sort((a, b) => (filter === "new" ? compareManifestDates(b, a) : compareManifestDates(a, b)));
-  const pendingPageScope = JSON.stringify([scope, view, query, filter]);
+  const pendingCities = [
+    ...new Set(
+      pending.flatMap((manifest) =>
+        manifest.documents.filter(isPendingDocument).flatMap((doc) => (doc.city ? [doc.city] : [])),
+      ),
+    ),
+  ].sort((a, b) => a.localeCompare(b, "pt-BR"));
+  const pendingPageScope = JSON.stringify([scope, view, query, filter, city]);
   const pendingPage =
     pendingPagination.scope === pendingPageScope
       ? Math.min(
@@ -585,7 +686,7 @@ export function ConferenceWorkspace({
       log(
         "Documentos importados",
         drafts.every((draft) => isExportManifest(draft.id))
-          ? `${drafts.length} manifesto(s) da planilha 108 · filial 06 / DIS`
+          ? `${drafts.length} manifesto(s) da planilha 108 · ${describeLuftFilter(importFilter)}`
           : `${drafts.length} foto(s) / pré(s) revisados`,
       );
       notify(
@@ -632,6 +733,7 @@ export function ConferenceWorkspace({
     { view: "missing" as const, label: "Pendências", count: missing.length, Icon: Clock3 },
     { view: "finished" as const, label: "Finalizados", count: finished.length, Icon: FileCheck2 },
     { view: "tracking" as const, label: "Rastreamento", count: documents.length, Icon: Search },
+    { view: "metrics" as const, label: "Indicadores", count: 0, Icon: BarChart3 },
     {
       view: "issues" as const,
       label: "Ocorrências",
@@ -687,7 +789,7 @@ export function ConferenceWorkspace({
                   >
                     <Icon />
                     <span className="workspace-sidebar-nav-label">{label}</span>
-                    {(target !== "issues" || count > 0) && (
+                    {target !== "metrics" && (target !== "issues" || count > 0) && (
                       <span className="nav-count">{count}</span>
                     )}
                   </Button>
@@ -699,7 +801,7 @@ export function ConferenceWorkspace({
                   className="workspace-sidebar-tooltip"
                 >
                   {label}
-                  {target !== "issues" || count > 0 ? ` · ${count}` : ""}
+                  {target !== "metrics" && (target !== "issues" || count > 0) ? ` · ${count}` : ""}
                 </TooltipContent>
               </Tooltip>
             ))}
@@ -868,41 +970,19 @@ export function ConferenceWorkspace({
                     Aguardando CTC
                   </p>
                 </div>
-                <form className="scan-form" onSubmit={scan}>
-                  <Barcode />
-                  <input
-                    ref={scanner}
-                    aria-label="Código do CTC"
-                    className="scan-input"
-                    placeholder="Bipe ou digite o código do CTC…"
-                    value={code}
-                    onChange={(event) => setCode(event.target.value)}
-                    autoComplete="off"
-                    disabled={
-                      !!blocked ||
-                      newOpen ||
-                      sheetOpen ||
-                      !!receiptReview ||
-                      !!deleteId ||
-                      !!editingManifest
-                    }
-                  />
-                  <Button
-                    type="submit"
-                    size="sm"
-                    disabled={
-                      !code.trim() ||
-                      !!blocked ||
-                      newOpen ||
-                      sheetOpen ||
-                      !!receiptReview ||
-                      !!deleteId ||
-                      !!editingManifest
-                    }
-                  >
-                    Conferir <ArrowRight size={13} />
-                  </Button>
-                </form>
+                <ScanForm
+                  inputRef={scanner}
+                  clearSignal={scanClear}
+                  onScan={scan}
+                  disabled={
+                    !!blocked ||
+                    newOpen ||
+                    sheetOpen ||
+                    !!receiptReview ||
+                    !!deleteId ||
+                    !!editingManifest
+                  }
+                />
               </section>
             )}
             <div className={`content-grid ${view === "tracking" ? "content-grid-tracking" : ""}`}>
@@ -917,8 +997,10 @@ export function ConferenceWorkspace({
                           ? "Conferências concluídas"
                           : view === "tracking"
                             ? "Consulta de documentos"
-                            : "Ocorrências"}
-                    <span className="section-count">
+                            : view === "metrics"
+                              ? "Indicadores"
+                              : "Ocorrências"}
+                    <span className="section-count" hidden={view === "metrics"}>
                       {view === "issues"
                         ? issues.length
                         : view === "missing"
@@ -947,11 +1029,28 @@ export function ConferenceWorkspace({
                         onAccept={acceptTeamReview}
                       />
                     )}
+                  {(view === "missing" || view === "tracking") && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void exportExcel()}
+                      disabled={excelBusy}
+                      className="text-[11px]"
+                    >
+                      {excelBusy ? (
+                        <Loader2 size={12} className="animate-spin" />
+                      ) : (
+                        <Sheet size={12} />
+                      )}
+                      Excel
+                    </Button>
+                  )}
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => void exportPdf()}
                     disabled={pdfBusy}
+                    hidden={view === "metrics"}
                     className="text-[11px]"
                   >
                     {pdfBusy ? (
@@ -962,7 +1061,7 @@ export function ConferenceWorkspace({
                     {pdfBusy ? "Gerando PDF…" : "PDF"}
                   </Button>
                 </div>
-                {view !== "issues" && (
+                {view !== "issues" && view !== "metrics" && (
                   <div className="list-tools">
                     <div className="search-wrap">
                       <Search />
@@ -1001,6 +1100,21 @@ export function ConferenceWorkspace({
                       <option value="new">Mais recentes</option>
                       <option value="old">Há 2 dias ou mais</option>
                     </select>
+                    {view === "missing" && pendingCities.length > 1 && (
+                      <select
+                        aria-label="Filtrar por cidade de entrega"
+                        className="filter-select"
+                        value={city}
+                        onChange={(event) => setCity(event.target.value)}
+                      >
+                        <option value="">Todas as cidades</option>
+                        {pendingCities.map((name) => (
+                          <option key={name} value={name}>
+                            {name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                     {filtersActive && (
                       <Button type="button" variant="ghost" size="sm" onClick={clearFilters}>
                         Limpar filtros
@@ -1009,9 +1123,12 @@ export function ConferenceWorkspace({
                   </div>
                 )}
                 <div className="manifest-list">
-                  {view === "tracking" ? (
+                  {view === "metrics" ? (
+                    <ConferenceMetricsView manifests={presented} now={now} />
+                  ) : view === "tracking" ? (
                     <CtcTracking
                       rows={trackingRows}
+                      archivedIds={new Set(trackingArchive.map((item) => item.id))}
                       status={trackingStatus}
                       onStatusChange={setTrackingStatus}
                       scope={JSON.stringify([query, filter, trackingStatus])}
@@ -1021,104 +1138,26 @@ export function ConferenceWorkspace({
                     />
                   ) : view === "missing" ? (
                     missingRows.length ? (
-                      <>
-                        <div
-                          ref={pendingTableRef}
-                          tabIndex={0}
-                          role="region"
-                          aria-label="Tabela de CTCs pendentes"
-                          className="manifest-card pending-table-wrap paged-documents"
-                        >
-                          <table
-                            className="document-table pending-table"
-                            aria-label="CTCs pendentes"
-                          >
-                            <thead>
-                              <tr>
-                                <th>CTC</th>
-                                <th>Pré / Motorista</th>
-                                <th>NF</th>
-                                <th>Vols.</th>
-                                <th>Status</th>
-                                <th>
-                                  <span className="sr-only">Ações</span>
-                                </th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {visibleMissingRows.map(({ manifest, doc, days }) => (
-                                <tr key={`${manifest.id}:${doc.id}`}>
-                                  <td className="ctc-number" data-label="CTC / Cliente">
-                                    <span className="ctc-identifier">{doc.ctc}</span>
-                                    {doc.client && (
-                                      <span className="block text-muted-foreground text-[10px] font-sans mt-1">
-                                        {doc.client}
-                                      </span>
-                                    )}
-                                  </td>
-                                  <td data-label="Pré / Motorista">
-                                    <span className="block font-semibold">{manifest.id}</span>
-                                    <span className="text-muted-foreground">
-                                      {manifest.driver} ·{" "}
-                                      <span className="plate">{manifest.plate}</span>
-                                    </span>
-                                    <span className="block text-muted-foreground text-[10px] mt-1">
-                                      {normalizeIssueDate(manifest.issueDate ?? "")
-                                        ? /^\d{8,12}$/.test(manifest.id)
-                                          ? "Manifestado em"
-                                          : "Emissão"
-                                        : "Cadastro"}{" "}
-                                      {formatManifestDate(manifestReferenceDate(manifest))}
-                                    </span>
-                                  </td>
-                                  <td className="text-muted-foreground" data-label="Nota fiscal">
-                                    <NfOccurrences nf={doc.nf} values={doc.nfOccurrences} />
-                                  </td>
-                                  <td data-label="Volumes">{doc.volumes}</td>
-                                  <td data-label="Status">
-                                    <span
-                                      className={`status-badge ${days >= 2 ? "badge-warning" : "badge-pending"}`}
-                                    >
-                                      <Clock3 size={10} />
-                                      Pendente
-                                    </span>
-                                    <span className="tracking-detail">
-                                      {manifestAgeLabel(manifest, now)}
-                                    </span>
-                                  </td>
-                                  <td data-label="Ações">
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      className="document-action text-muted-foreground"
-                                      disabled={teamReadOnly}
-                                      aria-label={`Marcar CTC ${doc.ctc} como recebido`}
-                                      onClick={() => toggleDocument(manifest, doc.id, true)}
-                                    >
-                                      <Check />
-                                    </Button>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                        <DocumentPagination
-                          total={missingRows.length}
-                          page={pendingPage}
-                          onPageChange={(page) =>
-                            setPendingPagination({ scope: pendingPageScope, page })
-                          }
-                          label="Páginas das pendências"
-                          targetRef={pendingTableRef}
-                        />
-                      </>
+                      <PendingTable
+                        rows={visibleMissingRows}
+                        total={missingRows.length}
+                        page={pendingPage}
+                        onPageChange={(page) =>
+                          setPendingPagination({ scope: pendingPageScope, page })
+                        }
+                        tableRef={pendingTableRef}
+                        now={now}
+                        readOnly={teamReadOnly}
+                        onReceive={(manifest, documentId) =>
+                          toggleDocument(manifest, documentId, true)
+                        }
+                      />
                     ) : (
                       <div className="empty-state">
                         <CheckCheck />
                         <h3>{filtersActive ? "Nenhuma pendência encontrada" : "Nada pendente"}</h3>
                         <p className="text-xs mt-2">
-                          {query.trim() || filter === "old"
+                          {query.trim() || filter === "old" || city
                             ? "Nenhum resultado para essa busca ou filtro."
                             : presented.length
                               ? "Não há CTCs pendentes nas rotas atuais. Consulte as tentativas anteriores no rastreamento."
@@ -1306,6 +1345,8 @@ export function ConferenceWorkspace({
             demandOwner={accountEmail ? { email: accountEmail, userId: accountId } : undefined}
             sharedDemands={sharedDemands}
             onUpdateOccurrences={updateOccurrences}
+            findArchived={findArchived}
+            filter={importFilter}
           />
         )}
         {newOpen && (
@@ -1318,6 +1359,7 @@ export function ConferenceWorkspace({
             manifests={manifests}
             onCreate={importDrafts}
             initialId={prefillId}
+            findArchived={findArchived}
           />
         )}
         {editingManifest && (

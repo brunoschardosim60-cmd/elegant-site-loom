@@ -1,9 +1,13 @@
-import type { LuftExport } from "./luft-spreadsheet";
+import type { LuftExport, LuftFilter } from "./luft-spreadsheet";
 import { reportGeneratedAt } from "./nf-occurrence-date";
 import { spreadsheetLimits } from "./luft-spreadsheet-limits";
 
 /** No file data leaves the browser. Termination cancels parsing and late results. */
-export async function readLuftSpreadsheet(file: File, signal: AbortSignal): Promise<LuftExport> {
+export async function readLuftSpreadsheet(
+  file: File,
+  signal: AbortSignal,
+  filter?: LuftFilter,
+): Promise<LuftExport> {
   signal.throwIfAborted();
   if (!/\.xlsx$/i.test(file.name) || file.size > spreadsheetLimits.fileBytes)
     throw new Error(`Envie o relatório 108 em XLSX, com até ${spreadsheetLimits.fileMb} MB.`);
@@ -57,6 +61,6 @@ export async function readLuftSpreadsheet(file: File, signal: AbortSignal): Prom
       } else reject(new Error(event.data.error || "Não foi possível ler a planilha."));
     };
     if (signal.aborted) abort();
-    else worker.postMessage(bytes, [bytes]);
+    else worker.postMessage({ bytes, filter }, [bytes]);
   });
 }

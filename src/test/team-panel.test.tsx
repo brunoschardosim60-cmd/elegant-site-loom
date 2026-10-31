@@ -167,3 +167,83 @@ it("offers invitations only to owners, without a displayed count or a fixed cap"
   expect(screen.queryByText(/três pessoas|\/3/)).not.toBeInTheDocument();
   expect(rpc).not.toHaveBeenCalled();
 });
+
+const ownerId = "00000000-0000-4000-8000-0000000000aa";
+const roleTeam = (role: ConferenceTeam["role"], owner = role === "owner"): ConferenceTeam => ({
+  ...team,
+  owner,
+  role,
+  settings: { branches: ["06"], reasons: ["DIS"] },
+  members: [
+    { email: "owner@example.com", userId: ownerId, owner: true, pending: false, role: "owner" },
+    {
+      email: "admin@example.com",
+      userId: "00000000-0000-4000-8000-0000000000bb",
+      owner: false,
+      pending: false,
+      role: "admin",
+    },
+    {
+      email: "conf@example.com",
+      userId: "00000000-0000-4000-8000-0000000000cc",
+      owner: false,
+      pending: false,
+      role: "conferente",
+    },
+  ],
+});
+const renderPanel = (value: ConferenceTeam, accountId: string) => {
+  const rpc = vi.fn().mockResolvedValue({ data: {}, error: null });
+  const onRefresh = vi.fn();
+  render(
+    <TeamPanel
+      client={{ rpc } as unknown as SupabaseClient}
+      team={value}
+      open
+      onOpenChange={() => {}}
+      onRefresh={onRefresh}
+      accountId={accountId}
+    />,
+  );
+  return { rpc, onRefresh };
+};
+
+it("lets the owner change a member's role, remove members and save the 108 filter", async () => {
+  const { rpc, onRefresh } = renderPanel(roleTeam("owner"), ownerId);
+  fireEvent.change(screen.getByLabelText("Papel de conf@example.com"), {
+    target: { value: "leitura" },
+  });
+  await waitFor(() =>
+    expect(rpc).toHaveBeenCalledWith("set_conference_member_role", {
+      member_email: "conf@example.com",
+      new_role: "leitura",
+    }),
+  );
+  expect(screen.getAllByRole("button", { name: "Remover" })).toHaveLength(2);
+  fireEvent.change(screen.getByLabelText("Filiais"), { target: { value: "06, 12;26" } });
+  fireEvent.change(screen.getByLabelText("Motivos"), { target: { value: "DIS" } });
+  fireEvent.click(screen.getByRole("button", { name: "Salvar configuração" }));
+  await waitFor(() =>
+    expect(rpc).toHaveBeenCalledWith("set_conference_settings", {
+      branch_codes: ["06", "12", "26"],
+      reason_codes: ["DIS"],
+    }),
+  );
+  expect(onRefresh).toHaveBeenCalled();
+});
+
+it("lets an administrator manage conferentes but not roles, other admins or themselves", () => {
+  renderPanel(roleTeam("admin"), "00000000-0000-4000-8000-0000000000bb");
+  expect(screen.queryByLabelText("Papel de conf@example.com")).not.toBeInTheDocument();
+  expect(screen.getAllByRole("button", { name: "Remover" })).toHaveLength(1);
+  expect(screen.getByRole("button", { name: "Liberar acesso à equipe" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Salvar configuração" })).toBeInTheDocument();
+});
+
+it("shows conferentes the roles without any management controls", () => {
+  renderPanel(roleTeam("conferente"), "00000000-0000-4000-8000-0000000000cc");
+  expect(screen.queryByRole("button", { name: "Remover" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Liberar acesso à equipe" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Salvar configuração" })).not.toBeInTheDocument();
+  expect(screen.getAllByText("Administrador").length).toBeGreaterThan(0);
+});
