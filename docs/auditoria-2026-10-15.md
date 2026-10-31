@@ -1,5 +1,7 @@
 # Auditoria do confere. — 15/10/2026
 
+> **Documento histórico.** Descreve o sistema na data do título. A leitura de fotos por IA (Gemini) citada aqui foi removida em 30/10/2026; veja o [README](../README.md) para o estado atual.
+
 **Atualização posterior:** a dívida de lint registrada nesta auditoria foi resolvida. Veja a seção 8 para o resultado mais recente.
 
 Base examinada: `f5409b6`, branch `codex/ocr-image-reading`. O Git estava limpo no início. Na conclusão inicial, as correções ficaram **locais, sem commit, push, deploy ou migração remota**. A publicação foi autorizada posteriormente pelo usuário, incluindo os ajustes complementares abaixo. Nenhum cadastro real foi criado, editado ou excluído.

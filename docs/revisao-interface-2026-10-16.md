@@ -1,5 +1,7 @@
 # Revisão da interface — 16/10/2026
 
+> **Documento histórico.** Descreve o sistema na data do título; partes podem ter mudado desde então. Veja o [README](../README.md) para o estado atual.
+
 ## Ajustes
 
 - Pendências renderiza até 50 CTCs por página. A busca, os totais, o PDF e as operações continuam usando todos os registros; não há truncamento no cadastro.

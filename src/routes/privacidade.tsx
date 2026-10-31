@@ -35,8 +35,9 @@ function PrivacyPolicy() {
         </li>
         <li>
           <strong>Dados operacionais dos documentos de transporte:</strong> número do pré-manifesto
-          ou manifesto, nome do motorista, placa do veículo, datas de emissão e previsão de entrega,
-          números de CTC e de nota fiscal, volumes, nomes do remetente (cliente/laboratório) e do
+          ou manifesto, nome do motorista e do conferente, placa do veículo, datas de emissão e
+          previsão de entrega, números de CTC e de nota fiscal, volumes, valor e peso da mercadoria,
+          natureza da carga, cidade de entrega, nomes do remetente (cliente/laboratório) e do
           destinatário, e ocorrências de entrega importadas da planilha.
         </li>
         <li>
@@ -59,6 +60,12 @@ function PrivacyPolicy() {
           podem registrar dados como endereço IP, data e hora de acesso, para segurança e
           cumprimento de obrigações legais.
         </li>
+        <li>
+          <strong>Registro de falhas:</strong> quando ocorre um erro inesperado na tela, o sistema
+          guarda a mensagem técnica, a página, o navegador usado e o identificador da conta, para
+          corrigir o problema. Senhas e chaves são removidas da mensagem, e o registro é apagado
+          após 90 dias.
+        </li>
       </ul>
 
       <h2>3. Para que os dados são usados</h2>
@@ -67,6 +74,10 @@ function PrivacyPolicy() {
         pré-manifestos, conferir CTCs, acompanhar pendências por motorista, rastrear documentos,
         gerar relatórios em PDF e manter o histórico de quem fez cada ação. Os dados não são usados
         para publicidade, não são vendidos e não são enviados a serviços de inteligência artificial.
+      </p>
+      <p>
+        O papel de cada pessoa na equipe (responsável, administrador, conferente ou só leitura)
+        define o que ela pode consultar e alterar.
       </p>
       <p>
         As bases legais são a execução do contrato com a controladora e o legítimo interesse na

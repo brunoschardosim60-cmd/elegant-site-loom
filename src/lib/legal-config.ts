@@ -15,7 +15,7 @@ export const legalConfig = {
   databaseRegion: "[PREENCHER: região do banco Supabase]",
   /** How long records are kept after the contract ends or the record closes. */
   retention: "[PREENCHER: prazo de guarda definido pela empresa]",
-  updatedAt: "30/10/2026",
+  updatedAt: "31/10/2026",
 };
 
 export const isPlaceholder = (value: string) => value.startsWith("[PREENCHER");
