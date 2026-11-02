@@ -5,6 +5,9 @@ import {
   parseLuft108,
   isLuft108Header,
   isLuft108Demand,
+  defaultLuftFilter,
+  describeLuftFilter,
+  type LuftFilter,
   luftColumnIndex,
   validateSpreadsheetZip,
   type LuftExport,
@@ -125,6 +128,7 @@ function readSheet(
   dates: Set<number>,
   epoch1904: boolean,
   budget: { cells: number; selected: number },
+  filter: LuftFilter,
 ) {
   const rows: SheetCell[][] = [],
     parser = xmlParser();
@@ -222,11 +226,11 @@ function readSheet(
         branchColumn = luftColumnIndex(cells, "Filial");
         reasonColumn = luftColumnIndex(cells, "Motivo");
       } else if (matching && cells.some((cell) => cell !== null && cell !== "")) {
-        if (!isLuft108Demand(cells[branchColumn], cells[reasonColumn])) ignored++;
+        if (!isLuft108Demand(cells[branchColumn], cells[reasonColumn], filter)) ignored++;
         else {
           if (++budget.selected > spreadsheetLimits.selectedRows)
             throw new Error(
-              "A planilha tem mais de 50 mil linhas da filial 06 + DIS. Exporte um período menor.",
+              `A planilha tem mais de 50 mil linhas da ${describeLuftFilter(filter)}. Exporte um período menor.`,
             );
           rows.push(cells);
           rowNumbers.push(rowNumber);
@@ -269,8 +273,11 @@ function readZipXml(
     unzip.push(bytes.subarray(offset, offset + size), offset + size >= bytes.length);
 }
 
-/** Metadata first, then streamed sheets; only branch 06 + DIS rows stay in memory. */
-export function decodeLuftXlsx(buffer: ArrayBuffer): LuftExport {
+/** Metadata first, then streamed sheets; only the team's branch/reason rows stay in memory. */
+export function decodeLuftXlsx(
+  buffer: ArrayBuffer,
+  filter: LuftFilter = defaultLuftFilter,
+): LuftExport {
   validateSpreadsheetZip(buffer);
   const strings = sharedStrings();
   const expansion = { expanded: 0 };
@@ -297,7 +304,7 @@ export function decodeLuftXlsx(buffer: ArrayBuffer): LuftExport {
   const budget = { cells: 0, selected: 0 };
   readZipXml(buffer, expansion, (name) => {
     if (!/^xl\/worksheets\/[^/]+\.xml$/.test(name)) return;
-    const sheet = readSheet(strings.result, dates, epoch1904, budget);
+    const sheet = readSheet(strings.result, dates, epoch1904, budget, filter);
     return (text, final) => {
       sheet.parser.write(text);
       if (final) {
@@ -306,5 +313,5 @@ export function decodeLuftXlsx(buffer: ArrayBuffer): LuftExport {
       }
     };
   });
-  return parseLuft108(sheets);
+  return parseLuft108(sheets, filter);
 }

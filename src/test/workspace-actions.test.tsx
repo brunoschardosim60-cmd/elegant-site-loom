@@ -5,9 +5,6 @@ import type { ConferenceState } from "@/lib/conference-state";
 
 const mocks = vi.hoisted(() => ({ pdf: vi.fn() }));
 vi.mock("@/lib/conference-pdf", () => ({ exportConferencePdf: mocks.pdf }));
-vi.mock("@/lib/photo-reader.functions", () => ({
-  photoReaderStatus: async () => ({ configured: false }),
-}));
 const initialState = {
   manifests: [
     {

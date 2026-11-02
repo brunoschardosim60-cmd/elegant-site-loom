@@ -35,6 +35,9 @@ const routes: Record<string, string[]> = {
   get_conference_team: ["accept_invitation"],
   get_conference_revision: [],
   save_team_conference: ["base_data", "next_data"],
+  save_team_conference_v2: ["base_data", "next_data"],
+  archive_conference_manifests: ["min_days"],
+  find_archived_conference_manifests: ["manifest_ids", "ctc_numbers", "hashes"],
   invite_conference_member: ["member_email"],
   get_conference_audit: ["pre_id", "before_id"],
 };
@@ -48,7 +51,8 @@ async function rpc(user: number, name: string, args: Record<string, unknown> = {
       })
     ).json();
   } catch {
-    return { data: null, error: { message: "network" } };
+    // Same shape supabase-js returns when fetch itself fails.
+    return { data: null, error: { message: "TypeError: fetch failed" } };
   }
 }
 beforeAll(async () => {
@@ -78,8 +82,14 @@ beforeAll(async () => {
     "20261017020000_security_scalar_types.sql",
     "20261018010000_shared_personal_demands.sql",
     "20261018020000_personal_receipt_acceptance.sql",
+    "20261030010000_remove_photo_ai.sql",
+    "20261030020000_conference_archive.sql",
+    "20261030030000_roles_settings_monitoring.sql",
   ])
     await db.exec(await readFile(`supabase/migrations/${migration}`, "utf8"));
+  await db.exec(
+    "insert into public.conference_owner_allowlist(email) values ('device1@example.invalid')",
+  );
   server = createServer(async (request, response) => {
     const user = Number(request.headers["x-test-user"]);
     let saving = false;
@@ -90,7 +100,7 @@ beforeAll(async () => {
       const { name, args } = JSON.parse(Buffer.concat(chunks).toString());
       if (!Object.hasOwn(routes, name)) throw new Error("unknown RPC");
       const params = routes[name]!.map((k) => args[k] ?? null);
-      saving = name === "save_team_conference";
+      saving = name.startsWith("save_team_conference");
       if (saving) {
         peak = Math.max(peak, ++inflight);
         await new Promise((done) => setTimeout(done, 30));
@@ -140,6 +150,7 @@ beforeEach(async () => {
     uid(1),
   ]);
   await db.exec("delete from public.conference_audit");
+  await db.exec("delete from public.conference_archive");
 });
 afterAll(async () => {
   await new Promise<void>((done) => server?.close(() => done()));
@@ -236,8 +247,8 @@ it("keeps personal confirmations independent, accepts a peer explicitly, and doe
     original.receiptChecks![0],
   );
   expect(
-    (await rpc(3, "save_team_conference", { base_data: views[2]!.state, next_data: stale })).error
-      ?.message,
+    (await rpc(3, "save_team_conference_v2", { base_data: views[2]!.state, next_data: stale }))
+      .error?.message,
   ).toContain("CONFERENCE_CONFLICT");
   expect(
     (await audit()).some(
@@ -311,7 +322,7 @@ it("invalidates approval suggestions after the NF changes, without losing the hi
     oldReceipt,
   );
   expect(
-    (await rpc(3, "save_team_conference", { base_data: staleBase, next_data: staleAcceptance }))
+    (await rpc(3, "save_team_conference_v2", { base_data: staleBase, next_data: staleAcceptance }))
       .error?.message,
   ).toContain("CONFERENCE_CONFLICT");
   sessions.forEach((session) => session.stop());
@@ -477,8 +488,11 @@ it("retries a lost response after commit without duplicate audit or undoing anot
   loseResponseFor = 1;
   sessions[0]!.change(receive(views[0]!.state, 0));
   sessions[1]!.change(receive(views[1]!.state, 1));
-  await vi.waitFor(() => expect(views[0]!.error).toContain("Não foi possível sincronizar"));
+  // A lost response is a transport failure: retried quietly, never shown in red.
+  await vi.waitFor(() => expect(views[0]!.reconnecting).toBe(true));
+  expect(views[0]!.error).toBe("");
   await vi.waitFor(() => expect(views[1]!.pending).toBe(false));
+  // Retry now instead of waiting for the automatic 5 s back-off.
   sessions[0]!.retry();
   await settle(sessions, views);
   expect(
@@ -548,7 +562,7 @@ it("three clients converge when a route is remanifested while two unrelated CTCs
   const setup = (await rpc(1, "get_conference_team")).data.data as ConferenceState;
   expect(
     (
-      await rpc(1, "save_team_conference", {
+      await rpc(1, "save_team_conference_v2", {
         base_data: setup,
         next_data: { ...setup, manifests: [...setup.manifests, original] },
       })
@@ -582,6 +596,40 @@ it("three clients converge when a route is remanifested while two unrelated CTCs
   const bad = structuredClone(stale);
   bad.manifests[1]!.documents[0]!.received = true;
   expect(
-    (await rpc(3, "save_team_conference", { base_data: stale, next_data: bad })).error?.message,
+    (await rpc(3, "save_team_conference_v2", { base_data: stale, next_data: bad })).error?.message,
   ).toContain("CONFERENCE_CONFLICT");
+});
+
+it("archiving a long-finished pre does not disturb a device that has not refreshed yet", async () => {
+  const finishedAt = new Date(Date.now() - 40 * 86400000).toISOString();
+  const old = {
+    ...pre(9),
+    issueDate: "2026-08-01",
+    finishedAt,
+    documents: pre(9).documents.map((doc) => ({ ...doc, received: true, receivedAt: finishedAt })),
+  };
+  await db.query("update public.conference_states set data=$1 where user_id=$2", [
+    { ...emptyConference, manifests: [pre(), old] },
+    uid(1),
+  ]);
+  const { sessions, views } = await clients();
+  expect((await rpc(2, "archive_conference_manifests", { min_days: 30 })).data).toBe(1);
+  // Device 1 still holds the archived pre and scans a CTC of the open one.
+  expect(views[0]!.state.manifests.map((m) => m.id)).toContain(old.id);
+  sessions[0]!.change(receive(views[0]!.state, 0));
+  await settle(sessions, views);
+  for (const view of views) {
+    expect(view.error).toBe("");
+    expect(view.conflict).toBe(false);
+    expect(view.state.manifests.map((m) => m.id)).toEqual([pre().id]);
+    expect(view.state.manifests[0]!.documents[0]!.received).toBe(true);
+  }
+  const found = await rpc(3, "find_archived_conference_manifests", {
+    manifest_ids: [],
+    ctc_numbers: [old.documents[0]!.ctc],
+    hashes: [],
+  });
+  expect((found.data as { manifest: { id: string } }[]).map((item) => item.manifest.id)).toEqual([
+    old.id,
+  ]);
 });

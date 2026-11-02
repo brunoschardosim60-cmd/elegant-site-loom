@@ -15,6 +15,11 @@ export type ManifestDraftRow = {
   occurrenceDescription?: string | undefined;
   occurrenceDate?: string | undefined;
   reportGeneratedAt?: string | undefined;
+  /** 108 cargo details for this NF line; summed or merged per CTC on import. */
+  cargoValueCents?: number | undefined;
+  weightGrams?: number | undefined;
+  nature?: string | undefined;
+  city?: string | undefined;
 };
 type Field = "ctc" | "nf" | "volumes" | "client" | "recipient";
 const labels: Record<Field, string> = {

@@ -12,6 +12,8 @@ export type ImportDraft = {
   issueDate?: string | undefined;
   issueTime?: string | undefined;
   sourcePhotoHash?: string | undefined;
+  /** Checker who loaded the manifest (108 column Conferente). */
+  checker?: string | undefined;
   rows: ManifestDraftRow[];
   targetId?: string;
 } & ManifestTotals;
@@ -231,9 +233,18 @@ export function applyImports(
     const docs: DocumentItem[] = [...grouped.entries()].map(([ctc, group]) => {
       const deliveryDates = group.rows.map((row) => normalizeIssueDate(row.deliveryDate ?? ""));
       const nfOccurrences = occurrencesFromRows(group.rows);
-      const unique = (field: "nf" | "client" | "recipient") => [
+      const unique = (field: "nf" | "client" | "recipient" | "nature" | "city") => [
         ...new Set(group.rows.map((item) => item[field]?.trim() ?? "").filter(Boolean)),
       ];
+      // Cargo details sum over the CTC's NFs, only when every NF line carries them.
+      const total = (field: "cargoValueCents" | "weightGrams") =>
+        group.rows.every((item) => Number.isSafeInteger(item[field]))
+          ? group.rows.reduce((sum, item) => sum + item[field]!, 0)
+          : undefined;
+      const cargoValueCents = total("cargoValueCents"),
+        weightGrams = total("weightGrams"),
+        nature = unique("nature").join(" / ").slice(0, 120),
+        city = unique("city").join(" / ").slice(0, 120);
       return {
         id: `${id}-${ctc}`,
         ctc,
@@ -243,6 +254,10 @@ export function applyImports(
         volumes: group.rows.reduce((sum, item) => sum + Number(item.volumes), 0),
         received: false,
         ...(nfOccurrences.length ? { nfOccurrences } : {}),
+        ...(cargoValueCents !== undefined ? { cargoValueCents } : {}),
+        ...(weightGrams !== undefined ? { weightGrams } : {}),
+        ...(nature ? { nature } : {}),
+        ...(city ? { city } : {}),
         ...(deliveryDates.every((day) => !!day)
           ? { deliveryDates: [...new Set(deliveryDates as string[])].sort() }
           : {}),
@@ -283,6 +298,7 @@ export function applyImports(
         ...(issueDate ? { issueDate } : {}),
         ...(issueTime ? { issueTime } : {}),
         ...(sourcePhotoHash ? { sourcePhotoHashes: [sourcePhotoHash] } : {}),
+        ...(draft.checker?.trim() ? { checker: draft.checker.trim().slice(0, 120) } : {}),
         documents: docs,
       });
   }

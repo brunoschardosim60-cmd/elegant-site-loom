@@ -7,9 +7,6 @@ import { ConferenceWorkspace } from "@/components/conference-workspace";
 import { AccountStatusBar } from "@/components/account-status";
 import { useState } from "react";
 import type { ConferenceState } from "@/lib/conference-state";
-vi.mock("@/lib/photo-reader.functions", () => ({
-  photoReaderStatus: async () => ({ configured: false }),
-}));
 afterEach(cleanup);
 function TeamPreview({
   items,

@@ -48,7 +48,8 @@ it("reveals a new import error once without pulling the screen on team updates",
     const mounted = render(<SpreadsheetImportDialog {...props} manifests={[]} />);
     upload();
     expect(await screen.findByRole("alert")).toHaveTextContent("Arquivo inválido");
-    expect(scroll).toHaveBeenCalledTimes(1);
+    // The scroll runs in a passive effect, which React may flush after the alert paints.
+    await waitFor(() => expect(scroll).toHaveBeenCalledTimes(1));
     expect(scroll).toHaveBeenCalledWith({ block: "nearest" });
     mounted.rerender(<SpreadsheetImportDialog {...props} manifests={[]} />);
     expect(scroll).toHaveBeenCalledTimes(1);
@@ -293,7 +294,7 @@ it("highlights a dragged file, keeps the highlight across children and reads a d
   expect(dropZone()).toHaveAttribute("data-dragging", "true");
   fireEvent.drop(dropZone(), { dataTransfer: transfer });
   await screen.findByLabelText("Selecionar manifesto 06052233");
-  expect(mock.read).toHaveBeenCalledExactlyOnceWith(file, expect.any(AbortSignal));
+  expect(mock.read).toHaveBeenCalledExactlyOnceWith(file, expect.any(AbortSignal), undefined);
   expect(dropZone()).not.toHaveAttribute("data-dragging");
   expect(save).not.toHaveBeenCalled();
 });

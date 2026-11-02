@@ -63,15 +63,19 @@ export function securityHeaders(
   );
   headers.set("Cross-Origin-Resource-Policy", "same-origin");
   headers.set("Cache-Control", "private, no-store");
+  // Internal system: search engines must not index any response.
+  headers.set("X-Robots-Tag", "noindex, nofollow");
   if (production) {
+    // Browsers that saw the site once refuse plain HTTP for two years.
+    headers.set("Strict-Transport-Security", "max-age=63072000; includeSubDomains");
     const supabase = new URL(databaseUrl);
     const csp = [
       "default-src 'self'",
       `script-src 'self' 'nonce-${nonce}' 'wasm-unsafe-eval'`,
-      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-      "font-src 'self' https://fonts.gstatic.com",
+      "style-src 'self' 'unsafe-inline'",
+      "font-src 'self'",
       "img-src 'self' data: blob:",
-      `connect-src 'self' ${supabase.origin} wss://${supabase.host} https://cdn.jsdelivr.net https://tessdata.projectnaptha.com`,
+      `connect-src 'self' ${supabase.origin} wss://${supabase.host}`,
       "worker-src 'self'",
       "object-src 'none'",
       "base-uri 'none'",

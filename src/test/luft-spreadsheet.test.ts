@@ -1,8 +1,10 @@
 import { expect, it } from "vitest";
 import {
+  describeLuftFilter,
   findLuftCtcOverlaps,
   parseLuft108,
   validateSpreadsheetZip,
+  type LuftFilter,
   type SheetCell,
 } from "@/lib/luft-spreadsheet";
 import { applyImports } from "@/lib/manifest-import";
@@ -189,4 +191,31 @@ it("keeps issuance time and next-day delivery forecast separate without applying
     issueTime: "17:03",
     documents: [{ deliveryDates: ["2026-10-14"] }],
   });
+});
+
+it("imports the branches and reasons configured for the team, comparing numeric branches as numbers", () => {
+  const sheet = (filter?: LuftFilter) =>
+    parseLuft108(
+      [
+        {
+          name: "Relatório",
+          rows: [
+            headers,
+            row({ Manifesto: "06050001", CTRC: "0000000001" }),
+            row({ Manifesto: "12050002", Filial: 12, CTRC: "0000000002" }),
+            row({ Manifesto: "12050003", Filial: "12", Motivo: "TRA", CTRC: "0000000003" }),
+          ],
+        },
+      ],
+      filter,
+    );
+  expect(sheet().drafts.map((d) => d.id)).toEqual(["06050001"]);
+  expect(sheet({ branches: ["012"], reasons: ["dis", "TRA"] }).drafts.map((d) => d.id)).toEqual([
+    "12050002",
+    "12050003",
+  ]);
+  expect(describeLuftFilter({ branches: ["06", "12"], reasons: ["DIS"] })).toBe(
+    "filiais 06, 12 / DIS",
+  );
+  expect(() => sheet({ branches: ["99"], reasons: ["DIS"] })).toThrow("filial 99 / DIS");
 });

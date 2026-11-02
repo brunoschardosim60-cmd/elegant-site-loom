@@ -1,14 +1,17 @@
-User-agent: Googlebot
+# Sistema interno: buscadores não devem indexar nenhuma página.
+# Os robôs de pré-visualização de links continuam liberados para que um link
+# compartilhado no WhatsApp ou em redes sociais mostre título e imagem.
+User-agent: facebookexternalhit
 Allow: /
 
-User-agent: Bingbot
+User-agent: WhatsApp
 Allow: /
 
 User-agent: Twitterbot
 Allow: /
 
-User-agent: facebookexternalhit
+User-agent: LinkedInBot
 Allow: /
 
 User-agent: *
-Allow: /
+Disallow: /

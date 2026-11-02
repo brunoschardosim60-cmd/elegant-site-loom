@@ -3,9 +3,6 @@ import { afterEach, expect, it, vi } from "vitest";
 import { ConferenceWorkspace } from "@/components/conference-workspace";
 import type { ConferenceState } from "@/lib/conference-state";
 
-vi.mock("@/lib/photo-reader.functions", () => ({
-  photoReaderStatus: async () => ({ configured: false }),
-}));
 afterEach(cleanup);
 const state = (count = 123): ConferenceState => ({
   activity: [],

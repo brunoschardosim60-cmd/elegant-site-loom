@@ -1,5 +1,7 @@
 # Revisão de segurança — confere.
 
+> **Documento histórico.** Descreve o sistema na data do título; partes podem ter mudado desde então. Veja o [README](../README.md) para o estado atual.
+
 Escopo: código e dependências, autenticação, funções públicas, isolamento de equipes, auditoria, importação e políticas HTTP. Testes de escrita adversarial executados exclusivamente em PostgreSQL/PGlite isolado, com identidades fictícias. Produção recebeu apenas migração de estrutura/funções e verificações anônimas de baixo volume; nenhum cadastro operacional ou senha foi alterado.
 
 ## Corrigido

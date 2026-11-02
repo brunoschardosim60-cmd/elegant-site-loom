@@ -27,6 +27,7 @@ import {
   manifestReferenceDate,
   normalizeIssueDate,
 } from "@/lib/manifest-date";
+import { CargoTags } from "./cargo-tags";
 
 type Props = {
   personal?: boolean;
@@ -477,6 +478,7 @@ export function DriverManifestList({
                                   <tr key={doc.id} className={doc.received ? "received-row" : ""}>
                                     <td className="ctc-number" data-label="CTC / Cliente">
                                       <span className="ctc-identifier">{doc.ctc}</span>
+                                      <CargoTags doc={doc} />
                                       {doc.client && (
                                         <span className="driver-document-client">{doc.client}</span>
                                       )}

@@ -7,9 +7,6 @@ import { selectConferenceReport } from "@/lib/conference-pdf";
 import { conferenceStateSchema } from "@/lib/conference-state";
 import { ConferenceWorkspace } from "@/components/conference-workspace";
 
-vi.mock("@/lib/photo-reader.functions", () => ({
-  photoReaderStatus: async () => ({ configured: false }),
-}));
 afterEach(cleanup);
 const routes = (): Manifest[] =>
   [13, 15].map((day, index) => ({

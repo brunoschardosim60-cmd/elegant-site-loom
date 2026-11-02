@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { type SupabaseClient, type Session } from "@supabase/supabase-js";
 import { AccountFeedback, AccountStatusBar } from "./account-status";
 import { ConferenceWorkspace } from "./conference-workspace";
@@ -6,10 +6,27 @@ import { getSupabaseClient } from "@/lib/supabase-client";
 import type { ConferenceState } from "@/lib/conference-state";
 import { AccountPanel, Login, PasswordReset } from "./account-auth";
 import { passwordRecoveryLocation, setPasswordRecoveryMarker } from "@/lib/password-recovery";
-import { TeamSync, teamSchema, type TeamSyncView } from "@/lib/conference-team";
+import {
+  isReadOnlyMember,
+  isTransientFailure,
+  TeamSync,
+  teamSchema,
+  type TeamSyncView,
+} from "@/lib/conference-team";
 import { TeamPanel } from "./team-panel";
 import { teamRequest } from "@/lib/team-request";
 import type { WorkspaceScope } from "@/lib/conference-ownership";
+import {
+  ARCHIVE_AFTER_DAYS,
+  ARCHIVE_EARLY_DAYS,
+  ARCHIVE_WARNING_BYTES,
+  archiveFinished,
+  conferenceBytes,
+  findArchived,
+  type ArchiveQuery,
+} from "@/lib/conference-archive";
+import { Button } from "./ui/button";
+import { watchErrors } from "@/lib/error-report";
 
 export function AccountWorkspace() {
   const [client, setClient] = useState<SupabaseClient>();
@@ -155,6 +172,7 @@ export function AccountWorkspace() {
 function SavedWorkspace({ client, session }: { client: SupabaseClient; session: Session }) {
   const [view, setView] = useState<TeamSyncView>();
   const [loadError, setLoadError] = useState("");
+  const [notInvited, setNotInvited] = useState(false);
   const [teamOpen, setTeamOpen] = useState(false);
   const [scope, setScope] = useState<WorkspaceScope>("mine");
   const [auditPre, setAuditPre] = useState("");
@@ -162,13 +180,45 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
   const [signOutError, setSignOutError] = useState("");
   const signOutPending = useRef(false);
   const sync = useRef<TeamSync | undefined>(undefined);
+  const [archiving, setArchiving] = useState(false);
+  const [archiveMessage, setArchiveMessage] = useState("");
+  const request = useCallback(
+    (name: string, args: Record<string, unknown>) => teamRequest(client, name, args),
+    [client],
+  );
+  // Uncaught browser errors go to the database log (report_client_error).
+  useEffect(() => watchErrors(request), [request]);
+  const lookupArchive = useCallback(
+    (query: ArchiveQuery) => findArchived(request, query),
+    [request],
+  );
   useEffect(() => {
     let active = true;
-    Promise.resolve(teamRequest(client, "get_conference_team", { accept_invitation: false }))
+    // A cold server or a brief network drop must not greet the user with an error:
+    // retry transient failures twice (2 s, then 5 s) before showing one.
+    const load = async (): Promise<{ data: unknown; error: { message?: string } | null }> => {
+      for (const wait of [2000, 5000, 0]) {
+        try {
+          const result = await teamRequest(client, "get_conference_team", {
+            accept_invitation: false,
+          });
+          if (!result.error || !wait || !isTransientFailure(result.error.message ?? ""))
+            return result;
+        } catch (error) {
+          if (!wait || !isTransientFailure(String((error as Error)?.message ?? error))) throw error;
+        }
+        await new Promise((done) => setTimeout(done, wait));
+        if (!active) break;
+      }
+      return { data: null, error: { message: "cancelled" } };
+    };
+    load()
       .then(({ data, error }) => {
         if (!active) return;
         if (error) {
-          setLoadError("Não foi possível carregar seus cadastros. Nenhum dado foi substituído.");
+          if (/CONFERENCE_NOT_INVITED/.test(error.message ?? "")) setNotInvited(true);
+          else
+            setLoadError("Não foi possível carregar seus cadastros. Nenhum dado foi substituído.");
           return;
         }
         const parsed = teamSchema.safeParse(data);
@@ -176,13 +226,9 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
           setLoadError("Os dados salvos precisam de revisão. Nenhum dado foi substituído.");
           return;
         }
-        sync.current = new TeamSync(
-          parsed.data,
-          (name, args) => teamRequest(client, name, args),
-          (next) => {
-            if (active) setView(next);
-          },
-        );
+        sync.current = new TeamSync(parsed.data, request, (next) => {
+          if (active) setView(next);
+        });
         setView({
           team: parsed.data,
           state: parsed.data.data,
@@ -191,6 +237,9 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
           conflict: false,
           pending: false,
         });
+        // Keep the live row small: finished manifests leave it after a waiting
+        // period. Idempotent on the server; the next poll picks up the change.
+        archiveFinished(request, ARCHIVE_AFTER_DAYS).catch(() => {});
       })
       .catch(() => {
         if (active)
@@ -220,9 +269,27 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
       window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", refresh);
     };
-  }, [client, session.user.id]);
+  }, [client, request, session.user.id]);
   function changed(snapshot: ConferenceState) {
     sync.current?.change(snapshot);
+  }
+  async function archiveEarly() {
+    if (archiving) return;
+    setArchiving(true);
+    setArchiveMessage("");
+    try {
+      const moved = await archiveFinished(request, ARCHIVE_EARLY_DAYS);
+      setArchiveMessage(
+        moved
+          ? `${moved} pré(s) finalizado(s) arquivado(s). Eles continuam disponíveis no Rastreamento.`
+          : `Nenhum pré finalizado há mais de ${ARCHIVE_EARLY_DAYS} dias para arquivar.`,
+      );
+      void sync.current?.refresh(true);
+    } catch {
+      setArchiveMessage("Não foi possível arquivar agora. Tente novamente em instantes.");
+    } finally {
+      setArchiving(false);
+    }
   }
   async function signOut() {
     if (signOutPending.current || sync.current?.pending()) return;
@@ -239,6 +306,26 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
       setSigningOut(false);
     }
   }
+  if (notInvited)
+    return (
+      <AccountPanel>
+        <div className="grid gap-3 text-sm" role="status">
+          <strong>Sua conta ainda não tem acesso</strong>
+          <p className="text-muted-foreground">
+            O confere. funciona por convite. Peça ao responsável pela sua equipe para incluir o
+            e-mail <strong>{session.user.email}</strong> em Equipe e depois entre de novo.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" onClick={() => window.location.reload()}>
+              Já fui convidado
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => void signOut()}>
+              Sair da conta
+            </Button>
+          </div>
+        </div>
+      </AccountPanel>
+    );
   if (loadError)
     return (
       <AccountPanel>
@@ -251,30 +338,61 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
         <AccountFeedback message="Carregando seus cadastros…" />
       </AccountPanel>
     );
+  const liveBytes = conferenceBytes(view.state);
   return (
     <div className="account-shell">
-      <AccountStatusBar
-        email={session.user.email || ""}
-        status={view.status}
-        pending={view.pending}
-        error={view.error}
-        conflict={view.conflict}
-        invitation={!!view.team.invitation}
-        teamView={scope === "team"}
-        onTeam={() => {
-          setScope((current) => (current === "team" ? "mine" : "team"));
-          if (view.team.invitation) {
-            setAuditPre("");
-            setTeamOpen(true);
-          }
-          void sync.current?.refresh(true);
-        }}
-        signingOut={signingOut}
-        signOutError={signOutError}
-        onSignOut={() => void signOut()}
-        onRetry={() => sync.current?.retry()}
-        onReload={() => window.location.reload()}
-      />
+      <div className="account-top">
+        <AccountStatusBar
+          email={session.user.email || ""}
+          status={view.status}
+          pending={view.pending}
+          error={view.error}
+          conflict={view.conflict}
+          reconnecting={view.reconnecting === true}
+          invitation={!!view.team.invitation}
+          teamView={scope === "team"}
+          onTeam={() => {
+            setScope((current) => (current === "team" ? "mine" : "team"));
+            if (view.team.invitation) {
+              setAuditPre("");
+              setTeamOpen(true);
+            }
+            void sync.current?.refresh(true);
+          }}
+          signingOut={signingOut}
+          signOutError={signOutError}
+          onSignOut={() => void signOut()}
+          onRetry={() => sync.current?.retry()}
+          onReload={() => window.location.reload()}
+        />
+        {liveBytes > ARCHIVE_WARNING_BYTES && (
+          <div className="archive-warning" role="status">
+            <div>
+              <strong>
+                Os cadastros em andamento estão perto do limite do banco (
+                {(liveBytes / 1_000_000).toFixed(1).replace(".", ",")} de 5 MB).
+              </strong>
+              <p>
+                Prés finalizados há mais de {ARCHIVE_AFTER_DAYS} dias são arquivados
+                automaticamente. Para liberar espaço agora, arquive os finalizados há mais de{" "}
+                {ARCHIVE_EARLY_DAYS} dias; eles continuam consultáveis no Rastreamento.
+              </p>
+              {archiveMessage && <p>{archiveMessage}</p>}
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={archiving}
+              onClick={() => void archiveEarly()}
+            >
+              {archiving
+                ? "Arquivando…"
+                : `Arquivar finalizados há mais de ${ARCHIVE_EARLY_DAYS} dias`}
+            </Button>
+          </div>
+        )}
+      </div>
       <div className="account-workspace-content" inert={signingOut || undefined}>
         <ConferenceWorkspace
           initialState={view.state}
@@ -295,6 +413,9 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
             setAuditPre(id);
             setTeamOpen(true);
           }}
+          findArchived={lookupArchive}
+          readOnly={isReadOnlyMember(view.team)}
+          importFilter={view.team.settings}
         />
       </div>
       <TeamPanel
@@ -305,6 +426,7 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
         onRefresh={() => void sync.current?.refresh(true)}
         selectedPre={auditPre}
         canJoin={!view.pending}
+        accountId={session.user.id}
       />
     </div>
   );

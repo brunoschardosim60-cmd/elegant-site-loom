@@ -1,10 +1,12 @@
 import { z } from "zod";
+import { missingRpc } from "./conference-archive";
 import { conferenceStateSchema, type ConferenceState } from "./conference-state";
 
+const memberRoleSchema = z.enum(["owner", "admin", "conferente", "leitura"]);
 export const teamSchema = z.object({
   sharedDemands: z.boolean().optional(),
   personalReceipts: z.boolean().optional(),
-  teamId: z.string().uuid(),
+  teamId: z.guid(),
   name: z.string(),
   owner: z.boolean(),
   revision: z.number().int().nonnegative(),
@@ -12,13 +14,33 @@ export const teamSchema = z.object({
   members: z.array(
     z.object({
       email: z.string(),
-      userId: z.string().uuid().optional(),
+      userId: z.guid().optional(),
       owner: z.boolean(),
       pending: z.boolean(),
+      role: memberRoleSchema.optional(),
     }),
   ),
   invitation: z.object({ ownerEmail: z.string() }).nullable().optional(),
+  /** Caller's role; absent on databases without the roles migration. */
+  role: memberRoleSchema.optional(),
+  /** Which rows of the 108 export belong to this team. */
+  settings: z
+    .object({ branches: z.array(z.string()).min(1), reasons: z.array(z.string()).min(1) })
+    .optional(),
 });
+export type MemberRole = z.infer<typeof memberRoleSchema>;
+export const roleLabels: Record<MemberRole, string> = {
+  owner: "Responsável",
+  admin: "Administrador",
+  conferente: "Conferente",
+  leitura: "Só leitura",
+};
+/** Owners and administrators manage people and the import filter. */
+export const canManageTeam = (team: { owner: boolean; role?: MemberRole | undefined }) =>
+  team.owner || team.role === "admin";
+/** Read-only members may look but not change anything. */
+export const isReadOnlyMember = (team: { role?: MemberRole | undefined }) =>
+  team.role === "leitura";
 export type ConferenceTeam = z.infer<typeof teamSchema>;
 const savedTeamSchema = z.object({
   revision: z.number().int().nonnegative(),
@@ -135,7 +157,21 @@ export type TeamSyncView = {
   error: string;
   conflict: boolean;
   pending: boolean;
+  /** A transient network failure is being retried automatically. */
+  reconnecting?: boolean;
 };
+
+/** Automatic attempts (5, 10, 20 s apart) before a network failure is shown as an error. */
+export const TRANSIENT_RETRIES = 3;
+/** Network-level failures that a later identical request can fix. Never business errors. */
+export function isTransientFailure(message: string) {
+  return (
+    !/CONFERENCE_|Equipe não autorizada|Authentication required/.test(message) &&
+    /failed to fetch|networkerror|network request failed|load failed|fetch failed|abort|timed? ?out|econn|enotfound|socket|502|503|504|bad gateway|service unavailable|gateway time|jwt expired|PGRST301/i.test(
+      message,
+    )
+  );
+}
 export class TeamSync {
   private base: ConferenceState;
   private local: ConferenceState;
@@ -145,6 +181,12 @@ export class TeamSync {
   private collision = false;
   private refreshRetryAt = 0;
   private refreshFailures = 0;
+  private reconnecting = false;
+  private saveFailures = 0;
+  private saveRetry: ReturnType<typeof setTimeout> | undefined;
+  // The v2 RPC settles archived manifests a stale device still holds; databases
+  // without the archive migration only have the original RPC.
+  private saveRpc = "save_team_conference_v2";
   constructor(
     private team: ConferenceTeam,
     private rpc: Rpc,
@@ -162,12 +204,17 @@ export class TeamSync {
           ? this.pending()
             ? "Alterações ainda não salvas"
             : "Sincronização interrompida"
-          : this.busy && this.pending()
-            ? "Salvando…"
-            : "Todos os dados salvos",
+          : this.reconnecting
+            ? this.pending()
+              ? "Sem conexão · as alterações serão salvas ao reconectar"
+              : "Sem conexão · tentando novamente…"
+            : this.busy && this.pending()
+              ? "Salvando…"
+              : "Todos os dados salvos",
         error: this.failure,
         conflict: this.collision,
         pending: this.pending(),
+        reconnecting: this.reconnecting && !this.failure,
       });
   }
   pending() {
@@ -175,6 +222,7 @@ export class TeamSync {
   }
   stop() {
     this.stopped = true;
+    if (this.saveRetry) clearTimeout(this.saveRetry);
   }
   change(state: ConferenceState) {
     if (this.stopped) return;
@@ -187,12 +235,35 @@ export class TeamSync {
     this.collision = false;
     this.refreshRetryAt = 0;
     this.refreshFailures = 0;
+    this.saveFailures = 0;
+    this.reconnecting = false;
     this.emit();
     if (this.pending()) void this.flush();
     else void this.refresh();
   }
   private fail(error: unknown, refreshing = false) {
     const message = String((error as { message?: string })?.message ?? error);
+    // A dropped connection, a timeout or a restarting server is retried quietly:
+    // reads are harmless, and the save RPC merges a repeated save safely.
+    if (isTransientFailure(message)) {
+      const attempt = refreshing ? this.refreshFailures++ : this.saveFailures++;
+      const delay = 5000 * 2 ** Math.min(attempt, 3);
+      if (attempt < TRANSIENT_RETRIES) {
+        this.collision = false;
+        this.failure = "";
+        this.reconnecting = true;
+        if (refreshing) this.refreshRetryAt = Date.now() + delay;
+        else {
+          if (this.saveRetry) clearTimeout(this.saveRetry);
+          this.saveRetry = setTimeout(() => {
+            this.saveRetry = undefined;
+            void this.flush();
+          }, delay);
+        }
+        return;
+      }
+    }
+    this.reconnecting = false;
     this.collision = /CONFERENCE_CONFLICT|CONFERENCE_DUPLICATE|CONFERENCE_TEAM_CHANGED/.test(
       message,
     );
@@ -204,13 +275,15 @@ export class TeamSync {
         : 0;
     this.failure = /CONFERENCE_TEAM_CHANGED/.test(message)
       ? "Sua equipe mudou nesta sessão. Gere o PDF se precisar guardar alterações locais e recarregue para abrir os dados da equipe atual. Nenhum dado foi transferido automaticamente."
-      : /CONFERENCE_TOTALS_REVIEW/.test(message)
-        ? "Os totais diferem do cabeçalho. Revise o pré antes de salvar. As alterações locais foram preservadas."
-        : /CONFERENCE_DUPLICATE/.test(message)
-          ? "Outra pessoa já cadastrou esse pré, CTC ou foto. Nenhuma duplicata foi salva. Gere o PDF se precisar guardar as alterações locais e recarregue os dados."
-          : this.collision
-            ? "O mesmo campo foi alterado por outra pessoa ou o registro foi excluído. Gere o PDF para guardar as alterações locais antes de recarregar."
-            : "Não foi possível sincronizar. Mantenha esta página aberta e tente novamente.";
+      : /CONFERENCE_READ_ONLY/.test(message)
+        ? "Sua conta é só de leitura nesta equipe. As alterações não foram salvas; peça ao responsável para mudar seu papel."
+        : /CONFERENCE_TOTALS_REVIEW/.test(message)
+          ? "Os totais diferem do cabeçalho. Revise o pré antes de salvar. As alterações locais foram preservadas."
+          : /CONFERENCE_DUPLICATE/.test(message)
+            ? "Outra pessoa já cadastrou esse pré, CTC ou foto. Nenhuma duplicata foi salva. Gere o PDF se precisar guardar as alterações locais e recarregue os dados."
+            : this.collision
+              ? "O mesmo campo foi alterado por outra pessoa ou o registro foi excluído. Gere o PDF para guardar as alterações locais antes de recarregar."
+              : "Sem conexão com o banco há mais de 30 segundos. Mantenha esta página aberta: as alterações continuam na tela e serão enviadas ao tentar novamente.";
   }
   async flush() {
     if (this.stopped || this.busy || this.failure || !this.pending()) return;
@@ -219,16 +292,21 @@ export class TeamSync {
     try {
       while (!this.stopped && this.pending()) {
         const sent = this.local;
-        const result = await this.rpc("save_team_conference", {
-          base_data: this.base,
-          next_data: sent,
-        });
+        const args = { base_data: this.base, next_data: sent };
+        let result = await this.rpc(this.saveRpc, args);
         if (this.stopped) return;
+        if (this.saveRpc !== "save_team_conference" && missingRpc(result.error)) {
+          this.saveRpc = "save_team_conference";
+          result = await this.rpc(this.saveRpc, args);
+          if (this.stopped) return;
+        }
         if (result.error) throw result.error;
         const committed = savedTeamSchema.parse(result.data);
         this.local = mergeConference(sent, this.local, committed.data);
         this.base = committed.data;
         this.team = { ...this.team, ...committed };
+        this.saveFailures = 0;
+        this.reconnecting = false;
         this.emit();
       }
     } catch (error) {
@@ -243,7 +321,8 @@ export class TeamSync {
       this.stopped ||
       this.busy ||
       (this.failure &&
-        (this.collision || !this.refreshRetryAt || (!force && Date.now() < this.refreshRetryAt)))
+        (this.collision || !this.refreshRetryAt || (!force && Date.now() < this.refreshRetryAt))) ||
+      (this.reconnecting && !force && Date.now() < this.refreshRetryAt)
     )
       return;
     this.busy = true;
@@ -254,7 +333,7 @@ export class TeamSync {
         if (this.stopped) return;
         if (version.error) throw version.error;
         const stamp = z
-          .object({ teamId: z.string().uuid(), revision: z.number().int().nonnegative() })
+          .object({ teamId: z.guid(), revision: z.number().int().nonnegative() })
           .parse(version.data);
         if (stamp.teamId !== this.team.teamId) throw new Error("CONFERENCE_TEAM_CHANGED");
         if (stamp.revision === this.team.revision) {
@@ -281,10 +360,12 @@ export class TeamSync {
         this.collision = false;
         this.refreshRetryAt = 0;
         this.refreshFailures = 0;
+        this.reconnecting = false;
       }
       this.busy = false;
       this.emit();
-      if (!this.failure) void this.flush();
+      // Retry pending saves only once the database answered again.
+      if (succeeded && !this.failure) void this.flush();
     }
   }
 }

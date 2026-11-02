@@ -74,6 +74,14 @@ it("protects HTML and error responses without caching account data or allowing a
   expect(result.headers.get("cache-control")).toBe("private, no-store");
   expect(result.headers.get("set-cookie")).toContain("synthetic");
   expect(result.headers.get("permissions-policy")).toContain("camera=(self)");
+  expect(result.headers.get("strict-transport-security")).toBe(
+    "max-age=63072000; includeSubDomains",
+  );
+  expect(result.headers.get("x-robots-tag")).toBe("noindex, nofollow");
+  // No third-party origin may load scripts, styles, fonts or data.
+  expect(result.headers.get("content-security-policy")).not.toMatch(
+    /googleapis|gstatic|jsdelivr|projectnaptha/,
+  );
   expect(result.status).toBe(500);
 });
 it("does not enforce production CSP on Vite development", () => {

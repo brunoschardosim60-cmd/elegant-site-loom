@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Button } from "./ui/button";
+import { LegalFooter } from "./legal-page";
 
 type AuthProblem = { code?: string | undefined; status?: number | undefined } | null;
 const rateLimited = (error: AuthProblem) =>
@@ -13,11 +14,12 @@ const recoveryMessage =
 
 export function AccountPanel({ children }: { children: ReactNode }) {
   return (
-    <main className="min-h-dvh flex items-center justify-center bg-background p-5">
+    <main className="min-h-dvh flex flex-col items-center justify-center gap-4 bg-background p-5">
       <section className="w-full max-w-sm rounded-xl border bg-card p-7 shadow-sm grid gap-5">
         <h1 className="text-3xl font-bold text-primary">confere.</h1>
         {children}
       </section>
+      <LegalFooter />
     </main>
   );
 }

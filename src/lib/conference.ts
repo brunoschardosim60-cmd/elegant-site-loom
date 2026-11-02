@@ -24,6 +24,12 @@ export type DocumentItem = {
   nfOccurrences?: NfOccurrence[] | undefined;
   /** Derived for display only; never persisted. */
   reroutedTo?: string | undefined;
+  /** From the 108 export, summed over the CTC's NFs: merchandise value (cents) and weight (grams). */
+  cargoValueCents?: number | undefined;
+  weightGrams?: number | undefined;
+  /** Cargo nature (e.g. MAT.LAB, PERECIVEL) and delivery city from the 108 export. */
+  nature?: string | undefined;
+  city?: string | undefined;
 };
 export type PersonalReceipt = {
   id: string;
@@ -54,6 +60,8 @@ export type Manifest = {
   expectedRows?: number | undefined;
   totalVolumes?: number | undefined;
   totalsReviewed?: boolean | undefined;
+  /** Checker who loaded the manifest (108 column Conferente). */
+  checker?: string | undefined;
   documents: DocumentItem[];
   finishedAt?: string | undefined;
   /** Derived for display only; never persisted. */
