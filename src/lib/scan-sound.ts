@@ -4,7 +4,6 @@
  */
 export type ScanSound = "ok" | "done" | "warning" | "error";
 
-const STORAGE_KEY = "confere-scan-sound";
 // Frequency (Hz) and length (s) of each tone; "done" and "error" play two.
 const tones: Record<ScanSound, [number, number][]> = {
   ok: [[1046, 0.09]],
@@ -21,24 +20,7 @@ const tones: Record<ScanSound, [number, number][]> = {
 
 let context: AudioContext | undefined;
 
-export function scanSoundEnabled(): boolean {
-  try {
-    return localStorage.getItem(STORAGE_KEY) !== "off";
-  } catch {
-    return true;
-  }
-}
-
-export function setScanSoundEnabled(enabled: boolean) {
-  try {
-    localStorage.setItem(STORAGE_KEY, enabled ? "on" : "off");
-  } catch {
-    /* Private mode: the choice lasts for this page only. */
-  }
-}
-
 export function playScanSound(kind: ScanSound) {
-  if (!scanSoundEnabled()) return;
   try {
     const Audio =
       typeof window === "undefined"

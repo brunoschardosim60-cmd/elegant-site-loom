@@ -6,11 +6,7 @@ import { conferenceSheet, exportFilename } from "@/lib/conference-export";
 
 const mocks = vi.hoisted(() => ({ download: vi.fn(), sound: vi.fn() }));
 vi.mock("@/lib/xlsx-writer", () => ({ downloadXlsx: mocks.download }));
-vi.mock("@/lib/scan-sound", () => ({
-  playScanSound: mocks.sound,
-  scanSoundEnabled: () => true,
-  setScanSoundEnabled: vi.fn(),
-}));
+vi.mock("@/lib/scan-sound", () => ({ playScanSound: mocks.sound }));
 
 const manifest = (
   id: string,
