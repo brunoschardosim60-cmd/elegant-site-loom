@@ -18,9 +18,9 @@ const cities = [
   "CANOAS",
   "CAXIAS DO SUL",
   "GRAVATAI",
-  "NOVO HAMBURGO",
-  "SAO LEOPOLDO",
-  "ESTEIO",
+  "CACHOEIRINHA",
+  "SAPUCAIA DO SUL",
+  "ELDORADO DO SUL",
 ];
 const doc = (id: string, ctc: string, nf: string, volumes: number, received: boolean) => ({
   id,
