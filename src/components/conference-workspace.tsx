@@ -68,6 +68,7 @@ import { ScanForm } from "./scan-form";
 import { playScanSound } from "@/lib/scan-sound";
 import { applyDemandImports } from "@/lib/shared-demand-import";
 import { applyImports, type ImportDraft, type ImportOutcome } from "@/lib/manifest-import";
+import { fillCities } from "@/lib/city-fill";
 import type { ConferenceState } from "@/lib/conference-state";
 import type { FindArchived } from "@/lib/conference-archive";
 import { describeLuftFilter, type LuftFilter } from "@/lib/luft-spreadsheet";
@@ -674,7 +675,10 @@ export function ConferenceWorkspace({
     (pendingPage + 1) * documentPageSize,
   );
 
-  function importDrafts(drafts: ImportDraft[], linkExisting = false) {
+  function importDrafts(entered: ImportDraft[], linkExisting = false) {
+    // Photo and manual CTCs take the city already known for their recipient,
+    // so they show on the map like the ones imported from the 108.
+    const drafts = fillCities(entered, current.current);
     const result =
       linkExisting && accountEmail && accountId
         ? applyDemandImports(
@@ -1362,7 +1366,11 @@ export function ConferenceWorkspace({
             manifest={editingManifest}
             onClose={() => setEditingManifest(null)}
             onSave={(base, draft) => {
-              const result = applyManifestEdit(current.current, base, draft);
+              const result = applyManifestEdit(
+                current.current,
+                base,
+                fillCities([draft], current.current)[0]!,
+              );
               if (result.ok) {
                 update(result.manifests);
                 setQuery("");

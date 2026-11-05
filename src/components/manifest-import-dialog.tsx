@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   AlertCircle,
   Camera,
@@ -25,6 +25,7 @@ import { photoFingerprint, uniquePhotoFiles } from "@/lib/photo-files";
 import { LOCAL_HEADER_NOTICE, LOCAL_ROW_NOTICE } from "@/lib/local-photo";
 import type { FindArchived } from "@/lib/conference-archive";
 import { useArchivedManifests } from "@/hooks/use-archived-manifests";
+import { knownCities, recipientKey } from "@/lib/city-fill";
 import {
   blank,
   documentCount,
@@ -93,6 +94,7 @@ export function ManifestImportDialog({
   const draft = items[active];
   const archived = useArchivedManifests(findArchived, items);
   const conflictSources = archived.length ? [...manifests, ...archived] : manifests;
+  const cities = useMemo(() => knownCities(manifests), [manifests]);
   const conflicts = findImportConflicts(conflictSources, items);
   const draftConflicts = conflicts.filter((conflict) => conflict.index === active);
   const manifestConflicts = [
@@ -937,6 +939,7 @@ export function ManifestImportDialog({
                       draft.readingSource === "local" ? LOCAL_ROW_NOTICE : undefined
                     }
                     ctcConflicts={ctcConflicts}
+                    cityFor={(recipient) => cities.get(recipientKey(recipient))}
                   />
                   {draft.status === "read" && (
                     <p className="import-completeness" role="status">
