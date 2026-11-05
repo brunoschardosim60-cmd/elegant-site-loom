@@ -52,7 +52,8 @@ export function parsePreIssueDate(text: string): string | undefined {
   return candidates.size === 1 ? [...candidates][0] : undefined;
 }
 
-function calendarDate(value: string | number | Date): string | undefined {
+/** Calendar day in Brasília ("2026-11-05"). */
+export function calendarDate(value: string | number | Date): string | undefined {
   if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value))
     return normalizeIssueDate(value);
   const date = value instanceof Date ? value : new Date(value);

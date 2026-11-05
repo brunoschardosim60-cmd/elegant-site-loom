@@ -62,24 +62,38 @@ it("computes return rate, late and perishable CTCs, pending value and median ret
     ["ANA", 1, 5],
     ["BETO", 0, 0],
   ]);
+  // Out of time: ANA's pending CTC (5 days) and the one returned after 2 days.
+  // BETO's same-day pending CTC is not decided yet and stays out of the rate.
+  expect(m.outOfTime).toBe(2);
+  expect(m.evaluated).toBe(3);
+  expect(m.outOfTimeRate).toBeCloseTo(2 / 3);
   expect(m.cities).toEqual([
-    { city: "GRAVATAI", ctcs: 2, received: 0, pending: 2, late: 1, pendingValueCents: 1_250_000 },
+    {
+      city: "GRAVATAI",
+      ctcs: 2,
+      received: 0,
+      pending: 2,
+      late: 1,
+      outOfTime: 1,
+      evaluated: 1,
+      pendingValueCents: 1_250_000,
+    },
   ]);
   expect(formatMoney(1_250_000).replace(/\s/g, " ")).toBe("R$ 12.500");
 });
 
 it("renders the indicator tiles and the per-driver table", () => {
   render(<ConferenceMetricsView manifests={manifests} now={now} />);
-  expect(screen.getByText("50%")).toBeInTheDocument();
-  expect(screen.getByText("2 de 4 CTCs devolvidos")).toBeInTheDocument();
-  const table = screen.getByRole("region", { name: "Indicadores por motorista" });
+  expect(screen.getByText("67%")).toBeInTheDocument();
+  expect(screen.getByText(/2 de 3 CTCs com 2\+ dias/)).toBeInTheDocument();
+  const table = screen.getByRole("region", { name: "Por motorista" });
   expect(within(table).getAllByRole("row")).toHaveLength(3);
   expect(within(table).getByText("ANA")).toBeInTheDocument();
 });
 
 it("shows an empty state without CTCs", () => {
   render(<ConferenceMetricsView manifests={[]} now={now} />);
-  expect(screen.getByText("Sem dados para indicadores")).toBeInTheDocument();
+  expect(screen.getByText("Sem dados neste período")).toBeInTheDocument();
 });
 
 it("sums cargo value and weight over a CTC's NFs and keeps the manifest checker", () => {

@@ -960,9 +960,7 @@ h1 { font-size: 22px; }
 .metrics-table caption { text-align: left; font-weight: 700; font-size: 12px; padding: 14px 16px 6px; }
 .metrics-table th, .metrics-table td { padding: 9px 16px; }
 .metrics-table td:not(:first-child), .metrics-table th:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
-.metrics-table tr[data-late="true"] td:nth-child(3) { color: var(--warning); font-weight: 700; }
-[aria-label="Indicadores por cidade"] tr[data-late="true"] td:nth-child(3) { color: inherit; font-weight: inherit; }
-[aria-label="Indicadores por cidade"] tr[data-late="true"] td:nth-child(4) { color: var(--warning); font-weight: 700; }
+.metrics-table tr[data-late="true"] td:nth-child(4) { color: var(--warning); font-weight: 700; }
 .city-map { padding: 16px; display: grid; gap: 12px; }
 .city-map-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px 24px; }
 .city-map-head h3 { font-size: 12px; font-weight: 700; }
@@ -974,6 +972,7 @@ h1 { font-size: 22px; }
 .city-map-legend i[data-level="ok"], .city-shape[data-level="ok"] { background: #16803c; fill: #16803c; }
 .city-map-legend i[data-level="attention"], .city-shape[data-level="attention"] { background: #e8a400; fill: #e8a400; }
 .city-map-legend i[data-level="critical"], .city-shape[data-level="critical"] { background: #c81e1e; fill: #c81e1e; }
+.city-map-legend i[data-level="few"], .city-shape[data-level="few"] { background: #9fb0c4; fill: #9fb0c4; }
 .city-map-body { position: relative; }
 .city-map svg { display: block; width: 100%; max-height: 600px; background: #e6eef7; border-radius: 6px; }
 .city-shape { fill: #d3dbe5; stroke: #ffffff; stroke-width: calc(0.7px * var(--map-unit)); stroke-linejoin: round; }
@@ -993,3 +992,16 @@ h1 { font-size: 22px; }
 @media (max-width: 760px) { .metrics-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .cargo-tag { display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; padding: 1px 6px; border-radius: 999px; font-family: var(--font-sans); font-size: 9px; font-weight: 700; letter-spacing: 0.2px; vertical-align: middle; white-space: nowrap; }
 .cargo-tag-perishable { background: #e0f2fe; color: #075985; }
+.metrics-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.metrics-toolbar label { display: inline-flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 600; }
+.metrics-toolbar .filter-select { height: 32px; max-width: none; }
+.metrics-period { font-size: 11px; color: var(--muted-foreground); }
+.metrics-note { font-size: 11px; padding: 8px 12px; border-radius: 6px; background: #fff7e6; color: var(--warning); border: 1px solid #f3dcb0; }
+.metric-change { display: block; margin-top: 3px; font-weight: 600; color: var(--muted-foreground); }
+.metric-change[data-better="true"] { color: var(--success); }
+.metric-change[data-better="false"] { color: var(--destructive); }
+.metrics-table tr[data-few="true"] td { color: var(--muted-foreground); }
+.metrics-more { display: block; width: 100%; padding: 10px; font-size: 11px; font-weight: 600; color: var(--primary); border-top: 1px solid var(--border); cursor: pointer; }
+.metrics-more:hover { background: var(--secondary); }
+.metrics-table tbody tr:not(.received-row) td:first-child { box-shadow: none; }
+.metrics-table tbody tr[data-late="true"] td:first-child { box-shadow: inset 3px 0 var(--warning); }

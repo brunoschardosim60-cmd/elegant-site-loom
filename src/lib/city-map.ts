@@ -1,4 +1,4 @@
-import type { CityMetrics } from "./conference-metrics";
+import { MIN_CTCS, type CityMetrics, type GroupMetrics } from "./conference-metrics";
 
 /** Outline of each Rio Grande do Sul municipality (see scripts/build-rs-map.mjs). */
 export type CityShapes = {
@@ -21,15 +21,30 @@ export function cityKey(name: string) {
     .replace(/[^A-Z0-9]/g, "");
 }
 
-export type CityLevel = "ok" | "attention" | "critical";
-/** Share of a city's CTCs that are late from which it turns red. */
-export const CRITICAL_LATE_SHARE = 0.2;
+export type CityLevel = "ok" | "attention" | "critical" | "few";
+/** Share of a city's evaluated CTCs out of time from which it turns red. */
+export const CRITICAL_SHARE = 0.2;
 
-/** Green: nothing late. Yellow: some late. Red: a fifth or more of its CTCs late. */
-export function cityLevel(city: Pick<CityMetrics, "ctcs" | "late">): CityLevel {
-  if (!city.late) return "ok";
-  return city.late / city.ctcs >= CRITICAL_LATE_SHARE ? "critical" : "attention";
+/**
+ * Green: nothing out of time. Yellow: some. Red: a fifth or more. Cities with
+ * fewer than MIN_CTCS evaluated CTCs are marked as having too little data, so
+ * one late CTC out of one does not paint a town red.
+ */
+export function cityLevel(city: Pick<GroupMetrics, "evaluated" | "outOfTime">): CityLevel {
+  if (city.evaluated < MIN_CTCS) return "few";
+  if (!city.outOfTime) return "ok";
+  return city.outOfTime / city.evaluated >= CRITICAL_SHARE ? "critical" : "attention";
 }
+
+const counters = [
+  "ctcs",
+  "received",
+  "pending",
+  "late",
+  "outOfTime",
+  "evaluated",
+  "pendingValueCents",
+] as const;
 
 /** Joins the indicators to the map; cities that match no municipality are returned apart. */
 export function placeCities(shapes: CityShapes, cities: CityMetrics[]) {
@@ -44,19 +59,13 @@ export function placeCities(shapes: CityShapes, cities: CityMetrics[]) {
     }
     // Two spellings of one municipality add up.
     const previous = placed.get(id);
-    placed.set(
-      id,
-      previous
-        ? {
-            city: previous.city,
-            ctcs: previous.ctcs + city.ctcs,
-            received: previous.received + city.received,
-            pending: previous.pending + city.pending,
-            late: previous.late + city.late,
-            pendingValueCents: previous.pendingValueCents + city.pendingValueCents,
-          }
-        : city,
-    );
+    if (!previous) {
+      placed.set(id, city);
+      continue;
+    }
+    const merged = { ...previous };
+    for (const key of counters) merged[key] += city[key];
+    placed.set(id, merged);
   }
   return { placed, unplaced };
 }

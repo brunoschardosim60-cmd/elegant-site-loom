@@ -23,6 +23,7 @@ import {
   archiveFinished,
   conferenceBytes,
   findArchived,
+  listArchivedByDate,
   type ArchiveQuery,
 } from "@/lib/conference-archive";
 import { Button } from "./ui/button";
@@ -190,6 +191,10 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
   useEffect(() => watchErrors(request), [request]);
   const lookupArchive = useCallback(
     (query: ArchiveQuery) => findArchived(request, query),
+    [request],
+  );
+  const archivedByDate = useCallback(
+    (range: { from: string; to: string }) => listArchivedByDate(request, range),
     [request],
   );
   useEffect(() => {
@@ -414,6 +419,7 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
             setTeamOpen(true);
           }}
           findArchived={lookupArchive}
+          listArchivedByDate={archivedByDate}
           readOnly={isReadOnlyMember(view.team)}
           importFilter={view.team.settings}
         />
