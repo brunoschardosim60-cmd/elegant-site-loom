@@ -13,3 +13,4 @@ routeTree.gen.ts
 .sheet-review*
 .ocr-*
 *.local.*
+src/lib/maps/

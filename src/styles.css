@@ -978,7 +978,7 @@ h1 { font-size: 22px; }
 .city-map svg { display: block; width: 100%; max-height: 600px; background: #e6eef7; border-radius: 6px; }
 .city-shape { fill: #d3dbe5; stroke: #ffffff; stroke-width: calc(0.7px * var(--map-unit)); stroke-linejoin: round; }
 .city-shape[data-level] { cursor: pointer; stroke: #ffffff; stroke-width: calc(1.4px * var(--map-unit)); }
-.city-shape[data-level]:hover, .city-shape[data-selected], .city-shape:focus-visible { stroke: #10213e; stroke-width: calc(3px * var(--map-unit)); outline: none; }
+.city-shape[data-level]:hover, .city-shape[data-selected], .city-shape:focus-visible { stroke: #10213e; stroke-width: calc(2px * var(--map-unit)); filter: brightness(1.08); outline: none; }
 .city-labels { pointer-events: none; }
 .city-labels text { fill: #10213e; stroke: #ffffff; paint-order: stroke; stroke-linejoin: round; font-weight: 600; text-anchor: middle; dominant-baseline: middle; }
 .city-labels g:not([data-data]) text { fill: #3d4a5c; font-weight: 500; }

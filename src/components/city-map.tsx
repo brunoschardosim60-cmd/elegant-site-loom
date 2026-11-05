@@ -45,21 +45,23 @@ function pathBox(d: string): Box {
   return box;
 }
 
-/** View box around the given boxes, with a margin and a minimum size, inside the state. */
+/** View box around the given boxes, with a margin and a minimum size. */
 function fitBox(boxes: Box[], width: number, height: number) {
   const x0 = Math.min(...boxes.map((b) => b.x0));
   const y0 = Math.min(...boxes.map((b) => b.y0));
   const x1 = Math.max(...boxes.map((b) => b.x1));
   const y1 = Math.max(...boxes.map((b) => b.y1));
   const ratio = width / height;
-  let w = Math.max(x1 - x0, 200) * 1.4;
-  let h = Math.max(y1 - y0, 200 / ratio) * 1.4;
+  // Generous margin: enough neighbouring towns and reference cities to read the region.
+  let w = Math.max(x1 - x0, 240) * 1.6;
+  let h = Math.max(y1 - y0, 240 / ratio) * 1.6;
   if (w / h < ratio) w = h * ratio;
   else h = w / ratio;
   w = Math.min(w, width);
   h = Math.min(h, height);
-  const x = Math.min(Math.max((x0 + x1) / 2 - w / 2, 0), width - w);
-  const y = Math.min(Math.max((y0 + y1) / 2 - h / 2, 0), height - h);
+  // Centred on the cities, even when that shows some sea past the coast.
+  const x = (x0 + x1) / 2 - w / 2;
+  const y = (y0 + y1) / 2 - h / 2;
   return { x, y, w, h };
 }
 

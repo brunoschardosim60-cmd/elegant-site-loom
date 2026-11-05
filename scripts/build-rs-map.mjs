@@ -2,7 +2,7 @@
 // municipality as an SVG path, for the map in Indicadores.
 //
 // Source: IBGE municipal mesh via github.com/tbrugz/geodata-br (geojs-43-mun.json).
-//   npx mapshaper geojs-43-mun.json -simplify 6% keep-shapes \
+//   npx mapshaper geojs-43-mun.json -simplify 25% keep-shapes \
 //     -o format=geojson precision=0.0001 rs-simplified.json
 //   node scripts/build-rs-map.mjs rs-simplified.json
 import { readFileSync, writeFileSync } from "node:fs";
