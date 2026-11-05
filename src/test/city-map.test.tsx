@@ -49,5 +49,11 @@ it("shows a city's numbers on the first tap and opens its pending CTCs on the se
   expect(screen.getByText("4 CTCs · 3 pendentes · 2 atrasados")).toBeInTheDocument();
   fireEvent.click(pelotas);
   expect(open).toHaveBeenCalledExactlyOnceWith("PELOTAS");
-  expect(screen.getAllByRole("button")).toHaveLength(1);
+  // Only cities with CTCs are interactive; the map opens zoomed on them.
+  expect(screen.getAllByRole("button", { name: /:/ })).toHaveLength(1);
+  const svg = screen.getByRole("group", { name: "Municípios do Rio Grande do Sul" });
+  const zoomed = svg.getAttribute("viewBox");
+  fireEvent.click(screen.getByRole("button", { name: "Ver o estado inteiro" }));
+  expect(svg.getAttribute("viewBox")).not.toBe(zoomed);
+  expect(svg.getAttribute("viewBox")).toMatch(/^0 0 1000 /);
 });

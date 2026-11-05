@@ -175,7 +175,7 @@ it("keeps personal receipt dates discreet and shows receipt authors only in the 
   expect(screen.queryByText(/Atualizado por/)).not.toBeInTheDocument();
   expect(screen.queryByText(/Conferido por/)).not.toBeInTheDocument();
   expect(screen.getByText("16/10/2026, 14:00")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "CTCs" }));
+  fireEvent.click(screen.getByRole("button", { name: "Pendências" }));
   expect(screen.queryByText(/Atualizado por/)).not.toBeInTheDocument();
   view.rerender(
     <ConferenceWorkspace

@@ -66,12 +66,12 @@ it("keeps compact navigation labelled, shows a keyboard tooltip and preserves re
   const onSnapshot = vi.fn();
   render(<ConferenceWorkspace initialState={initialState} onSnapshot={onSnapshot} />);
   fireEvent.click(screen.getByRole("button", { name: "Recolher menu lateral" }));
-  const pending = screen.getByRole("button", { name: "CTCs" });
+  const pending = screen.getByRole("button", { name: "Pendências" });
   fireEvent.focus(pending);
-  expect(await screen.findByRole("tooltip")).toHaveTextContent("CTCs · 2");
+  expect(await screen.findByRole("tooltip")).toHaveTextContent("Pendências · 2");
   fireEvent.blur(pending);
   fireEvent.click(pending);
-  expect(screen.getByRole("heading", { name: "CTCs", level: 1 })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Pendências de conferência" })).toBeInTheDocument();
   expect(pending).toHaveAttribute("aria-current", "page");
   fireEvent.click(screen.getByRole("button", { name: "Marcar CTC 0000000001 como recebido" }));
   expect(onSnapshot.mock.lastCall?.[0].manifests[0].documents).toMatchObject([
