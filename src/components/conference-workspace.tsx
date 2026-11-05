@@ -62,7 +62,8 @@ import { NfOccurrences } from "./nf-occurrences";
 import { planOccurrenceUpdates } from "@/lib/nf-occurrences";
 import { documentPageSize } from "./document-pagination";
 import { PendingTable } from "./pending-table";
-import { ConferenceMetricsView } from "./conference-metrics";
+import { ConferenceMetricsView, type LoadArchivedByDate } from "./conference-metrics";
+import type { DateRange } from "@/lib/metrics-period";
 import { ScanForm } from "./scan-form";
 import { playScanSound } from "@/lib/scan-sound";
 import { applyDemandImports } from "@/lib/shared-demand-import";
@@ -124,6 +125,7 @@ export function ConferenceWorkspace({
   onScopeChange,
   onManageTeam,
   findArchived,
+  listArchivedByDate,
   readOnly = false,
   importFilter,
 }: {
@@ -140,6 +142,8 @@ export function ConferenceWorkspace({
   onManageTeam?: (() => void) | undefined;
   /** Looks up manifests moved to the archive; absent in standalone use. */
   findArchived?: FindArchived | undefined;
+  /** Lists archived manifests by date for the indicators; absent in standalone use. */
+  listArchivedByDate?: LoadArchivedByDate | undefined;
   /** The account's role only allows reading this team's records. */
   readOnly?: boolean;
   /** The team's 108 filter (branches and reasons). */
@@ -595,6 +599,19 @@ export function ConferenceWorkspace({
     );
   }
   const presented = selectOwnedRoutes(manifests, demandOwner);
+  // Archived manifests for the indicators, in the same scope as the live list.
+  const metricsArchive = useMemo(
+    () =>
+      listArchivedByDate &&
+      (async (range: DateRange) => {
+        const found = await listArchivedByDate(range);
+        const owner =
+          scope === "mine" && accountEmail ? { email: accountEmail, userId: accountId } : undefined;
+        return found && selectOwnedRoutes(found, owner);
+      }),
+    // demandOwner is rebuilt every render; depend on what it is made of.
+    [listArchivedByDate, scope, accountEmail, accountId],
+  );
   const scopeTotals = demandTotals(presented);
   const pending = presented.filter((item) => !item.finishedAt && !item.routeResolved);
   const finished = presented.filter((item) => item.finishedAt || item.routeResolved);
@@ -1115,6 +1132,7 @@ export function ConferenceWorkspace({
                     <ConferenceMetricsView
                       manifests={presented}
                       now={now}
+                      loadArchived={metricsArchive}
                       onOpenCity={(name) => {
                         setQuery("");
                         setFilter("all");

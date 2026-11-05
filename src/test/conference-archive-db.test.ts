@@ -138,6 +138,34 @@ it("moves only manifests finished at least 30 days ago and is idempotent", async
   expect(found[0]!.manifest.documents[0]!.received).toBe(true);
 });
 
+it("lists the team's archived manifests by manifest date for the indicators", async () => {
+  await seed();
+  await rpc("archive_conference_manifests");
+  const listed = await rpc<Manifest[]>("list_archived_conference_manifests", [
+    "2026-07-01",
+    "2026-08-31",
+  ]);
+  expect(listed.map((m) => m.id)).toEqual(["DI0000000001"]);
+  expect(
+    await rpc<Manifest[]>("list_archived_conference_manifests", ["2026-09-01", "2026-09-30"]),
+  ).toEqual([]);
+  await expect(
+    rpc("list_archived_conference_manifests", ["2026-08-31", "2026-07-01"]),
+  ).rejects.toThrow("CONFERENCE_INVALID");
+  await expect(
+    rpc("list_archived_conference_manifests", ["2025-01-01", "2026-08-31"]),
+  ).rejects.toThrow("CONFERENCE_INVALID");
+  await login(3);
+  await team();
+  expect(
+    await rpc<Manifest[]>("list_archived_conference_manifests", ["2026-07-01", "2026-08-31"]),
+  ).toEqual([]);
+  await login(1, "anon");
+  await expect(
+    rpc("list_archived_conference_manifests", ["2026-07-01", "2026-08-31"]),
+  ).rejects.toThrow("permission denied");
+});
+
 it("lets a teammate archive and hides the archive from other teams", async () => {
   await seed();
   await login(2);

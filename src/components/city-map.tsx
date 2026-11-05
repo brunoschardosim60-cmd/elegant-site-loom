@@ -1,18 +1,25 @@
 import { useEffect, useMemo, useState } from "react";
 import type { CityMetrics } from "@/lib/conference-metrics";
-import { formatMoney, LATE_AFTER_DAYS } from "@/lib/conference-metrics";
+import {
+  formatMoney,
+  formatShare,
+  LATE_AFTER_DAYS,
+  MIN_CTCS,
+  outOfTimeShare,
+} from "@/lib/conference-metrics";
 import {
   cityLevel,
-  CRITICAL_LATE_SHARE,
+  CRITICAL_SHARE,
   placeCities,
   type CityLevel,
   type CityShapes,
 } from "@/lib/city-map";
 
 const levelLabels: Record<CityLevel, string> = {
-  ok: "Sem atraso",
-  attention: `Com atraso (menos de ${Math.round(CRITICAL_LATE_SHARE * 100)}%)`,
-  critical: `${Math.round(CRITICAL_LATE_SHARE * 100)}% ou mais atrasados`,
+  ok: "Tudo no prazo",
+  attention: `Até ${Math.round(CRITICAL_SHARE * 100)}% fora do prazo`,
+  critical: `${Math.round(CRITICAL_SHARE * 100)}% ou mais fora do prazo`,
+  few: `Poucos dados (menos de ${MIN_CTCS} CTCs)`,
 };
 
 /** Reference cities always named on the map, so a coloured area is easy to place. */
@@ -71,7 +78,9 @@ function describe(city: CityMetrics) {
   return [
     plural(city.ctcs, "CTC", "CTCs"),
     plural(city.pending, "pendente", "pendentes"),
-    plural(city.late, "atrasado", "atrasados"),
+    `${plural(city.outOfTime, "fora do prazo", "fora do prazo")}${
+      city.evaluated >= MIN_CTCS ? ` (${formatShare(outOfTimeShare(city))})` : ""
+    }`,
     ...(city.pendingValueCents ? [`${formatMoney(city.pendingValueCents)} pendentes`] : []),
   ].join(" · ");
 }
@@ -110,7 +119,7 @@ export function CityMap({
     [shapes, cities],
   );
   const counts = useMemo(() => {
-    const total: Record<CityLevel, number> = { ok: 0, attention: 0, critical: 0 };
+    const total: Record<CityLevel, number> = { ok: 0, attention: 0, critical: 0, few: 0 };
     for (const city of placed.values()) total[cityLevel(city)]++;
     return total;
   }, [placed]);
@@ -167,10 +176,10 @@ export function CityMap({
     <section className="manifest-card city-map" aria-label="Mapa de atrasos por cidade">
       <div className="city-map-head">
         <div>
-          <h3>Onde os CTCs estão atrasando</h3>
+          <h3>Onde os CTCs estão voltando fora do prazo</h3>
           <p>
-            Cidades de entrega da planilha 108. Atrasado: pendente há {LATE_AFTER_DAYS} dias ou
-            mais.
+            Cidades de entrega da planilha 108. Fora do prazo: devolvido com {LATE_AFTER_DAYS} dias
+            ou mais, ou ainda pendente há {LATE_AFTER_DAYS} dias ou mais.
           </p>
         </div>
         <ul className="city-map-legend">
@@ -268,7 +277,10 @@ export function CityMap({
         <p className="city-map-unplaced">
           Fora do mapa do RS:{" "}
           {unplaced
-            .map((city) => `${city.city} (${plural(city.late, "atrasado", "atrasados")})`)
+            .map(
+              (city) =>
+                `${city.city} (${plural(city.outOfTime, "fora do prazo", "fora do prazo")})`,
+            )
             .join(", ")}
           .
         </p>

@@ -9,7 +9,7 @@ Conferência de CTCs e pré-manifestos para operações de transporte. A equipe 
 - **Conferência por bipe:** com leitor de código de barras ou digitando o CTC. Um CTC repetido não conta duas vezes.
 - **Equipe e papéis:** os integrantes entram só por convite e trabalham na mesma base ao mesmo tempo. Papéis: responsável, administrador, conferente e só leitura. Conflitos de edição nunca sobrescrevem o trabalho de outra pessoa.
 - **Filial configurável:** cada equipe escolhe quais filiais e motivos da planilha 108 importa (padrão: 06 / DIS).
-- **Indicadores:** taxa de devolução, valor de mercadoria com CTC pendente, atrasados, perecíveis e tempo até a devolução, por motorista e por cidade, e um mapa do RS com as cidades em verde, amarelo ou vermelho conforme os atrasos.
+- **Indicadores:** CTCs fora do prazo, tempo até a devolução, valor de mercadoria pendente e perecíveis, por cidade, cliente e motorista, com filtro de período e comparação com o período anterior (incluindo os prés arquivados). Mapa do RS com as cidades em verde, amarelo ou vermelho, e PDF gerencial com mapa e rankings.
 - **Rastreamento, PDF e Excel:** busca CTCs, inclusive nos prés arquivados, e exporta a seleção.
 - **Bipe sonoro:** sons diferentes para conferido, pré finalizado, aviso e erro.
 - **Histórico:** auditoria imutável de cadastros, conferências, alterações e exclusões.
@@ -36,6 +36,7 @@ bun run build      # build de produção
    - até `20261030020000_conference_archive.sql`: aplique antes ou depois do deploy, tanto faz;
    - publique o app;
    - depois aplique `20261030030000_roles_settings_monitoring.sql` e `20261030040000_cargo_details.sql`. A primeira fecha as funções antigas de salvamento, que versões anteriores do app ainda usam.
+   - `20261105010000_archive_by_date.sql` pode ser aplicada a qualquer momento. Sem ela, os Indicadores funcionam, mas os períodos não incluem os prés arquivados.
 2. **Quem pode criar uma equipe nova:** o cadastro agora é só por convite. Quem já tem equipe continua entrando normalmente. Para liberar um novo responsável de equipe, rode no editor SQL:
    ```sql
    insert into public.conference_owner_allowlist(email, note) values ('pessoa@empresa.com.br', 'Filial 06');

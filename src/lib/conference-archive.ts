@@ -61,6 +61,23 @@ export async function findArchived(rpc: Rpc, query: ArchiveQuery): Promise<Archi
   return archivedSchema.parse(result.data);
 }
 
+/**
+ * Archived manifests with a manifest date in the range (inclusive), for the
+ * indicators; null when the database does not have the lookup yet.
+ */
+export async function listArchivedByDate(
+  rpc: Rpc,
+  range: { from: string; to: string },
+): Promise<Manifest[] | null> {
+  const result = await rpc("list_archived_conference_manifests", {
+    from_date: range.from,
+    to_date: range.to,
+  });
+  if (missingRpc(result.error)) return null;
+  if (result.error) throw result.error;
+  return z.array(manifestSchema).parse(result.data) as Manifest[];
+}
+
 /** Key for draft-driven lookups, so an unchanged batch is not queried again. */
 export function archiveQueryKey(query: ArchiveQuery) {
   const sorted = (values?: string[]) => [...new Set(values ?? [])].sort().join(",");

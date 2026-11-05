@@ -77,7 +77,10 @@ checks(migration, applied, detail) as (values
     'papéis, cadastro por convite, filial configurável e registro de erros'),
   ('20261030040000_cargo_details',
     exists(select 1 from fn where sig = 'conference_validate_input(jsonb)' and def like '%cargoValueCents%'),
-    'valor, peso, natureza, cidade e conferente da planilha')
+    'valor, peso, natureza, cidade e conferente da planilha'),
+  ('20261105010000_archive_by_date',
+    exists(select 1 from has_fn where name = 'list_archived_conference_manifests(date,date)'),
+    'prés arquivados por data, para os indicadores')
 )
 select migration as "migração",
   case when applied then 'aplicada' else 'FALTANDO' end as "situação",

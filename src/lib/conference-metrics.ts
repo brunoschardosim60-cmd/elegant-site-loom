@@ -2,38 +2,43 @@ import type { DocumentItem, Manifest } from "./conference";
 import { isPendingDocument } from "./conference-routes";
 import { manifestAgeDays } from "./manifest-date";
 
-/** A pending CTC this many days after the manifest date counts as late (same as the "old" filter). */
+/** A CTC takes this many days or more to come back (or is still out that long): out of time. */
 export const LATE_AFTER_DAYS = 2;
+/** Below this many evaluated CTCs a city, client or driver has too little data to rank. */
+export const MIN_CTCS = 5;
 const PERISHABLE = /PERECIV/i;
 /** Cargo nature from the 108 export marks it perishable (e.g. "PERECIVEL-CONVENCIONAL 48"). */
 export const isPerishable = (doc: { nature?: string | undefined }) =>
   !!doc.nature && PERISHABLE.test(doc.nature);
 
-export type DriverMetrics = {
-  driver: string;
-  pending: number;
-  late: number;
-  pendingValueCents: number;
-  oldestDays: number;
+/**
+ * Counters shared by the whole operation and each driver, city and client.
+ * "Out of time" covers CTCs returned after LATE_AFTER_DAYS and those still
+ * pending that long; CTCs pending for less are not decided yet and stay out
+ * of the rate ("evaluated" excludes them).
+ */
+export type GroupMetrics = {
+  ctcs: number;
   received: number;
+  pending: number;
+  /** Pending for LATE_AFTER_DAYS or more. */
+  late: number;
+  outOfTime: number;
+  evaluated: number;
+  pendingValueCents: number;
+};
+export type DriverMetrics = GroupMetrics & {
+  driver: string;
+  oldestDays: number;
   medianReturnDays: number | undefined;
 };
-export type CityMetrics = {
-  city: string;
-  ctcs: number;
-  received: number;
-  pending: number;
-  late: number;
-  pendingValueCents: number;
-};
-export type ConferenceMetrics = {
-  ctcs: number;
-  received: number;
-  pending: number;
-  late: number;
+export type CityMetrics = GroupMetrics & { city: string };
+export type ClientMetrics = GroupMetrics & { client: string };
+export type ConferenceMetrics = GroupMetrics & {
   /** Share of CTCs returned, 0–1; undefined with no CTCs. */
   returnRate: number | undefined;
-  pendingValueCents: number;
+  /** Share of evaluated CTCs out of time, 0–1; undefined with none evaluated. */
+  outOfTimeRate: number | undefined;
   /** Pending CTCs without a value (photo or manual entries, older imports). */
   pendingWithoutValue: number;
   pendingWeightGrams: number;
@@ -41,7 +46,22 @@ export type ConferenceMetrics = {
   medianReturnDays: number | undefined;
   drivers: DriverMetrics[];
   cities: CityMetrics[];
+  clients: ClientMetrics[];
 };
+
+export const emptyGroup = (): GroupMetrics => ({
+  ctcs: 0,
+  received: 0,
+  pending: 0,
+  late: 0,
+  outOfTime: 0,
+  evaluated: 0,
+  pendingValueCents: 0,
+});
+
+/** Share of a group's evaluated CTCs that are out of time; undefined without any. */
+export const outOfTimeShare = (group: Pick<GroupMetrics, "outOfTime" | "evaluated">) =>
+  group.evaluated ? group.outOfTime / group.evaluated : undefined;
 
 function median(values: number[]): number | undefined {
   if (!values.length) return undefined;
@@ -50,10 +70,26 @@ function median(values: number[]): number | undefined {
   return sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2;
 }
 
+/** Worst first: groups with enough data by out-of-time share, then the rest by volume. */
+function byOutOfTime<T extends GroupMetrics>(name: (item: T) => string) {
+  return (a: T, b: T) => {
+    const enoughA = a.evaluated >= MIN_CTCS;
+    const enoughB = b.evaluated >= MIN_CTCS;
+    if (enoughA !== enoughB) return enoughA ? -1 : 1;
+    return (
+      (outOfTimeShare(b) ?? -1) - (outOfTimeShare(a) ?? -1) ||
+      b.outOfTime - a.outOfTime ||
+      b.pending - a.pending ||
+      b.ctcs - a.ctcs ||
+      name(a).localeCompare(name(b), "pt-BR")
+    );
+  };
+}
+
 /**
  * Operational indicators over the manifests shown (already filtered to the
- * user's scope and route-resolved). A CTC moved to a later route counts only
- * on that route, as in the pending list.
+ * user's scope, period and route-resolved). A CTC moved to a later route
+ * counts only on that route, as in the pending list.
  */
 export function conferenceMetrics(
   manifests: Manifest[],
@@ -61,85 +97,70 @@ export function conferenceMetrics(
 ): ConferenceMetrics {
   const drivers = new Map<string, DriverMetrics & { returns: number[] }>();
   const cities = new Map<string, CityMetrics>();
+  const clients = new Map<string, ClientMetrics>();
   const returns: number[] = [];
-  const result = {
-    ctcs: 0,
-    received: 0,
-    pending: 0,
-    late: 0,
-    pendingValueCents: 0,
-    pendingWithoutValue: 0,
-    pendingWeightGrams: 0,
-    perishablePending: 0,
-  };
+  const total = emptyGroup();
+  const extra = { pendingWithoutValue: 0, pendingWeightGrams: 0, perishablePending: 0 };
   for (const manifest of manifests) {
     const name = manifest.driver.trim() || "Motorista não informado";
     const driver = drivers.get(name) ?? {
+      ...emptyGroup(),
       driver: name,
-      pending: 0,
-      late: 0,
-      pendingValueCents: 0,
       oldestDays: 0,
-      received: 0,
       medianReturnDays: undefined,
       returns: [],
     };
+    drivers.set(name, driver);
     const age = manifestAgeDays(manifest, now);
     for (const doc of manifest.documents as DocumentItem[]) {
       if (doc.reroutedTo) continue;
-      result.ctcs++;
       const cityName = doc.city?.trim();
+      const clientName = doc.client?.trim();
       const city = cityName
-        ? (cities.get(cityName) ?? {
-            city: cityName,
-            ctcs: 0,
-            received: 0,
-            pending: 0,
-            late: 0,
-            pendingValueCents: 0,
-          })
+        ? (cities.get(cityName) ?? { ...emptyGroup(), city: cityName })
         : undefined;
-      if (city) {
-        city.ctcs++;
-        cities.set(city.city, city);
-      }
+      if (city) cities.set(city.city, city);
+      const client = clientName
+        ? (clients.get(clientName) ?? { ...emptyGroup(), client: clientName })
+        : undefined;
+      if (client) clients.set(client.client, client);
+      const groups: GroupMetrics[] = [total, driver];
+      if (city) groups.push(city);
+      if (client) groups.push(client);
+      const add = (key: keyof GroupMetrics, amount = 1) => {
+        for (const group of groups) group[key] += amount;
+      };
+      add("ctcs");
       if (doc.received) {
-        result.received++;
-        driver.received++;
-        if (city) city.received++;
+        add("received");
+        add("evaluated");
         if (doc.receivedAt) {
           const days = manifestAgeDays(manifest, doc.receivedAt);
           returns.push(days);
           driver.returns.push(days);
+          if (days >= LATE_AFTER_DAYS) add("outOfTime");
         }
         continue;
       }
       if (!isPendingDocument(doc)) continue;
-      result.pending++;
-      driver.pending++;
+      add("pending");
       driver.oldestDays = Math.max(driver.oldestDays, age);
       if (age >= LATE_AFTER_DAYS) {
-        result.late++;
-        driver.late++;
-        if (city) city.late++;
+        add("late");
+        add("outOfTime");
+        add("evaluated");
       }
-      if (doc.cargoValueCents === undefined) result.pendingWithoutValue++;
-      else {
-        result.pendingValueCents += doc.cargoValueCents;
-        driver.pendingValueCents += doc.cargoValueCents;
-      }
-      result.pendingWeightGrams += doc.weightGrams ?? 0;
-      if (isPerishable(doc)) result.perishablePending++;
-      if (city) {
-        city.pending++;
-        city.pendingValueCents += doc.cargoValueCents ?? 0;
-      }
+      if (doc.cargoValueCents === undefined) extra.pendingWithoutValue++;
+      else add("pendingValueCents", doc.cargoValueCents);
+      extra.pendingWeightGrams += doc.weightGrams ?? 0;
+      if (isPerishable(doc)) extra.perishablePending++;
     }
-    drivers.set(name, driver);
   }
   return {
-    ...result,
-    returnRate: result.ctcs ? result.received / result.ctcs : undefined,
+    ...total,
+    ...extra,
+    returnRate: total.ctcs ? total.received / total.ctcs : undefined,
+    outOfTimeRate: outOfTimeShare(total),
     medianReturnDays: median(returns),
     drivers: [...drivers.values()]
       .map(({ returns: driverReturns, ...driver }) => ({
@@ -147,16 +168,9 @@ export function conferenceMetrics(
         medianReturnDays: median(driverReturns),
       }))
       .filter((driver) => driver.pending || driver.received)
-      .sort(
-        (a, b) =>
-          b.late - a.late ||
-          b.pending - a.pending ||
-          b.pendingValueCents - a.pendingValueCents ||
-          a.driver.localeCompare(b.driver),
-      ),
-    cities: [...cities.values()].sort(
-      (a, b) => b.late - a.late || b.pending - a.pending || a.city.localeCompare(b.city, "pt-BR"),
-    ),
+      .sort(byOutOfTime((driver) => driver.driver)),
+    cities: [...cities.values()].sort(byOutOfTime((city) => city.city)),
+    clients: [...clients.values()].sort(byOutOfTime((client) => client.client)),
   };
 }
 
@@ -171,3 +185,6 @@ export const formatDays = (days: number | undefined) =>
   days === undefined
     ? "—"
     : `${days.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} ${days === 1 ? "dia" : "dias"}`;
+/** "12%" (undefined → "—"). */
+export const formatShare = (share: number | undefined) =>
+  share === undefined ? "—" : `${Math.round(share * 100)}%`;
