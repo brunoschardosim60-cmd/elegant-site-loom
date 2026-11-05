@@ -129,9 +129,7 @@ export function ImportQueue({
         <Plus size={15} />
         Adicionar pré manualmente
       </Button>
-      <p className="import-draft-note">
-        Os documentos só serão salvos ao cadastrar. Fechar descarta os rascunhos e as fotos.
-      </p>
+      <p className="import-draft-note">Nada é salvo até você cadastrar.</p>
     </aside>
   );
 }

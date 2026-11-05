@@ -48,12 +48,7 @@ export function NfOccurrences({
                   {item.code && item.description && " — "}
                   {item.description || "Descrição não informada"}
                 </>
-              ) : (
-                <>
-                  {" "}
-                  <span className="nf-occurrence-empty">Sem ocorrência</span>
-                </>
-              )}
+              ) : null}
             </li>
           );
         })}

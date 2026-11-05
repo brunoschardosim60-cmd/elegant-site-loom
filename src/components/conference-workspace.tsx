@@ -19,7 +19,6 @@ import {
   Plus,
   Search,
   ScanLine,
-  ShieldCheck,
   TriangleAlert,
   UploadCloud,
   X,
@@ -795,9 +794,6 @@ export function ConferenceWorkspace({
               {sidebarCollapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
             </Button>
           </div>
-          <p className="brand-subtitle text-sidebar-muted text-[10px] mt-2 ml-10">
-            Cada documento no seu lugar.
-          </p>
           <div className="sidebar-label">Operação</div>
           <nav id="workspace-navigation" aria-label="Navegação principal">
             {navigation.map(({ view: target, label, count, Icon }) => (
@@ -831,27 +827,19 @@ export function ConferenceWorkspace({
             ))}
           </nav>
           <div className="sidebar-bottom">
-            <div className="session-note">
-              <div className="flex items-center gap-2 text-sidebar-foreground font-semibold mb-1">
-                <ShieldCheck size={14} />{" "}
-                {accountEmail ? "Equipe confere." : "Sessão de demonstração"}
-              </div>
-              {accountEmail
-                ? "Cadastros compartilhados com sua equipe. Rascunhos são descartados ao fechar."
-                : "Os dados são temporários e serão reiniciados ao atualizar a página."}
-            </div>
-            <div
-              className="profile"
-              title={accountEmail || "Bruno Schardosim · Operação · Porto Alegre"}
-            >
+            <div className="profile" title={accountEmail || "Demonstração"}>
               <div className="avatar">
-                {accountEmail ? accountEmail.slice(0, 2).toUpperCase() : "BS"}
+                {accountEmail ? accountEmail.slice(0, 2).toUpperCase() : "DE"}
               </div>
               <div className="workspace-sidebar-profile-text">
                 <div className="text-[11px] font-semibold truncate max-w-36">
-                  {accountEmail?.split("@")[0] || "Bruno Schardosim"}
+                  {accountEmail?.split("@")[0] || "Demonstração"}
                 </div>
-                <div className="text-[9px] text-sidebar-muted mt-1">Operação · Porto Alegre</div>
+                {!accountEmail && (
+                  <div className="text-[9px] text-sidebar-muted mt-1">
+                    Os dados somem ao recarregar
+                  </div>
+                )}
               </div>
               <span className="workspace-sidebar-profile-chevron ml-auto text-sidebar-muted">
                 <ChevronRight size={14} />
@@ -887,10 +875,6 @@ export function ConferenceWorkspace({
                     })
                   : ""}
               </span>
-              <span>
-                <i className="online-dot" />
-                Sessão ativa
-              </span>
             </div>
           </header>
           <div className="page-content">
@@ -901,14 +885,14 @@ export function ConferenceWorkspace({
                   {teamReadOnly
                     ? `Equipe · ${scopeTotals.manifests} manifestos · ${scopeTotals.nfs} NFs cadastradas · Somente consulta`
                     : view === "pending"
-                      ? "Seus documentos separados por motorista. Confira os CTCs e acompanhe o que falta."
+                      ? "Prés em aberto, por motorista."
                       : view === "missing"
-                        ? "Todos os CTCs que ainda faltam voltar, do mais antigo ao mais novo."
+                        ? "CTCs que ainda não voltaram, do mais antigo ao mais novo."
                         : view === "finished"
-                          ? "Documentos recebidos. Conferência concluída."
+                          ? "Prés com todos os CTCs conferidos."
                           : view === "tracking"
-                            ? "Consulte cada CTC, a pendência e a data da conferência, incluindo manifestos finalizados."
-                            : "Onde e com quem os CTCs estão demorando para voltar."}
+                            ? "Busque qualquer CTC, inclusive de prés finalizados."
+                            : "Onde e com quem os CTCs demoram para voltar."}
                 </p>
               </div>
               <div className="flex shrink-0 flex-wrap gap-2">
@@ -944,28 +928,33 @@ export function ConferenceWorkspace({
                 {
                   label: "Manifestos em aberto",
                   value: pending.length,
-                  caption: "Aguardando documentos",
+                  caption: "",
                   icon: Layers,
                   color: "",
                 },
                 {
                   label: "Documentos pendentes",
                   value: missing.length,
-                  caption: `${missing.reduce((sum, doc) => sum + doc.volumes, 0)} volumes a conferir`,
+                  caption: `${missing.reduce((sum, doc) => sum + doc.volumes, 0)} volumes · ${
+                    pending
+                      .filter((manifest) => age(manifest) >= 2)
+                      .flatMap((manifest) => manifest.documents)
+                      .filter(isPendingDocument).length
+                  } há 2 dias ou mais`,
                   icon: FileText,
                   color: "",
                 },
                 {
                   label: "Documentos conferidos",
                   value: documents.filter((doc) => doc.received && !doc.reroutedTo).length,
-                  caption: "Recebidos e identificados",
+                  caption: "",
                   icon: CircleCheck,
                   color: "text-success",
                 },
                 {
                   label: "Manifestos finalizados",
                   value: finished.length,
-                  caption: "Conferidos ou encaminhados em nova rota",
+                  caption: "",
                   icon: CheckCheck,
                   color: "text-primary",
                 },
@@ -978,7 +967,7 @@ export function ConferenceWorkspace({
                   <div className={`metric-value ${metric.color}`}>
                     {String(metric.value).padStart(2, "0")}
                   </div>
-                  <div className="metric-caption">{metric.caption}</div>
+                  {metric.caption && <div className="metric-caption">{metric.caption}</div>}
                 </div>
               ))}
             </div>
@@ -988,11 +977,7 @@ export function ConferenceWorkspace({
                   <ScanLine size={29} strokeWidth={1.6} />
                 </div>
                 <div className="scanner-copy">
-                  <h2>Pronto para a próxima leitura</h2>
-                  <p>
-                    <span className="online-dot" />
-                    Aguardando CTC
-                  </p>
+                  <h2>Conferir CTC</h2>
                 </div>
                 <ScanForm
                   inputRef={scanner}
@@ -1244,14 +1229,7 @@ export function ConferenceWorkspace({
                 </div>
               </section>
               <aside className="activity-panel">
-                <div className="activity-heading">
-                  Últimas atividades{" "}
-                  <span className="live-label">
-                    <i className="online-dot" />
-                    Ao vivo
-                  </span>
-                </div>
-                <div className="activity-date">Equipe · Horários de Brasília</div>
+                <div className="activity-heading">Últimas atividades</div>
                 <div className="activity-list">
                   {activity.slice(0, 5).map((item) => (
                     <div className="activity-item" key={item.id}>
@@ -1273,44 +1251,12 @@ export function ConferenceWorkspace({
                       </div>
                     </div>
                   ))}
-                </div>
-                <div className="daily-summary">
-                  <h3>Resumo dos cadastros</h3>
-                  <div className="summary-line">
-                    <span>Documentos recebidos</span>
-                    <strong>
-                      {documents.filter((doc) => doc.received && !doc.reroutedTo).length}
-                    </strong>
-                  </div>
-                  <div className="summary-line">
-                    <span>Pré-manifestos concluídos</span>
-                    <strong>{finished.length}</strong>
-                  </div>
-                  <div className="summary-line">
-                    <span>CTCs pendentes há 2 dias ou mais</span>
-                    <strong>
-                      {
-                        pending
-                          .filter((manifest) => age(manifest) >= 2)
-                          .flatMap((manifest) => manifest.documents)
-                          .filter(isPendingDocument).length
-                      }
-                    </strong>
-                  </div>
+                  {!activity.length && (
+                    <p className="text-xs text-muted-foreground">Nada por aqui ainda.</p>
+                  )}
                 </div>
               </aside>
             </div>
-            <footer className="page-footer">
-              <span className="flex gap-1.5 items-center">
-                <ShieldCheck size={12} />{" "}
-                {accountEmail
-                  ? "Cadastros da equipe · sincronização automática"
-                  : "Dados temporários · reiniciam ao atualizar a página"}
-              </span>
-              <span>
-                confere. <span className="mx-2">/</span> Controle de retorno de documentos
-              </span>
-            </footer>
           </div>
         </main>
         <div className="toast-stack" aria-live="polite">

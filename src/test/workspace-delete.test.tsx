@@ -180,7 +180,7 @@ it("deletes only the selected open pré, preserving all other records and updati
   expectMetric("Documentos pendentes", "02");
   expectMetric("Documentos conferidos", "01");
   expectMetric("Manifestos finalizados", "01");
-  expect(screen.getByText("7 volumes a conferir")).toBeInTheDocument();
+  expect(screen.getByText(/^7 volumes · /)).toBeInTheDocument();
   expect(
     screen.queryByRole("button", { name: `Excluir pré ${state.manifests[0]!.id}` }),
   ).not.toBeInTheDocument();

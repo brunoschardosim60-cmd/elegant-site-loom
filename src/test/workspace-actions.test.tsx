@@ -322,5 +322,4 @@ it("shows actual activity dates in Brasília and labels legacy timestamps withou
   expect(screen.getByText("12/10/2026, 22:05")).toBeInTheDocument();
   expect(screen.getByText("10:15 · data não registrada")).toBeInTheDocument();
   expect(screen.queryByText("Hoje", { exact: true })).not.toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "Resumo dos cadastros" })).toBeInTheDocument();
 });
