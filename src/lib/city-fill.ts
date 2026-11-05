@@ -42,3 +42,25 @@ export function fillCities(drafts: ImportDraft[], manifests: Manifest[]): Import
     }),
   }));
 }
+
+/**
+ * The same manifests with each CTC lacking a city given its recipient's known
+ * one, for the indicators only (nothing is saved). Older photo and manual
+ * entries then show on the map too.
+ */
+export function withKnownCities(manifests: Manifest[]): Manifest[] {
+  const known = knownCities(manifests);
+  if (!known.size) return manifests;
+  return manifests.map((manifest) =>
+    manifest.documents.some((doc) => !doc.city?.trim() && known.has(recipientKey(doc.recipient)))
+      ? {
+          ...manifest,
+          documents: manifest.documents.map((doc) => {
+            if (doc.city?.trim()) return doc;
+            const city = known.get(recipientKey(doc.recipient));
+            return city ? { ...doc, city } : doc;
+          }),
+        }
+      : manifest,
+  );
+}

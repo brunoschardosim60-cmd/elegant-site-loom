@@ -171,6 +171,8 @@ it("explains ignored older and undated occurrences without offering an unsafe re
             nf: draft.rows[0]!.nf,
             volumes: 2,
             received: true,
+            client: "LAB",
+            recipient: "CLIENTE",
             nfOccurrences: [
               {
                 nf: draft.rows[0]!.nf,
@@ -195,7 +197,7 @@ it("explains ignored older and undated occurrences without offering an unsafe re
     screen.getByText(/1 ocorrência\(s\) diferente\(s\) sem referência suficiente/),
   ).toBeInTheDocument();
   expect(
-    screen.queryByRole("button", { name: "Atualizar ocorrências das NFs cadastradas" }),
+    screen.queryByRole("button", { name: "Atualizar os já cadastrados" }),
   ).not.toBeInTheDocument();
   expect(save).not.toHaveBeenCalled();
   expect(refresh).not.toHaveBeenCalled();
@@ -224,9 +226,7 @@ it("previews NF occurrence codes and explicitly refreshes existing NFs without r
     />,
   );
   upload();
-  const update = await screen.findByRole("button", {
-    name: "Atualizar ocorrências das NFs cadastradas",
-  });
+  const update = await screen.findByRole("button", { name: "Atualizar os já cadastrados" });
   expect(screen.getByText(/ENTREGA REALIZADA NORMALMENTE/)).toBeInTheDocument();
   expect(refresh).not.toHaveBeenCalled();
   expect(screen.getByLabelText("Selecionar manifesto 06052233")).toBeDisabled();
@@ -486,4 +486,47 @@ it("shows original manifesto dates and filters fifty manifests without silently 
   fireEvent.click(screen.getByRole("button", { name: "Cadastrar 10 manifestos" }));
   expect(save.mock.calls[0]![0]).toHaveLength(10);
   expect(save.mock.calls[0]![0].every((draft) => draft.issueDate === "2026-10-12")).toBe(true);
+});
+
+it("offers to complete manifests imported before the city, value and nature columns were read", async () => {
+  const source = data();
+  source.drafts[0]!.rows[0] = {
+    ...source.drafts[0]!.rows[0]!,
+    city: "CANOAS",
+    nature: "PERECIVEL-CONVENCIONAL 48",
+    cargoValueCents: 120000,
+  };
+  mock.read.mockResolvedValueOnce(source);
+  const refresh = vi.fn(() => ({ ok: true as const, manifests: [] }));
+  render(
+    <SpreadsheetImportDialog
+      manifests={[
+        {
+          id: "06052233",
+          driver: "ANA",
+          plate: "ABC1D23",
+          date: "2026-10-14",
+          documents: [
+            {
+              id: "saved",
+              ctc: "0000000001",
+              nf: "123-1",
+              volumes: 2,
+              received: false,
+              client: "LAB",
+              recipient: "CLIENTE",
+            },
+          ],
+        },
+      ]}
+      onClose={vi.fn()}
+      onCreate={vi.fn()}
+      onUpdateOccurrences={refresh}
+    />,
+  );
+  upload();
+  const update = await screen.findByRole("button", { name: "Atualizar os já cadastrados" });
+  expect(screen.getByText(/1 CTC\(s\) sem cidade, valor, peso ou natureza/)).toBeInTheDocument();
+  fireEvent.click(update);
+  expect(refresh).toHaveBeenCalledExactlyOnceWith(source.drafts);
 });
