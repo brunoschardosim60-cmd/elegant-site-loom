@@ -191,7 +191,7 @@ it("deletes only the selected open pré, preserving all other records and updati
 
 it("also deletes a completed pré without changing any open conference", async () => {
   const { state, onSnapshot } = setup();
-  fireEvent.click(screen.getByRole("button", { name: "Finalizados" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Finalizados/ }));
   const dialog = openDelete("DI00123456791");
   expect(dialog).toHaveTextContent("CARLA LIMA");
   confirmDelete();

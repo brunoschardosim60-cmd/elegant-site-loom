@@ -193,6 +193,12 @@ h1 { font-size: 28px; font-weight: 750; line-height: 1.3; }
 .section-heading { display: flex; justify-content: space-between; gap: 10px; align-items: center; margin-bottom: 18px; }
 .section-heading h2 { font-size: 16px; font-weight: 750; }
 .section-count { display: inline-block; font-size: 10px; padding: 2px 7px; margin-left: 7px; border-radius: 4px; background: var(--secondary); color: var(--primary); vertical-align: middle; }
+.view-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; padding: 3px; border: 1px solid var(--border); border-radius: 7px; background: var(--muted); width: fit-content; max-width: 100%; }
+.view-tab { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 5px; font-size: 11px; font-weight: 600; color: var(--muted-foreground); cursor: pointer; }
+.view-tab:hover { color: var(--foreground); }
+.view-tab[aria-pressed="true"] { background: var(--card); color: var(--foreground); box-shadow: 0 1px 2px rgb(15 23 42 / 0.08); }
+.view-tab:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.view-tab-count { font-size: 10px; font-weight: 500; padding: 1px 6px; border-radius: 4px; background: var(--secondary); color: var(--primary); }
 .list-tools { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
 .search-wrap { display: flex; align-items: center; gap: 8px; background: var(--card); border: 1px solid var(--border); border-radius: 5px; height: 36px; padding: 0 11px; flex: 1; min-width: 0; }
 .search-wrap svg { width: 14px; color: var(--muted-foreground); flex-shrink: 0; }
@@ -961,6 +967,29 @@ h1 { font-size: 22px; }
 .metrics-table th, .metrics-table td { padding: 9px 16px; }
 .metrics-table td:not(:first-child), .metrics-table th:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
 .metrics-table tr[data-late="true"] td:nth-child(3) { color: var(--warning); font-weight: 700; }
+[aria-label="Indicadores por cidade"] tr[data-late="true"] td:nth-child(3) { color: inherit; font-weight: inherit; }
+[aria-label="Indicadores por cidade"] tr[data-late="true"] td:nth-child(4) { color: var(--warning); font-weight: 700; }
+.city-map { padding: 16px; display: grid; gap: 12px; }
+.city-map-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px 24px; }
+.city-map-head h3 { font-size: 12px; font-weight: 700; }
+.city-map-head p { font-size: 11px; color: var(--muted-foreground); margin-top: 4px; }
+.city-map-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 11px; color: var(--muted-foreground); align-items: center; }
+.city-map-legend li { display: inline-flex; align-items: center; gap: 6px; }
+.city-map-legend strong { color: var(--foreground); }
+.city-map-legend i { width: 12px; height: 12px; border-radius: 3px; background: #eef2f6; border: 1px solid #cdd6e1; }
+.city-map-legend i[data-level="ok"], .city-shape[data-level="ok"] { background: #2e9e5b; fill: #2e9e5b; }
+.city-map-legend i[data-level="attention"], .city-shape[data-level="attention"] { background: #f2b300; fill: #f2b300; }
+.city-map-legend i[data-level="critical"], .city-shape[data-level="critical"] { background: #d92d20; fill: #d92d20; }
+.city-map-body { position: relative; }
+.city-map svg { display: block; width: 100%; max-height: 560px; }
+.city-shape { fill: #eef2f6; stroke: #ffffff; stroke-width: 0.8; stroke-linejoin: round; }
+.city-shape[data-level] { cursor: pointer; }
+.city-shape[data-level]:hover, .city-shape[data-selected], .city-shape:focus-visible { stroke: #10213e; stroke-width: 2; outline: none; }
+.city-map-detail { position: absolute; left: 0; bottom: 0; max-width: min(320px, 100%); display: grid; gap: 3px; padding: 8px 10px; font-size: 11px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); box-shadow: 0 2px 8px rgb(15 23 42 / 0.08); }
+.city-map-detail strong { font-size: 12px; }
+.city-map-loading { height: 240px; display: grid; place-items: center; font-size: 11px; color: var(--muted-foreground); }
+.city-map-unplaced { font-size: 11px; color: var(--muted-foreground); }
+@media (max-width: 760px) { .city-map-detail { position: static; max-width: none; margin-top: 8px; } }
 @media (max-width: 760px) { .metrics-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .cargo-tag { display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; padding: 1px 6px; border-radius: 999px; font-family: var(--font-sans); font-size: 9px; font-weight: 700; letter-spacing: 0.2px; vertical-align: middle; white-space: nowrap; }
 .cargo-tag-perishable { background: #e0f2fe; color: #075985; }

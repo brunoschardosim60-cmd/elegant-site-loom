@@ -9,8 +9,6 @@ import {
   CheckCheck,
   ChevronRight,
   CircleCheck,
-  Clock3,
-  FileCheck2,
   FileText,
   Inbox,
   Layers,
@@ -84,7 +82,21 @@ import {
   normalizeIssueDate,
 } from "@/lib/manifest-date";
 
-type View = "pending" | "missing" | "finished" | "issues" | "tracking" | "metrics";
+type View = "pending" | "missing" | "finished" | "tracking" | "metrics";
+type Section = "conference" | "ctcs" | "metrics";
+const sectionOf = (view: View): Section =>
+  view === "pending" || view === "finished"
+    ? "conference"
+    : view === "missing" || view === "tracking"
+      ? "ctcs"
+      : "metrics";
+const sectionLabels: Record<Section, string> = {
+  conference: "Conferência",
+  ctcs: "CTCs",
+  metrics: "Indicadores",
+};
+/** Warnings kept with the team state; older ones are dropped so the row stays small. */
+const MAX_ISSUES = 50;
 type Activity = {
   id: number | string;
   title: string;
@@ -97,10 +109,9 @@ type Notice = { id: number; text: string; warning?: boolean };
 const initialActivity: Activity[] = [];
 const titles: Record<View, string> = {
   pending: "Conferência de documentos",
-  missing: "Pendências de conferência",
-  finished: "Manifestos finalizados",
-  issues: "Ocorrências da conferência",
-  tracking: "Rastreamento de CTCs",
+  missing: "CTCs",
+  finished: "Conferência de documentos",
+  tracking: "CTCs",
   metrics: "Indicadores da operação",
 };
 const timeNow = () =>
@@ -167,22 +178,17 @@ export function ConferenceWorkspace({
   const [query, setQuery] = useState("");
   const [focusedManifest, setFocusedManifest] = useState<{ id: string } | null>(null);
   const [filter, setFilter] = useState("all");
-  /** Delivery city in Pendências ("" = all), from the 108 import. */
+  /** Delivery city in CTCs › Pendentes ("" = all), from the 108 import. */
   const [city, setCity] = useState("");
   const [trackingStatus, setTrackingStatus] = useState<TrackingStatus>("all");
   const [pendingPagination, setPendingPagination] = useState({ scope: "", page: 0 });
   const searchInput = useRef<HTMLInputElement>(null);
   const pendingTableRef = useRef<HTMLDivElement>(null);
-  const filtersActive =
-    !!query.trim() ||
-    filter === "old" ||
-    (view === "missing" && !!city) ||
-    (view === "tracking" && trackingStatus !== "all");
+  const filtersActive = !!query.trim() || filter === "old" || (view === "missing" && !!city);
   function clearFilters() {
     setQuery("");
     setFilter("all");
     setCity("");
-    setTrackingStatus("all");
     searchInput.current?.focus({ preventScroll: true });
   }
   const [scanClear, setScanClear] = useState(0);
@@ -264,9 +270,9 @@ export function ConferenceWorkspace({
       ]);
       // The same rows, filters and order as the screen.
       const rows = view === "missing" ? missingRows : trackingRows;
-      const kind = view === "missing" ? "pendencias" : "rastreamento";
+      const kind = view === "missing" ? "pendencias" : "ctcs";
       downloadXlsx(exportFilename(kind), [
-        conferenceSheet(view === "missing" ? "Pendências" : "Rastreamento", rows, now),
+        conferenceSheet(view === "missing" ? "Pendentes" : "CTCs", rows, now),
       ]);
     } catch {
       notify("Não foi possível gerar a planilha. Tente novamente.", true);
@@ -285,7 +291,7 @@ export function ConferenceWorkspace({
         view,
         query,
         filter,
-        owner: view === "issues" ? undefined : demandOwner,
+        owner: demandOwner,
         ...(view === "tracking" ? { trackingStatus } : {}),
       });
     } catch {
@@ -329,7 +335,7 @@ export function ConferenceWorkspace({
     activityCurrent.current = [entry, ...activityCurrent.current].slice(0, 20);
     setActivity(activityCurrent.current);
     if (warning) {
-      issuesCurrent.current = [entry, ...issuesCurrent.current];
+      issuesCurrent.current = [entry, ...issuesCurrent.current].slice(0, MAX_ISSUES);
       setIssues(issuesCurrent.current);
     }
     if (externalState)
@@ -728,20 +734,44 @@ export function ConferenceWorkspace({
       };
     }
   }
+  const section = sectionOf(view);
   const navigation = [
-    { view: "pending" as const, label: "Conferência", count: pending.length, Icon: ScanLine },
-    { view: "missing" as const, label: "Pendências", count: missing.length, Icon: Clock3 },
-    { view: "finished" as const, label: "Finalizados", count: finished.length, Icon: FileCheck2 },
-    { view: "tracking" as const, label: "Rastreamento", count: documents.length, Icon: Search },
-    { view: "metrics" as const, label: "Indicadores", count: 0, Icon: BarChart3 },
     {
-      view: "issues" as const,
-      label: "Ocorrências",
-      count: issues.length,
-      Icon: TriangleAlert,
-      UploadCloud,
+      target: "pending" as const,
+      section: "conference" as const,
+      count: pending.length,
+      Icon: ScanLine,
     },
-  ];
+    { target: "missing" as const, section: "ctcs" as const, count: missing.length, Icon: Search },
+    { target: "metrics" as const, section: "metrics" as const, count: undefined, Icon: BarChart3 },
+  ].map((item) => ({ ...item, label: sectionLabels[item.section] }));
+  // Views that share a menu entry, picked with tabs above the list.
+  const tabs: { view: View; label: string; count: number; status?: TrackingStatus }[] =
+    section === "conference"
+      ? [
+          { view: "pending", label: "Em aberto", count: pending.length },
+          { view: "finished", label: "Finalizados", count: finished.length },
+        ]
+      : section === "ctcs"
+        ? [
+            { view: "missing", label: "Pendentes", count: missing.length },
+            {
+              view: "tracking",
+              label: "Conferidos",
+              status: "received",
+              count: documents.filter((doc) => doc.received).length,
+            },
+            {
+              view: "tracking",
+              label: "Remanifestados",
+              status: "rerouted",
+              count: documents.filter((doc) => doc.reroutedTo).length,
+            },
+            { view: "tracking", label: "Todos", status: "all", count: documents.length },
+          ]
+        : [];
+  const tabActive = (tab: (typeof tabs)[number]) =>
+    tab.view === view && (view !== "tracking" || tab.status === trackingStatus);
   return (
     <TooltipProvider delayDuration={150}>
       <div
@@ -774,24 +804,23 @@ export function ConferenceWorkspace({
           </p>
           <div className="sidebar-label">Operação</div>
           <nav id="workspace-navigation" aria-label="Navegação principal">
-            {navigation.map(({ view: target, label, count, Icon }) => (
+            {navigation.map(({ target, section: entry, label, count, Icon }) => (
               <Tooltip key={target}>
                 <TooltipTrigger asChild>
                   <Button
                     variant="ghost"
-                    className={`nav-item ${view === target ? "active" : ""}`}
+                    className={`nav-item ${section === entry ? "active" : ""}`}
                     aria-label={label}
-                    aria-current={view === target ? "page" : undefined}
+                    aria-current={section === entry ? "page" : undefined}
                     onClick={() => {
+                      if (section === entry) return;
                       setView(target);
-                      if (target !== "issues") setQuery("");
+                      setQuery("");
                     }}
                   >
                     <Icon />
                     <span className="workspace-sidebar-nav-label">{label}</span>
-                    {target !== "metrics" && (target !== "issues" || count > 0) && (
-                      <span className="nav-count">{count}</span>
-                    )}
+                    {count !== undefined && <span className="nav-count">{count}</span>}
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent
@@ -801,7 +830,7 @@ export function ConferenceWorkspace({
                   className="workspace-sidebar-tooltip"
                 >
                   {label}
-                  {target !== "metrics" && (target !== "issues" || count > 0) ? ` · ${count}` : ""}
+                  {count !== undefined ? ` · ${count}` : ""}
                 </TooltipContent>
               </Tooltip>
             ))}
@@ -840,17 +869,7 @@ export function ConferenceWorkspace({
             <div className="topbar-trail">
               <span>Operação</span>
               <ChevronRight size={12} />
-              <span className="text-foreground font-semibold">
-                {view === "pending"
-                  ? "Conferência"
-                  : view === "missing"
-                    ? "Pendências"
-                    : view === "finished"
-                      ? "Finalizados"
-                      : view === "tracking"
-                        ? "Rastreamento"
-                        : "Ocorrências"}
-              </span>
+              <span className="text-foreground font-semibold">{sectionLabels[section]}</span>
             </div>
             <div className="topbar-meta">
               <span className="date-meta">
@@ -879,12 +898,12 @@ export function ConferenceWorkspace({
                     : view === "pending"
                       ? "Seus documentos separados por motorista. Confira os CTCs e acompanhe o que falta."
                       : view === "missing"
-                        ? "Todos os CTCs que ainda faltam voltar, do mais antigo ao mais novo."
+                        ? "Os CTCs que ainda faltam voltar, do mais antigo ao mais novo."
                         : view === "finished"
                           ? "Documentos recebidos. Conferência concluída."
                           : view === "tracking"
-                            ? "Consulte cada CTC, a pendência e a data da conferência, incluindo manifestos finalizados."
-                            : "Ocorrências da equipe, compartilhadas entre todos os logins."}
+                            ? "Consulte cada CTC, a situação e a data da conferência, incluindo manifestos finalizados."
+                            : "Onde e com quem os CTCs estão demorando para voltar."}
                 </p>
               </div>
               <div className="flex shrink-0 flex-wrap gap-2">
@@ -996,18 +1015,14 @@ export function ConferenceWorkspace({
                         : view === "finished"
                           ? "Conferências concluídas"
                           : view === "tracking"
-                            ? "Consulta de documentos"
-                            : view === "metrics"
-                              ? "Indicadores"
-                              : "Ocorrências"}
+                            ? "Consulta de CTCs"
+                            : "Indicadores"}
                     <span className="section-count" hidden={view === "metrics"}>
-                      {view === "issues"
-                        ? issues.length
-                        : view === "missing"
-                          ? missingRows.length
-                          : view === "tracking"
-                            ? trackingRows.length
-                            : visible.length}
+                      {view === "missing"
+                        ? missingRows.length
+                        : view === "tracking"
+                          ? trackingRows.length
+                          : visible.length}
                     </span>
                   </h2>
                   {!teamReadOnly &&
@@ -1061,7 +1076,26 @@ export function ConferenceWorkspace({
                     {pdfBusy ? "Gerando PDF…" : "PDF"}
                   </Button>
                 </div>
-                {view !== "issues" && view !== "metrics" && (
+                {tabs.length > 0 && (
+                  <div className="view-tabs" role="group" aria-label="Situação">
+                    {tabs.map((tab) => (
+                      <button
+                        key={tab.label}
+                        type="button"
+                        className="view-tab"
+                        aria-pressed={tabActive(tab)}
+                        onClick={() => {
+                          setView(tab.view);
+                          if (tab.status) setTrackingStatus(tab.status);
+                        }}
+                      >
+                        {tab.label}
+                        <span className="view-tab-count">{tab.count}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {view !== "metrics" && (
                   <div className="list-tools">
                     <div className="search-wrap">
                       <Search />
@@ -1124,13 +1158,20 @@ export function ConferenceWorkspace({
                 )}
                 <div className="manifest-list">
                   {view === "metrics" ? (
-                    <ConferenceMetricsView manifests={presented} now={now} />
+                    <ConferenceMetricsView
+                      manifests={presented}
+                      now={now}
+                      onOpenCity={(name) => {
+                        setQuery("");
+                        setFilter("all");
+                        setCity(name);
+                        setView("missing");
+                      }}
+                    />
                   ) : view === "tracking" ? (
                     <CtcTracking
                       rows={trackingRows}
                       archivedIds={new Set(trackingArchive.map((item) => item.id))}
-                      status={trackingStatus}
-                      onStatusChange={setTrackingStatus}
                       scope={JSON.stringify([query, filter, trackingStatus])}
                       now={now}
                       onAuditManifest={onAuditManifest}
@@ -1165,29 +1206,6 @@ export function ConferenceWorkspace({
                                 ? "A equipe ainda não cadastrou manifestos."
                                 : "Importe uma planilha 108 ou cadastre um manifesto na sua conta para começar."}
                         </p>
-                      </div>
-                    )
-                  ) : view === "issues" ? (
-                    issues.length ? (
-                      issues.map((issue) => (
-                        <div className="manifest-card p-5 flex gap-3" key={issue.id}>
-                          <TriangleAlert className="text-warning shrink-0" size={19} />
-                          <div>
-                            <h3 className="font-semibold text-xs">{issue.title}</h3>
-                            <p className="text-muted-foreground text-xs mt-2">
-                              {issue.description}
-                            </p>
-                            <p className="text-muted-foreground text-[10px] mt-2">
-                              {activityTimestamp(issue)}
-                            </p>
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="empty-state">
-                        <ShieldCheck />
-                        <h3>Nenhuma ocorrência</h3>
-                        <p className="text-xs mt-2">Nenhuma ocorrência nos cadastros.</p>
                       </div>
                     )
                   ) : visible.length ? (
@@ -1280,12 +1298,15 @@ export function ConferenceWorkspace({
                     <strong>{finished.length}</strong>
                   </div>
                   <div className="summary-line">
-                    <span>Ocorrências da equipe</span>
-                    <strong>{issues.length}</strong>
-                  </div>
-                  <div className="flex gap-2 text-success text-[10px] mt-5 items-center">
-                    <ShieldCheck size={13} />
-                    {issues.length ? "Confira as ocorrências" : "Nenhuma ocorrência registrada"}
+                    <span>CTCs pendentes há 2 dias ou mais</span>
+                    <strong>
+                      {
+                        pending
+                          .filter((manifest) => age(manifest) >= 2)
+                          .flatMap((manifest) => manifest.documents)
+                          .filter(isPendingDocument).length
+                      }
+                    </strong>
                   </div>
                 </div>
               </aside>

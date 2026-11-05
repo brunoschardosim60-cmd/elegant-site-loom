@@ -18,7 +18,14 @@ export type DriverMetrics = {
   received: number;
   medianReturnDays: number | undefined;
 };
-export type CityMetrics = { city: string; pending: number; pendingValueCents: number };
+export type CityMetrics = {
+  city: string;
+  ctcs: number;
+  received: number;
+  pending: number;
+  late: number;
+  pendingValueCents: number;
+};
 export type ConferenceMetrics = {
   ctcs: number;
   received: number;
@@ -81,9 +88,25 @@ export function conferenceMetrics(
     for (const doc of manifest.documents as DocumentItem[]) {
       if (doc.reroutedTo) continue;
       result.ctcs++;
+      const cityName = doc.city?.trim();
+      const city = cityName
+        ? (cities.get(cityName) ?? {
+            city: cityName,
+            ctcs: 0,
+            received: 0,
+            pending: 0,
+            late: 0,
+            pendingValueCents: 0,
+          })
+        : undefined;
+      if (city) {
+        city.ctcs++;
+        cities.set(city.city, city);
+      }
       if (doc.received) {
         result.received++;
         driver.received++;
+        if (city) city.received++;
         if (doc.receivedAt) {
           const days = manifestAgeDays(manifest, doc.receivedAt);
           returns.push(days);
@@ -98,6 +121,7 @@ export function conferenceMetrics(
       if (age >= LATE_AFTER_DAYS) {
         result.late++;
         driver.late++;
+        if (city) city.late++;
       }
       if (doc.cargoValueCents === undefined) result.pendingWithoutValue++;
       else {
@@ -106,12 +130,9 @@ export function conferenceMetrics(
       }
       result.pendingWeightGrams += doc.weightGrams ?? 0;
       if (isPerishable(doc)) result.perishablePending++;
-      const cityName = doc.city?.trim();
-      if (cityName) {
-        const city = cities.get(cityName) ?? { city: cityName, pending: 0, pendingValueCents: 0 };
+      if (city) {
         city.pending++;
         city.pendingValueCents += doc.cargoValueCents ?? 0;
-        cities.set(cityName, city);
       }
     }
     drivers.set(name, driver);
@@ -134,7 +155,7 @@ export function conferenceMetrics(
           a.driver.localeCompare(b.driver),
       ),
     cities: [...cities.values()].sort(
-      (a, b) => b.pending - a.pending || a.city.localeCompare(b.city),
+      (a, b) => b.late - a.late || b.pending - a.pending || a.city.localeCompare(b.city, "pt-BR"),
     ),
   };
 }

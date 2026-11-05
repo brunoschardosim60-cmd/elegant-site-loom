@@ -1,4 +1,5 @@
 import type { Manifest } from "@/lib/conference";
+import { CityMap } from "./city-map";
 import {
   conferenceMetrics,
   formatDays,
@@ -7,7 +8,15 @@ import {
 } from "@/lib/conference-metrics";
 
 /** Indicators a manager reads at a glance: return rate, delays and value still pending. */
-export function ConferenceMetricsView({ manifests, now }: { manifests: Manifest[]; now: string }) {
+export function ConferenceMetricsView({
+  manifests,
+  now,
+  onOpenCity,
+}: {
+  manifests: Manifest[];
+  now: string;
+  onOpenCity?: ((city: string) => void) | undefined;
+}) {
   const m = conferenceMetrics(manifests, now);
   if (!m.ctcs)
     return (
@@ -53,6 +62,7 @@ export function ConferenceMetricsView({ manifests, now }: { manifests: Manifest[
           </div>
         ))}
       </div>
+      {!!m.cities.length && <CityMap cities={m.cities} onOpenCity={onOpenCity} />}
       <div
         className="manifest-card metrics-table-wrap"
         tabIndex={0}
@@ -94,22 +104,26 @@ export function ConferenceMetricsView({ manifests, now }: { manifests: Manifest[
           className="manifest-card metrics-table-wrap"
           tabIndex={0}
           role="region"
-          aria-label="Pendências por cidade"
+          aria-label="Indicadores por cidade"
         >
           <table className="document-table metrics-table">
-            <caption>Pendências por cidade de entrega</caption>
+            <caption>Por cidade de entrega</caption>
             <thead>
               <tr>
                 <th>Cidade</th>
-                <th>CTCs pendentes</th>
+                <th>CTCs</th>
+                <th>Pendentes</th>
+                <th>Atrasados</th>
                 <th>Valor pendente</th>
               </tr>
             </thead>
             <tbody>
               {m.cities.map((city) => (
-                <tr key={city.city}>
+                <tr key={city.city} data-late={city.late > 0}>
                   <td data-label="Cidade">{city.city}</td>
-                  <td data-label="CTCs pendentes">{city.pending}</td>
+                  <td data-label="CTCs">{city.ctcs}</td>
+                  <td data-label="Pendentes">{city.pending}</td>
+                  <td data-label="Atrasados">{city.late}</td>
                   <td data-label="Valor pendente">
                     {city.pendingValueCents ? formatMoney(city.pendingValueCents) : "—"}
                   </td>

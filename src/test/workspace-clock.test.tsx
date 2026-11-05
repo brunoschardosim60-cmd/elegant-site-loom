@@ -43,7 +43,7 @@ it("updates issue age after 24 hours without changing scans, focus or registered
 it("refreshes the two-day filter after São Paulo midnight while the page remains open", () => {
   vi.setSystemTime(new Date("2026-10-11T02:59:30Z")); // 10/10 at 23:59:30 in São Paulo.
   render(<ConferenceWorkspace initialState={state} />);
-  fireEvent.click(screen.getByRole("button", { name: /Pendências/ }));
+  fireEvent.click(screen.getByRole("button", { name: "CTCs" }));
   fireEvent.change(screen.getByRole("combobox", { name: "Filtrar pré-manifestos" }), {
     target: { value: "old" },
   });

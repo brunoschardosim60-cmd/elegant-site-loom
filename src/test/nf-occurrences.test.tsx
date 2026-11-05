@@ -196,9 +196,10 @@ it("shows distinct NF occurrences in the manifest, pending list and tracking wit
   expect(screen.getByText(/ENTREGA REALIZADA NORMALMENTE/)).toBeInTheDocument();
   expect(screen.getByText(/CLIENTE RETEVE CTC\/NF/)).toBeInTheDocument();
   expect(screen.getByText("Pendente", { exact: true })).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Pendências" }));
+  fireEvent.click(screen.getByRole("button", { name: "CTCs" }));
   expect(screen.getByText(/ENTREGA REALIZADA NORMALMENTE/)).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Rastreamento" }));
+  fireEvent.click(screen.getByRole("button", { name: "CTCs" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Todos/ }));
   expect(screen.getByText(/CLIENTE RETEVE CTC\/NF/)).toBeInTheDocument();
   expect(screen.getByText("Aguardando conferência")).toBeInTheDocument();
 });
