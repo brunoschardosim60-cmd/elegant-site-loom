@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { FileText, Loader2 } from "lucide-react";
 import type { Manifest } from "@/lib/conference";
 import { CityMap } from "./city-map";
+import { withKnownCities } from "@/lib/city-fill";
 import { Button } from "./ui/button";
 import {
   conferenceMetrics,
@@ -171,7 +172,7 @@ export function ConferenceMetricsView({
   }, [loadArchived, spanKey]);
   const archived = archive.key === spanKey ? archive.manifests : [];
   const loading = !!loadArchived && !!spanKey && archive.key !== spanKey;
-  const all = merge(manifests, archived);
+  const all = withKnownCities(merge(manifests, archived));
   const m = conferenceMetrics(inRange(all, period.range), now);
   const before: ConferenceMetrics | undefined = period.previous
     ? conferenceMetrics(inRange(all, period.previous), now)

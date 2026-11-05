@@ -4,7 +4,7 @@ import { ManifestDocumentsEditor } from "@/components/manifest-documents-editor"
 import { ConferenceWorkspace } from "@/components/conference-workspace";
 import type { Manifest } from "@/lib/conference";
 import type { ConferenceState } from "@/lib/conference-state";
-import { fillCities, knownCities } from "@/lib/city-fill";
+import { fillCities, knownCities, withKnownCities } from "@/lib/city-fill";
 
 afterEach(cleanup);
 
@@ -121,4 +121,11 @@ it("asks for the delivery city when typing a CTC, hinting the recipient's known 
   expect(city).toHaveAttribute("placeholder", "CANOAS");
   fireEvent.change(city, { target: { value: "gravataí" } });
   expect(change).toHaveBeenCalledWith([expect.objectContaining({ city: "GRAVATAÍ" })]);
+});
+
+it("shows older CTCs without a city on the map through their recipient, without saving", () => {
+  const older = manifest("26180009", [doc("0000000009", { recipient: "clinica a" })]);
+  const shown = withKnownCities([...state.manifests, older]);
+  expect(shown[1]!.documents[0]!.city).toBe("CANOAS");
+  expect(older.documents[0]!.city).toBeUndefined();
 });

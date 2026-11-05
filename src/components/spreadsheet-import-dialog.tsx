@@ -26,6 +26,7 @@ import {
 import { formatManifestDate } from "@/lib/manifest-date";
 import { isAnotherRoute } from "@/lib/conference-routes";
 import { planOccurrenceUpdates } from "@/lib/nf-occurrences";
+import { planDetailUpdates } from "@/lib/manifest-enrich";
 import { spreadsheetLimits } from "@/lib/luft-spreadsheet-limits";
 import type { FindArchived } from "@/lib/conference-archive";
 import { useArchivedManifests } from "@/hooks/use-archived-manifests";
@@ -193,6 +194,14 @@ export function SpreadsheetImportDialog({
       return null;
     }
   }, [result, manifests, drafts]);
+  const detailUpdates = useMemo(
+    () => (!result || result.errors.length ? null : planDetailUpdates(manifests, drafts)),
+    [result, manifests, drafts],
+  );
+  const existingUpdates = new Set([
+    ...(occurrenceUpdates?.manifestIds ?? []),
+    ...(detailUpdates?.manifestIds ?? []),
+  ]).size;
   const archived = useArchivedManifests(findArchived, drafts);
   const conflictSources = useMemo(
     () => (archived.length ? [...manifests, ...archived] : manifests),
@@ -560,17 +569,23 @@ export function SpreadsheetImportDialog({
                   </Button>
                 ))}
               </div>
-              {!!occurrenceUpdates?.count && onUpdateOccurrences && (
+              {!!existingUpdates && onUpdateOccurrences && (
                 <div className="rounded-lg border bg-primary/5 p-3 text-sm space-y-2">
                   <p>
-                    <strong>{occurrenceUpdates.count} NF(s)</strong> em{" "}
-                    {occurrenceUpdates.manifestIds.length} manifesto(s) já cadastrado(s) têm
-                    ocorrências para atualizar.
+                    <strong>{existingUpdates} manifesto(s) já cadastrado(s)</strong> podem ser
+                    atualizados com esta planilha:
+                    {!!occurrenceUpdates?.count &&
+                      ` ${occurrenceUpdates.count} ocorrência(s) de NF mais recente(s)`}
+                    {!!occurrenceUpdates?.count && !!detailUpdates?.count && " e"}
+                    {!!detailUpdates?.count &&
+                      ` ${detailUpdates.count} CTC(s) sem cidade, valor, peso ou natureza (perecível)`}
+                    .
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    Mantém a ocorrência mais recente das NFs correspondentes deste arquivo, sem
-                    duplicar cadastros nem alterar conferências. Os filtros e a seleção são usados
-                    para cadastrar manifestos novos.
+                    Só preenche o que está vazio e mantém a ocorrência mais recente de cada NF, sem
+                    duplicar cadastros nem alterar conferências. Serve para trazer ao mapa e aos
+                    indicadores o que foi importado antes destas informações existirem. Os filtros e
+                    a seleção abaixo valem só para cadastrar manifestos novos.
                   </p>
                   <Button
                     type="button"
@@ -582,12 +597,12 @@ export function SpreadsheetImportDialog({
                       if (outcome.ok) {
                         setError("");
                         setUpdateMessage(
-                          "Ocorrências atualizadas. Confira o status de salvamento da conta.",
+                          "Cadastros atualizados. Confira o status de salvamento da conta.",
                         );
                       } else setError(outcome.error);
                     }}
                   >
-                    <RefreshCw size={15} /> Atualizar ocorrências das NFs cadastradas
+                    <RefreshCw size={15} /> Atualizar os já cadastrados
                   </Button>
                 </div>
               )}

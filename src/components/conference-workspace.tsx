@@ -60,6 +60,7 @@ import {
 } from "@/lib/conference-ownership";
 import { NfOccurrences } from "./nf-occurrences";
 import { planOccurrenceUpdates } from "@/lib/nf-occurrences";
+import { planDetailUpdates } from "@/lib/manifest-enrich";
 import { documentPageSize } from "./document-pagination";
 import { PendingTable } from "./pending-table";
 import { ConferenceMetricsView, type LoadArchivedByDate } from "./conference-metrics";
@@ -723,24 +724,34 @@ export function ConferenceWorkspace({
     if (teamReadOnly)
       return { ok: false, index: 0, error: "Volte à sua conta para importar a planilha." };
     try {
-      const result = planOccurrenceUpdates(current.current, drafts);
-      if (!result.count)
+      // Newer occurrences, then the 108 details older imports did not read
+      // (value, weight, nature, city…). Conferences are never touched.
+      const occurrences = planOccurrenceUpdates(current.current, drafts);
+      const details = planDetailUpdates(occurrences.manifests, drafts);
+      if (!occurrences.count && !details.manifestIds.length)
         return {
           ok: false,
           index: 0,
-          error: "Nenhuma ocorrência nova corresponde aos manifestos, CTCs e NFs cadastrados.",
+          error: "Nada novo nesta planilha para os manifestos, CTCs e NFs cadastrados.",
         };
-      update(result.manifests);
+      update(details.manifests);
+      const touched = new Set([...occurrences.manifestIds, ...details.manifestIds]).size;
       log(
-        "Ocorrências da Luft atualizadas",
-        `${result.count} NF(s) · ${result.manifestIds.length} manifesto(s) · conferências preservadas`,
+        "Cadastros atualizados pela planilha 108",
+        [
+          occurrences.count ? `${occurrences.count} ocorrência(s) de NF` : "",
+          details.count ? `${details.count} CTC(s) completados` : "",
+          `${touched} manifesto(s) · conferências preservadas`,
+        ]
+          .filter(Boolean)
+          .join(" · "),
       );
       notify(
         onSnapshot
-          ? "Ocorrências atualizadas. Confira o status de salvamento."
-          : "Ocorrências atualizadas.",
+          ? "Cadastros atualizados. Confira o status de salvamento."
+          : "Cadastros atualizados.",
       );
-      return { ok: true, manifests: result.manifests };
+      return { ok: true, manifests: details.manifests };
     } catch (error) {
       return {
         ok: false,
