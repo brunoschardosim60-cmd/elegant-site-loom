@@ -103,7 +103,8 @@ it("shows pending and received dates without writing a snapshot or marking docum
     target: { value: "00000" },
   });
   snapshot.mockClear();
-  fireEvent.click(screen.getByRole("button", { name: "Rastreamento" }));
+  fireEvent.click(screen.getByRole("button", { name: "CTCs" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Todos/ }));
   const table = screen.getByRole("table", { name: "Rastreamento de CTCs" });
   expect(within(table).getByText("0000000001").closest("tr")).toHaveTextContent(
     "Aguardando conferência",
@@ -122,15 +123,16 @@ it("shows pending and received dates without writing a snapshot or marking docum
   expect(screen.getByRole("textbox", { name: "Código do CTC" })).toHaveValue("00000");
 });
 
-it("reflects another device receiving a CTC while keeping the current search and status filter", () => {
+it("reflects another device receiving a CTC while keeping the current search and status tab", () => {
   const { rerender } = render(<ConferenceWorkspace initialState={state} externalState={state} />);
-  fireEvent.click(screen.getByRole("button", { name: "Rastreamento" }));
-  fireEvent.change(screen.getByRole("textbox", { name: "Buscar CTC no rastreamento" }), {
+  fireEvent.click(screen.getByRole("button", { name: "CTCs" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Buscar pré-manifesto" }), {
     target: { value: "0000000001" },
   });
-  fireEvent.change(screen.getByRole("combobox", { name: "Status do CTC" }), {
-    target: { value: "pending" },
-  });
+  expect(screen.getByRole("button", { name: /^Pendentes/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
   const changed: ConferenceState = {
     ...state,
     manifests: state.manifests.map((manifest) => ({
@@ -141,13 +143,11 @@ it("reflects another device receiving a CTC while keeping the current search and
     })),
   };
   rerender(<ConferenceWorkspace initialState={state} externalState={changed} />);
-  expect(screen.getByRole("heading", { name: "Nenhum CTC encontrado" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Nenhuma pendência encontrada" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /^Conferidos/ }));
   expect(screen.getByRole("textbox", { name: "Buscar CTC no rastreamento" })).toHaveValue(
     "0000000001",
   );
-  fireEvent.change(screen.getByRole("combobox", { name: "Status do CTC" }), {
-    target: { value: "received" },
-  });
   expect(screen.getByRole("table")).toHaveTextContent("11:10");
 });
 
@@ -159,8 +159,6 @@ it("renders at most 50 rows and resets pagination for a different search", () =>
   }));
   const props = {
     rows,
-    status: "all" as const,
-    onStatusChange: vi.fn(),
     scope: "all",
     now: "2026-10-13T14:00:00Z",
   };
@@ -177,10 +175,9 @@ it("renders at most 50 rows and resets pagination for a different search", () =>
 it("exports the tracking status and search without changing conference state", async () => {
   mocks.pdf.mockResolvedValue(undefined);
   render(<ConferenceWorkspace initialState={state} />);
-  fireEvent.click(screen.getByRole("button", { name: "Rastreamento" }));
-  fireEvent.change(screen.getByRole("combobox", { name: "Status do CTC" }), {
-    target: { value: "received" },
-  });
+  fireEvent.click(screen.getByRole("button", { name: "CTCs" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Todos/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^Conferidos/ }));
   fireEvent.change(screen.getByRole("textbox", { name: "Buscar CTC no rastreamento" }), {
     target: { value: "MARIA" },
   });

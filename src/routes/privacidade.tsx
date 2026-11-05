@@ -104,9 +104,9 @@ function PrivacyPolicy() {
       <h2>5. Por quanto tempo</h2>
       <p>
         Os pré-manifestos ficam na lista de trabalho enquanto estão em andamento. Os finalizados há
-        mais de 30 dias são movidos para um arquivo, que continua consultável no Rastreamento. O
-        prazo de guarda dos registros é: <Fact value={c.retention} />. Depois disso, eles são
-        excluídos ou anonimizados, salvo obrigação legal de guarda.
+        mais de 30 dias são movidos para um arquivo, que continua consultável na tela CTCs. O prazo
+        de guarda dos registros é: <Fact value={c.retention} />. Depois disso, eles são excluídos ou
+        anonimizados, salvo obrigação legal de guarda.
       </p>
 
       <h2>6. Armazenamento no seu aparelho</h2>

@@ -77,6 +77,7 @@ it("scans only the latest attempt and never marks the previous route received", 
   expect(state.manifests[1].documents[0].received).toBe(true);
   expect(state.manifests[1].documents[0].receivedAt).toBeTruthy();
   expect(screen.queryByText(/vínculo ambíguo/)).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: /Rastreamento/ }));
+  fireEvent.click(screen.getByRole("button", { name: "CTCs" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Todos/ }));
   expect(await screen.findByText("Remanifestado")).toBeInTheDocument();
 });

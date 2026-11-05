@@ -23,7 +23,7 @@ Controle de retorno de CTCs e pré-manifestos, com importação da planilha 108,
 
 O botão discreto **Histórico** de cada pré e a aba **Equipe → Histórico de ações** mostram cadastro, inclusão/alteração de CTC e NF, conferência/desfazer, finalização/reabertura, edição e exclusão. O banco atribui e-mail, identidade e horário da transação; o navegador não pode escrever nem alterar a auditoria. O histórico pode ser filtrado e paginado, incluindo prés excluídos. Cadastros anteriores à ativação não recebem autoria retroativa. As atividades resumidas da tela usam UUID para evitar colisão entre dispositivos.
 
-**Rastreamento** consulta os CTCs dos prés abertos e finalizados, com busca, filtro de status, data/hora da conferência em Brasília e PDF da seleção. Uma busca de dez dígitos corresponde ao CTC exato, preservando zeros. A tela exibe até 50 registros por página; a busca e o PDF abrangem todos os registros selecionados. Consultar não marca documentos como recebidos. Registros antigos sem `receivedAt` mostram “Horário não registrado”.
+**CTCs** reúne a lista de pendentes (com conferência na linha e filtro por cidade) e a consulta dos CTCs dos prés abertos e finalizados, em abas por situação (Pendentes, Conferidos, Remanifestados, Todos), com busca, data/hora da conferência em Brasília e PDF da seleção. Uma busca de dez dígitos corresponde ao CTC exato, preservando zeros. A tela exibe até 50 registros por página; a busca e o PDF abrangem todos os registros selecionados. Consultar não marca documentos como recebidos. Registros antigos sem `receivedAt` mostram “Horário não registrado”.
 
 ## Leitura e revisão
 

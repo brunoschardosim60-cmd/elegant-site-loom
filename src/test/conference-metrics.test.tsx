@@ -62,7 +62,9 @@ it("computes return rate, late and perishable CTCs, pending value and median ret
     ["ANA", 1, 5],
     ["BETO", 0, 0],
   ]);
-  expect(m.cities).toEqual([{ city: "GRAVATAI", pending: 2, pendingValueCents: 1_250_000 }]);
+  expect(m.cities).toEqual([
+    { city: "GRAVATAI", ctcs: 2, received: 0, pending: 2, late: 1, pendingValueCents: 1_250_000 },
+  ]);
   expect(formatMoney(1_250_000).replace(/\s/g, " ")).toBe("R$ 12.500");
 });
 

@@ -218,13 +218,14 @@ it("removes CSV and manual divergence actions while keeping automatic operationa
     "O CTC 0000009999 não está em nenhum pré-manifesto cadastrado.",
   );
   fireEvent.click(screen.getByRole("button", { name: /Entendido, continuar/ }));
-  fireEvent.click(screen.getByRole("button", { name: /Ocorrências/ }));
-  expect(screen.getByRole("heading", { name: "CTC sem pré-manifesto" })).toBeInTheDocument();
+  // The warning stays in the activity panel; there is no separate Ocorrências screen.
+  expect(screen.queryByRole("button", { name: /Ocorrências/ })).not.toBeInTheDocument();
+  expect(screen.getByText("CTC sem pré-manifesto")).toBeInTheDocument();
 });
 
 it("passes the active view, search and ordering filter to the PDF report", async () => {
   render(<ConferenceWorkspace initialState={initialState} />);
-  fireEvent.click(screen.getByRole("button", { name: /Pendências/ }));
+  fireEvent.click(screen.getByRole("button", { name: "CTCs" }));
   fireEvent.change(screen.getByRole("textbox", { name: "Buscar pré-manifesto" }), {
     target: { value: "123-1" },
   });
@@ -271,7 +272,7 @@ it("saves an explicitly edited issue date through the existing snapshot and reta
   );
   expect(initialState.manifests[0]).not.toHaveProperty("issueDate");
   expect(screen.getByText(/Emissão 27\/08\/2026/)).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: /Pendências/ }));
+  fireEvent.click(screen.getByRole("button", { name: "CTCs" }));
   expect(screen.getByText("Emissão 27/08/2026")).toBeInTheDocument();
   expect(
     screen.getByRole("button", { name: "Marcar CTC 0000000001 como recebido" }),
@@ -281,11 +282,17 @@ it("saves an explicitly edited issue date through the existing snapshot and reta
 it("finds accented names with pasted whitespace in conference, pending and tracking views", () => {
   const manifest = { ...initialState.manifests[0]!, driver: "JOÃO  DA SILVA" };
   render(<ConferenceWorkspace initialState={{ ...initialState, manifests: [manifest] }} />);
-  for (const view of ["Conferência", "Pendências", "Rastreamento"]) {
-    fireEvent.click(screen.getByRole("button", { name: view }));
+  const views: [string, RegExp | undefined][] = [
+    ["Conferência", undefined],
+    ["CTCs", /^Pendentes/],
+    ["CTCs", /^Todos/],
+  ];
+  for (const [section, tab] of views) {
+    fireEvent.click(screen.getByRole("button", { name: section }));
+    if (tab) fireEvent.click(screen.getByRole("button", { name: tab }));
     fireEvent.change(
       screen.getByRole("textbox", {
-        name: view === "Rastreamento" ? "Buscar CTC no rastreamento" : "Buscar pré-manifesto",
+        name: tab?.source === "^Todos" ? "Buscar CTC no rastreamento" : "Buscar pré-manifesto",
       }),
       { target: { value: "  joao   da silva  " } },
     );
@@ -322,6 +329,4 @@ it("shows actual activity dates in Brasília and labels legacy timestamps withou
   expect(screen.getByText("10:15 · data não registrada")).toBeInTheDocument();
   expect(screen.queryByText("Hoje", { exact: true })).not.toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Resumo dos cadastros" })).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Ocorrências" }));
-  expect(screen.getAllByText("12/10/2026, 22:05")).toHaveLength(2);
 });

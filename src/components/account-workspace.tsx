@@ -281,7 +281,7 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
       const moved = await archiveFinished(request, ARCHIVE_EARLY_DAYS);
       setArchiveMessage(
         moved
-          ? `${moved} pré(s) finalizado(s) arquivado(s). Eles continuam disponíveis no Rastreamento.`
+          ? `${moved} pré(s) finalizado(s) arquivado(s). Eles continuam disponíveis em CTCs › Todos.`
           : `Nenhum pré finalizado há mais de ${ARCHIVE_EARLY_DAYS} dias para arquivar.`,
       );
       void sync.current?.refresh(true);
@@ -375,7 +375,7 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
               <p>
                 Prés finalizados há mais de {ARCHIVE_AFTER_DAYS} dias são arquivados
                 automaticamente. Para liberar espaço agora, arquive os finalizados há mais de{" "}
-                {ARCHIVE_EARLY_DAYS} dias; eles continuam consultáveis no Rastreamento.
+                {ARCHIVE_EARLY_DAYS} dias; eles continuam consultáveis em CTCs › Todos.
               </p>
               {archiveMessage && <p>{archiveMessage}</p>}
             </div>

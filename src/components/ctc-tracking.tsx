@@ -4,7 +4,7 @@ import { Button } from "./ui/button";
 import { ActionActor } from "./action-actor";
 import { NfOccurrences } from "./nf-occurrences";
 import { DocumentPagination, documentPageSize as pageSize } from "./document-pagination";
-import { conferenceTimestamp, type TrackingRow, type TrackingStatus } from "@/lib/ctc-tracking";
+import { conferenceTimestamp, type TrackingRow } from "@/lib/ctc-tracking";
 import {
   formatManifestDate,
   manifestAgeLabel,
@@ -15,8 +15,6 @@ import { CargoTags } from "./cargo-tags";
 
 export function CtcTracking({
   rows,
-  status,
-  onStatusChange,
   scope,
   now,
   onAuditManifest,
@@ -26,8 +24,6 @@ export function CtcTracking({
   rows: TrackingRow[];
   /** Manifests shown from the archive (finished and out of the live list). */
   archivedIds?: Set<string>;
-  status: TrackingStatus;
-  onStatusChange: (value: TrackingStatus) => void;
   scope: string;
   now: string;
   onAuditManifest?: ((id: string) => void) | undefined;
@@ -41,20 +37,6 @@ export function CtcTracking({
   return (
     <section className="ctc-tracking" aria-label="Consulta de CTCs">
       <div className="tracking-tools">
-        <label>
-          Status do CTC
-          <select
-            className="filter-select"
-            aria-label="Status do CTC"
-            value={status}
-            onChange={(event) => onStatusChange(event.target.value as TrackingStatus)}
-          >
-            <option value="all">Todos os status</option>
-            <option value="pending">Pendentes</option>
-            <option value="received">Conferidos</option>
-            <option value="rerouted">Remanifestados</option>
-          </select>
-        </label>
         <p role="status">
           {rows.length} CTC{rows.length === 1 ? "" : "s"} encontrado{rows.length === 1 ? "" : "s"}
           <span>
