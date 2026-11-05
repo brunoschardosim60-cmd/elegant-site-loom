@@ -326,11 +326,8 @@ export function ConferenceMetricsView({
             ]}
           />
           <p className="text-xs text-muted-foreground">
-            Fora do prazo: CTC devolvido com {LATE_AFTER_DAYS} dias ou mais desde a emissão do pré,
-            ou ainda pendente há {LATE_AFTER_DAYS} dias ou mais. Pendentes mais novos ainda não
-            contam. Com menos de {MIN_CTCS} CTCs avaliados, a porcentagem não aparece e a cidade
-            fica como “poucos dados”. Valores, cidade e cliente vêm da planilha 108; dias de
-            calendário em Brasília.
+            Fora do prazo: devolvido ou ainda pendente {LATE_AFTER_DAYS} dias ou mais após a emissão
+            do pré. A porcentagem só aparece com {MIN_CTCS} CTCs ou mais.
           </p>
         </>
       )}

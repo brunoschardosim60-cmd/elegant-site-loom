@@ -496,12 +496,8 @@ export function ManifestImportDialog({
             <ScanLine size={23} />
           </div>
           <div>
-            <span className="import-eyebrow">Entrada de documentos</span>
-            <DialogTitle>Importar pré-manifestos</DialogTitle>
-            <DialogDescription>
-              Uma foto ou um lote inteiro. Acompanhe a leitura e confira os dados antes de
-              cadastrar.
-            </DialogDescription>
+            <DialogTitle>Cadastrar pré-manifestos</DialogTitle>
+            <DialogDescription>Por foto (uma ou várias) ou preenchendo à mão.</DialogDescription>
           </div>
         </DialogHeader>
         <div
@@ -650,9 +646,7 @@ export function ManifestImportDialog({
                             : "Informe o número do pré"
                           : "Preencha os dados do pré")}
                   </h3>
-                  <p>
-                    {draft.file ? draft.filename : "Cadastre os documentos sem enviar uma foto."}
-                  </p>
+                  {draft.file && <p>{draft.filename}</p>}
                 </div>
                 <span
                   className={`import-file-status ${draftConflicts.length || needsReview(draft) ? "warning" : draft.status === "read" ? "success" : ""}`}
@@ -801,8 +795,7 @@ export function ManifestImportDialog({
                   )}
                   {!draft.targetId && (
                     <p className="import-date-note">
-                      Use a data impressa no cabeçalho do pré para contar os dias pendentes. Se não
-                      estiver legível, deixe em branco.
+                      Data impressa no cabeçalho do pré. Se não estiver legível, deixe em branco.
                     </p>
                   )}
                   {draft.status === "read" && (

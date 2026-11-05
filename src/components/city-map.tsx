@@ -1,12 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { CityMetrics } from "@/lib/conference-metrics";
-import {
-  formatMoney,
-  formatShare,
-  LATE_AFTER_DAYS,
-  MIN_CTCS,
-  outOfTimeShare,
-} from "@/lib/conference-metrics";
+import { formatMoney, formatShare, MIN_CTCS, outOfTimeShare } from "@/lib/conference-metrics";
 import {
   cityLevel,
   CRITICAL_SHARE,
@@ -176,11 +170,7 @@ export function CityMap({
     <section className="manifest-card city-map" aria-label="Mapa de atrasos por cidade">
       <div className="city-map-head">
         <div>
-          <h3>Onde os CTCs estão voltando fora do prazo</h3>
-          <p>
-            Cidades de entrega da planilha 108. Fora do prazo: devolvido com {LATE_AFTER_DAYS} dias
-            ou mais, ou ainda pendente há {LATE_AFTER_DAYS} dias ou mais.
-          </p>
+          <h3>Fora do prazo por cidade</h3>
         </div>
         <ul className="city-map-legend">
           {(Object.keys(levelLabels) as CityLevel[]).map((level) => (
@@ -266,7 +256,7 @@ export function CityMap({
                 {!!shown.pending && onOpenCity && <span>Clique para ver os pendentes.</span>}
               </>
             ) : (
-              <span>Passe o mouse ou toque numa cidade colorida para ver os números.</span>
+              <span>Toque numa cidade colorida para ver os números.</span>
             )}
           </div>
         </div>

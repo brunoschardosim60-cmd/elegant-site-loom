@@ -151,9 +151,7 @@ export function ManifestDocumentsEditor({
             </select>
           </label>
         ) : (
-          <div className="import-single-ctc">
-            CTC 1 de 1<span>Dados do documento</span>
-          </div>
+          <div className="import-single-ctc">CTC 1 de 1</div>
         )}
         {rows.length > 1 && (
           <div className="import-ctc-arrows">

@@ -51,7 +51,6 @@ it("collapses and expands the same workspace without clearing scans, filters or 
   expect(scanner).toHaveValue("00000");
   expect(query).toHaveValue("123-1");
   expect(filter).toHaveValue("old");
-  expect(screen.getByText(/Cadastros compartilhados com sua equipe/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Expandir menu lateral" }));
   expect(workspace).not.toHaveClass("workspace-sidebar-collapsed");
   expect(screen.getByRole("button", { name: "Recolher menu lateral" })).toHaveAttribute(

@@ -138,11 +138,11 @@ export function Login({
               ? "Entrar na sua conta"
               : "Criar conta"}
         </h2>
-        <p className="text-sm text-muted-foreground mt-2">
-          {mode === "forgot"
-            ? "Informe seu e-mail para receber um link e definir uma nova senha."
-            : "Seus pré-manifestos e conferências salvos, no computador e no celular."}
-        </p>
+        {mode === "forgot" && (
+          <p className="text-sm text-muted-foreground mt-2">
+            Informe seu e-mail para receber um link e definir uma nova senha.
+          </p>
+        )}
       </div>
       <form onSubmit={submit} className="grid gap-4">
         <label className="form-field">
