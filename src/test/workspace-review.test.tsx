@@ -50,7 +50,7 @@ it("gives an empty team a consultation message instead of asking to import in a 
 it("bounds pending rows while searching every document and saving the whole snapshot", () => {
   const onSnapshot = vi.fn();
   render(<ConferenceWorkspace initialState={state()} onSnapshot={onSnapshot} />);
-  fireEvent.click(screen.getByRole("button", { name: "CTCs" }));
+  fireEvent.click(screen.getByRole("button", { name: "Pendências" }));
   const pendingTable = () => screen.getByRole("table", { name: "CTCs pendentes" });
   expect(within(pendingTable()).getAllByRole("row")).toHaveLength(51);
   fireEvent.click(screen.getByRole("button", { name: "Próxima" }));
@@ -81,16 +81,18 @@ it("clears search and filters without a write and keeps the scanner draft", () =
   fireEvent.change(screen.getByRole("textbox", { name: "Código do CTC" }), {
     target: { value: "00000" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "CTCs" }));
-  fireEvent.click(screen.getByRole("button", { name: /^Todos/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Rastreamento" }));
   expect(screen.getByText(/consulta dos seus cadastros/)).toBeInTheDocument();
   fireEvent.change(screen.getByRole("textbox", { name: "Buscar CTC no rastreamento" }), {
     target: { value: "nao existe" },
   });
+  fireEvent.change(screen.getByRole("combobox", { name: "Status do CTC" }), {
+    target: { value: "received" },
+  });
   onSnapshot.mockClear();
   fireEvent.click(screen.getByRole("button", { name: "Limpar filtros" }));
   expect(screen.getByRole("textbox", { name: "Buscar CTC no rastreamento" })).toHaveValue("");
-  expect(screen.getByRole("button", { name: /^Todos/ })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("combobox", { name: "Status do CTC" })).toHaveValue("all");
   expect(screen.getByRole("table")).toHaveTextContent("0000000001");
   expect(onSnapshot).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Conferência" }));
@@ -102,7 +104,7 @@ it("clamps a pending page when a colleague receives its last records", () => {
   const { rerender } = render(
     <ConferenceWorkspace initialState={original} externalState={original} />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "CTCs" }));
+  fireEvent.click(screen.getByRole("button", { name: "Pendências" }));
   fireEvent.click(screen.getByRole("button", { name: "Próxima" }));
   expect(screen.getByRole("table")).toHaveTextContent("0000000051");
   const changed = structuredClone(original);

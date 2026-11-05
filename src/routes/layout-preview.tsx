@@ -13,7 +13,15 @@ const day = (n: number) => {
   date.setUTCHours(15, 0, 0, 0);
   return date.toISOString();
 };
-const cities = ["PORTO ALEGRE", "CANOAS", "CAXIAS DO SUL", "PELOTAS", "SANTA MARIA", "PASSO FUNDO"];
+const cities = [
+  "PORTO ALEGRE",
+  "CANOAS",
+  "CAXIAS DO SUL",
+  "GRAVATAI",
+  "NOVO HAMBURGO",
+  "SAO LEOPOLDO",
+  "ESTEIO",
+];
 const doc = (id: string, ctc: string, nf: string, volumes: number, received: boolean) => ({
   id,
   ctc,

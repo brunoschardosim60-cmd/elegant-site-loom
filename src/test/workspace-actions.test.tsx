@@ -225,7 +225,7 @@ it("removes CSV and manual divergence actions while keeping automatic operationa
 
 it("passes the active view, search and ordering filter to the PDF report", async () => {
   render(<ConferenceWorkspace initialState={initialState} />);
-  fireEvent.click(screen.getByRole("button", { name: "CTCs" }));
+  fireEvent.click(screen.getByRole("button", { name: /Pendências/ }));
   fireEvent.change(screen.getByRole("textbox", { name: "Buscar pré-manifesto" }), {
     target: { value: "123-1" },
   });
@@ -272,7 +272,7 @@ it("saves an explicitly edited issue date through the existing snapshot and reta
   );
   expect(initialState.manifests[0]).not.toHaveProperty("issueDate");
   expect(screen.getByText(/Emissão 27\/08\/2026/)).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "CTCs" }));
+  fireEvent.click(screen.getByRole("button", { name: /Pendências/ }));
   expect(screen.getByText("Emissão 27/08/2026")).toBeInTheDocument();
   expect(
     screen.getByRole("button", { name: "Marcar CTC 0000000001 como recebido" }),
@@ -282,17 +282,11 @@ it("saves an explicitly edited issue date through the existing snapshot and reta
 it("finds accented names with pasted whitespace in conference, pending and tracking views", () => {
   const manifest = { ...initialState.manifests[0]!, driver: "JOÃO  DA SILVA" };
   render(<ConferenceWorkspace initialState={{ ...initialState, manifests: [manifest] }} />);
-  const views: [string, RegExp | undefined][] = [
-    ["Conferência", undefined],
-    ["CTCs", /^Pendentes/],
-    ["CTCs", /^Todos/],
-  ];
-  for (const [section, tab] of views) {
-    fireEvent.click(screen.getByRole("button", { name: section }));
-    if (tab) fireEvent.click(screen.getByRole("button", { name: tab }));
+  for (const view of ["Conferência", "Pendências", "Rastreamento"]) {
+    fireEvent.click(screen.getByRole("button", { name: view }));
     fireEvent.change(
       screen.getByRole("textbox", {
-        name: tab?.source === "^Todos" ? "Buscar CTC no rastreamento" : "Buscar pré-manifesto",
+        name: view === "Rastreamento" ? "Buscar CTC no rastreamento" : "Buscar pré-manifesto",
       }),
       { target: { value: "  joao   da silva  " } },
     );

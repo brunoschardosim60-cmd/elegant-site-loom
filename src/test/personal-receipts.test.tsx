@@ -101,7 +101,7 @@ it("leaves receipts untouched when choosing manual checking and exposes the same
     />,
   );
   snapshot.mockClear();
-  fireEvent.click(screen.getByRole("button", { name: "CTCs" }));
+  fireEvent.click(screen.getByRole("button", { name: "Pendências" }));
   fireEvent.click(screen.getByRole("button", { name: "Conferências da equipe (1)" }));
   fireEvent.click(screen.getByRole("button", { name: "Conferir manualmente" }));
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

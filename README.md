@@ -10,7 +10,7 @@ Conferência de CTCs e pré-manifestos para operações de transporte. A equipe 
 - **Equipe e papéis:** os integrantes entram só por convite e trabalham na mesma base ao mesmo tempo. Papéis: responsável, administrador, conferente e só leitura. Conflitos de edição nunca sobrescrevem o trabalho de outra pessoa.
 - **Filial configurável:** cada equipe escolhe quais filiais e motivos da planilha 108 importa (padrão: 06 / DIS).
 - **Indicadores:** taxa de devolução, valor de mercadoria com CTC pendente, atrasados, perecíveis e tempo até a devolução, por motorista e por cidade, e um mapa do RS com as cidades em verde, amarelo ou vermelho conforme os atrasos.
-- **CTCs, PDF e Excel:** uma tela com os CTCs pendentes, conferidos, remanifestados ou todos, inclusive nos prés arquivados, e exportação da seleção.
+- **Rastreamento, PDF e Excel:** busca CTCs, inclusive nos prés arquivados, e exporta a seleção.
 - **Bipe sonoro:** sons diferentes para conferido, pré finalizado, aviso e erro.
 - **Histórico:** auditoria imutável de cadastros, conferências, alterações e exclusões.
 - **Arquivo automático:** prés finalizados há mais de 30 dias saem da lista de trabalho e continuam consultáveis.

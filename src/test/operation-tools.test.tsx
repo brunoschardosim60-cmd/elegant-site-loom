@@ -70,7 +70,7 @@ it("plays a distinct sound for a received, a repeated and an unknown CTC", () =>
 
 it("filters Pendências by delivery city and marks perishable CTCs", () => {
   render(<ConferenceWorkspace initialState={state} />);
-  fireEvent.click(screen.getByRole("button", { name: "CTCs" }));
+  fireEvent.click(screen.getByRole("button", { name: "Pendências" }));
   const table = () => screen.getByRole("table", { name: "CTCs pendentes" });
   expect(within(table()).getAllByRole("row")).toHaveLength(3);
   expect(within(table()).getByText("Perecível")).toBeInTheDocument();
@@ -85,7 +85,7 @@ it("filters Pendências by delivery city and marks perishable CTCs", () => {
 
 it("exports the rows shown in Pendências, with the active filter, to Excel", async () => {
   render(<ConferenceWorkspace initialState={state} />);
-  fireEvent.click(screen.getByRole("button", { name: "CTCs" }));
+  fireEvent.click(screen.getByRole("button", { name: "Pendências" }));
   fireEvent.change(screen.getByLabelText("Filtrar por cidade de entrega"), {
     target: { value: "CANOAS" },
   });
@@ -122,9 +122,9 @@ it("opens a city's pending CTCs from the map in Indicadores", async () => {
   const canoas = await screen.findByRole("button", { name: /^Canoas:/ });
   fireEvent.click(canoas);
   fireEvent.click(canoas);
-  expect(screen.getByRole("button", { name: /^Pendentes/ })).toHaveAttribute(
-    "aria-pressed",
-    "true",
+  expect(screen.getByRole("button", { name: "Pendências" })).toHaveAttribute(
+    "aria-current",
+    "page",
   );
   expect(screen.getByLabelText("Filtrar por cidade de entrega")).toHaveValue("CANOAS");
   const table = screen.getByRole("table", { name: "CTCs pendentes" });
