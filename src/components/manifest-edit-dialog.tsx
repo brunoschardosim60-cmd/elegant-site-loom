@@ -24,6 +24,7 @@ export function ManifestEditDialog({
       volumes: String(doc.volumes),
       client: doc.client ?? "",
       recipient: doc.recipient ?? "",
+      city: doc.city ?? "",
     })),
   }));
   const [selected, setSelected] = useState(0);

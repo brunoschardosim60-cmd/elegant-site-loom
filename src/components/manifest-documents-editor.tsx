@@ -1,5 +1,6 @@
 import { AlertCircle, ChevronLeft, ChevronRight, Plus, Trash2 } from "lucide-react";
 import { useId } from "react";
+import cityNames from "@/lib/maps/rs-cidades.json";
 import { Button } from "@/components/ui/button";
 import "./manifest-documents-editor.css";
 
@@ -59,6 +60,7 @@ export function ManifestDocumentsEditor({
   hideReviewNotice,
   ctcConflicts = {},
   allowStructureChange = true,
+  cityFor,
 }: {
   rows: ManifestDraftRow[];
   onChange: (rows: ManifestDraftRow[]) => void;
@@ -68,6 +70,8 @@ export function ManifestDocumentsEditor({
   hideReviewNotice?: string | undefined;
   ctcConflicts?: Record<number, string[]>;
   allowStructureChange?: boolean;
+  /** City already known for a recipient, shown as a hint while the field is empty. */
+  cityFor?: ((recipient: string) => string | undefined) | undefined;
 }) {
   const id = useId();
   const index = Math.max(0, Math.min(selectedIndex, rows.length - 1));
@@ -256,6 +260,33 @@ export function ManifestDocumentsEditor({
             {warning(field)}
           </label>
         ))}
+        <label className="form-field">
+          Cidade de entrega
+          <input
+            aria-label="Cidade de entrega"
+            disabled={disabled}
+            value={row.city ?? ""}
+            list={`${id}-cities`}
+            autoComplete="off"
+            maxLength={120}
+            placeholder={
+              (row.recipient && cityFor?.(row.recipient)) ||
+              "Preenchida pelo destinatário, se já conhecido"
+            }
+            onChange={(event) =>
+              onChange(
+                rows.map((item, i) =>
+                  i === index ? { ...item, city: event.target.value.toUpperCase() } : item,
+                ),
+              )
+            }
+          />
+          <datalist id={`${id}-cities`}>
+            {cityNames.map((name) => (
+              <option key={name} value={name.toUpperCase()} />
+            ))}
+          </datalist>
+        </label>
       </div>
       {!!otherIssues.length && (
         <div className="import-inline-review" role="status">

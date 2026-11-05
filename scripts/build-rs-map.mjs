@@ -1,4 +1,4 @@
-// Builds src/lib/maps/rs-municipios.json, the outline of each Rio Grande do Sul
+// Builds src/lib/maps/rs-municipios.json (and rs-cidades.json, the names), the outline of each Rio Grande do Sul
 // municipality as an SVG path, for the map in Indicadores.
 //
 // Source: IBGE municipal mesh via github.com/tbrugz/geodata-br (geojs-43-mun.json).
@@ -43,5 +43,10 @@ const cities = source.features
 writeFileSync(
   new URL("../src/lib/maps/rs-municipios.json", import.meta.url),
   JSON.stringify({ width: WIDTH, height, cities }),
+);
+// Names alone, for the city suggestions when typing a CTC by hand.
+writeFileSync(
+  new URL("../src/lib/maps/rs-cidades.json", import.meta.url),
+  JSON.stringify(cities.map((city) => city.name)),
 );
 console.log(`${cities.length} municípios, ${WIDTH}x${height}`);
