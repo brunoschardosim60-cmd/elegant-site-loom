@@ -89,12 +89,18 @@ function merge(b: Json | undefined, l: Json | undefined, r: Json | undefined): J
         ].sort();
         continue;
       }
-      const v =
-        k === "receivedAt" && l["received"] === r["received"]
-          ? r["received"] === true
-            ? (r[k] ?? l[k])
-            : undefined
-          : merge(b[k], l[k], r[k]);
+      // The time and author of a receipt follow whichever side's "received"
+      // wins: the server stamps its own time on a scan, so a quick undo (or a
+      // repeated scan) made while that save was in flight is not a conflict.
+      if (["receivedAt", "receivedBy", "receivedByEmail"].includes(k) && "ctc" in l && "ctc" in r) {
+        const received = merge(b["received"], l["received"], r["received"]);
+        if (received !== true) continue;
+        const source = r["received"] === true ? r : l;
+        const value = source[k] ?? (source === r ? l : r)[k];
+        if (value !== undefined) result[k] = value;
+        continue;
+      }
+      const v = merge(b[k], l[k], r[k]);
       if (v !== undefined) result[k] = v;
     }
     return result;

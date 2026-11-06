@@ -7,7 +7,7 @@ import {
   formatShare,
   LATE_AFTER_DAYS,
   MIN_CTCS,
-  outOfTimeShare,
+  lateShare,
   type ConferenceMetrics,
   type GroupMetrics,
 } from "./conference-metrics";
@@ -35,9 +35,9 @@ const levelColors: Record<CityLevel | "none", Rgb> = {
   none: [221, 228, 236],
 };
 const levelNames: Record<CityLevel, string> = {
-  ok: "Tudo no prazo",
-  attention: "Até 20% fora do prazo",
-  critical: "20% ou mais fora do prazo",
+  ok: "Nada atrasado",
+  attention: "Menos de 20% atrasados",
+  critical: "20% ou mais atrasados",
   few: `Poucos dados (menos de ${MIN_CTCS} CTCs)`,
 };
 const ROWS = 15;
@@ -151,14 +151,9 @@ export function createMetricsPdf(input: MetricsPdfInput) {
 
   const tiles: [string, string, string][] = [
     [
-      "FORA DO PRAZO",
-      formatShare(m.outOfTimeRate),
-      `${m.outOfTime} de ${m.evaluated} CTCs. ${change(m.outOfTimeRate, previous?.outOfTimeRate, (d) => `${Math.round(d * 100)} p.p.`)}`,
-    ],
-    [
-      "TEMPO ATÉ A DEVOLUÇÃO",
-      formatDays(m.medianReturnDays),
-      `Mediana. ${change(m.medianReturnDays, previous?.medianReturnDays, formatDays)}`,
+      "CTCS ATRASADOS AGORA",
+      String(m.late),
+      `${m.late ? `${formatShare(m.lateRate)} dos CTCs, ` : ""}pendentes há ${LATE_AFTER_DAYS}+ dias`,
     ],
     [
       "MERCADORIA COM CTC PENDENTE",
@@ -166,9 +161,14 @@ export function createMetricsPdf(input: MetricsPdfInput) {
       `${m.pending} CTCs pendentes`,
     ],
     [
-      `PENDENTES HÁ ${LATE_AFTER_DAYS}+ DIAS`,
-      String(m.late),
-      `Devolvidos: ${formatShare(m.returnRate)} de ${m.ctcs} CTCs`,
+      "TEMPO ATÉ A DEVOLUÇÃO",
+      formatDays(m.medianReturnDays),
+      `Mediana. ${change(m.medianReturnDays, previous?.medianReturnDays, formatDays)}`,
+    ],
+    [
+      `CONFERIDOS COM ${LATE_AFTER_DAYS}+ DIAS`,
+      formatShare(m.returnedLateRate),
+      `${m.returnedLate} de ${m.timedReturns}. ${change(m.returnedLateRate, previous?.returnedLateRate, (d) => `${Math.round(d * 100)} p.p.`)}`,
     ],
   ];
   const tileWidth = (available - 3 * 4) / 4;
@@ -203,14 +203,14 @@ export function createMetricsPdf(input: MetricsPdfInput) {
     cursor += 5.5;
   }
   cursor += 3;
-  text("Mais fora do prazo", side, cursor, 9, true);
+  text("Mais atrasadas", side, cursor, 9, true);
   cursor += 5;
-  const worst = m.cities.filter((city) => city.evaluated >= MIN_CTCS && city.outOfTime).slice(0, 8);
-  if (!worst.length) text("Nenhuma cidade com CTCs fora do prazo.", side, cursor, 8, false, muted);
+  const worst = m.cities.filter((city) => city.ctcs >= MIN_CTCS && city.late).slice(0, 8);
+  if (!worst.length) text("Nenhuma cidade com CTCs atrasados.", side, cursor, 8, false, muted);
   for (const city of worst) {
     text(city.city, side, cursor, 8);
     text(
-      `${formatShare(outOfTimeShare(city))} · ${city.outOfTime}/${city.evaluated}`,
+      `${formatShare(lateShare(city))} · ${city.late}/${city.ctcs}`,
       width - margin,
       cursor,
       8,
@@ -258,15 +258,16 @@ export function createMetricsPdf(input: MetricsPdfInput) {
     autoTable(pdf, {
       startY: startY + 2,
       margin: { left: margin, right: margin, top: 14, bottom: 14 },
-      head: [[label, "CTCs", "Pendentes", "Fora do prazo", "%", "Valor pendente"]],
+      head: [[label, "CTCs", "Pendentes", "Atrasados", "%", "Devolução", "Valor pendente"]],
       body: rows
         .slice(0, ROWS)
         .map((row) => [
           plain(name(row)),
           String(row.ctcs),
           String(row.pending),
-          String(row.outOfTime),
-          row.evaluated >= MIN_CTCS ? formatShare(outOfTimeShare(row)) : "poucos dados",
+          String(row.late),
+          row.ctcs < MIN_CTCS ? "poucos dados" : row.late ? formatShare(lateShare(row)) : "-",
+          plain(formatDays(row.medianReturnDays)),
           row.pendingValueCents ? formatMoney(row.pendingValueCents) : "-",
         ]),
       styles: {
@@ -285,6 +286,7 @@ export function createMetricsPdf(input: MetricsPdfInput) {
         3: { halign: "right" },
         4: { halign: "right" },
         5: { halign: "right" },
+        6: { halign: "right" },
       },
       rowPageBreak: "avoid",
     });
@@ -305,7 +307,7 @@ export function createMetricsPdf(input: MetricsPdfInput) {
     pdf.text(
       pdf.splitTextToSize(
         plain(
-          `Fora do prazo: CTC devolvido com ${LATE_AFTER_DAYS} dias ou mais desde a emissão do pré, ou ainda pendente há ${LATE_AFTER_DAYS} dias ou mais; pendentes mais novos ainda não contam. Porcentagens só com ${MIN_CTCS} ou mais CTCs avaliados. Dados da planilha 108.`,
+          `Atrasado: CTC pendente ${LATE_AFTER_DAYS} dias ou mais após a emissão do pré. Devolução: dias entre a emissão e a conferência (mediana). Porcentagens só com ${MIN_CTCS} ou mais CTCs. Dados da planilha 108.`,
         ),
         available - 20,
       ) as string[],

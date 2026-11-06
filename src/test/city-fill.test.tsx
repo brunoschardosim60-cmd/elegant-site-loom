@@ -129,3 +129,42 @@ it("shows older CTCs without a city on the map through their recipient, without 
   expect(shown[1]!.documents[0]!.city).toBe("CANOAS");
   expect(older.documents[0]!.city).toBeUndefined();
 });
+
+it("turns a city green as soon as its late CTCs are conferred", async () => {
+  const old: ConferenceState = {
+    ...state,
+    manifests: [
+      {
+        ...manifest(
+          "26180010",
+          Array.from({ length: 5 }, (_, i) =>
+            doc(`000000010${i}`, { city: "PELOTAS", recipient: "X" }),
+          ),
+        ),
+        date: "2026-09-01T12:00:00.000Z",
+        issueDate: "2026-09-01",
+      },
+    ],
+  };
+  const { rerender } = render(<ConferenceWorkspace initialState={old} externalState={old} />);
+  fireEvent.click(screen.getByRole("button", { name: "Indicadores" }));
+  expect(await screen.findByRole("button", { name: /^Pelotas:/ })).toHaveAttribute(
+    "data-level",
+    "critical",
+  );
+  const conferred: ConferenceState = {
+    ...old,
+    manifests: old.manifests.map((m) => ({
+      ...m,
+      documents: m.documents.map((d) => ({
+        ...d,
+        received: true,
+        receivedAt: new Date().toISOString(),
+      })),
+    })),
+  };
+  rerender(<ConferenceWorkspace initialState={old} externalState={conferred} />);
+  await vi.waitFor(() =>
+    expect(screen.getByRole("button", { name: /^Pelotas:/ })).toHaveAttribute("data-level", "ok"),
+  );
+});

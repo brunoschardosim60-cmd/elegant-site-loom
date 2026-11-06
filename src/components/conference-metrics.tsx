@@ -11,7 +11,7 @@ import {
   formatShare,
   LATE_AFTER_DAYS,
   MIN_CTCS,
-  outOfTimeShare,
+  lateShare,
   type ConferenceMetrics,
   type GroupMetrics,
 } from "@/lib/conference-metrics";
@@ -84,7 +84,8 @@ function GroupTable<T extends GroupMetrics>({
             <th>{label}</th>
             <th>CTCs</th>
             <th>Pendentes</th>
-            <th>Fora do prazo</th>
+            <th>Atrasados</th>
+            <th>Devolução (mediana)</th>
             <th>Valor pendente</th>
             {extra?.map((column) => (
               <th key={column.header}>{column.header}</th>
@@ -93,16 +94,17 @@ function GroupTable<T extends GroupMetrics>({
         </thead>
         <tbody>
           {shown.map((row) => {
-            const enough = row.evaluated >= MIN_CTCS;
+            const enough = row.ctcs >= MIN_CTCS;
             return (
-              <tr key={name(row)} data-late={enough && row.outOfTime > 0} data-few={!enough}>
+              <tr key={name(row)} data-late={row.late > 0} data-few={!enough}>
                 <td data-label={label}>{name(row)}</td>
                 <td data-label="CTCs">{row.ctcs}</td>
                 <td data-label="Pendentes">{row.pending}</td>
-                <td data-label="Fora do prazo">
-                  {row.outOfTime}
-                  {enough ? ` · ${formatShare(outOfTimeShare(row))}` : ""}
+                <td data-label="Atrasados">
+                  {row.late}
+                  {enough && row.late ? ` · ${formatShare(lateShare(row))}` : ""}
                 </td>
+                <td data-label="Devolução (mediana)">{formatDays(row.medianReturnDays)}</td>
                 <td data-label="Valor pendente">
                   {row.pendingValueCents ? formatMoney(row.pendingValueCents) : "—"}
                 </td>
@@ -177,7 +179,7 @@ export function ConferenceMetricsView({
   const before: ConferenceMetrics | undefined = period.previous
     ? conferenceMetrics(inRange(all, period.previous), now)
     : undefined;
-  const comparable = !!before && before.evaluated >= MIN_CTCS;
+  const comparable = !!before && before.timedReturns >= MIN_CTCS;
   const [pdfBusy, setPdfBusy] = useState(false);
   async function exportPdf() {
     setPdfBusy(true);
@@ -190,20 +192,18 @@ export function ConferenceMetricsView({
   }
   const tiles = [
     {
-      label: "Fora do prazo",
-      value: formatShare(m.outOfTimeRate),
-      caption: (
-        <>
-          {m.outOfTime} de {m.evaluated} CTCs com {LATE_AFTER_DAYS}+ dias
-          {comparable && (
-            <Change
-              current={m.outOfTimeRate}
-              previous={before.outOfTimeRate}
-              format={(d) => `${Math.round(d * 100)} p.p.`}
-            />
-          )}
-        </>
-      ),
+      label: "CTCs atrasados agora",
+      value: String(m.late),
+      caption: `${m.late ? `${formatShare(m.lateRate)} dos CTCs · ` : ""}pendentes há ${LATE_AFTER_DAYS}+ dias${
+        m.perishablePending ? ` · ${m.perishablePending} perecível(is) pendente(s)` : ""
+      }`,
+    },
+    {
+      label: "Mercadoria com CTC pendente",
+      value: formatMoney(m.pendingValueCents),
+      caption: m.pendingWithoutValue
+        ? `${m.pending} CTCs pendentes · ${m.pendingWithoutValue} sem valor informado`
+        : `${m.pending} CTCs pendentes`,
     },
     {
       label: "Tempo até a devolução",
@@ -222,18 +222,20 @@ export function ConferenceMetricsView({
       ),
     },
     {
-      label: "Mercadoria com CTC pendente",
-      value: formatMoney(m.pendingValueCents),
-      caption: m.pendingWithoutValue
-        ? `${m.pending} CTCs pendentes · ${m.pendingWithoutValue} sem valor informado`
-        : `${m.pending} CTCs pendentes · ${(m.pendingWeightGrams / 1_000_000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} t`,
-    },
-    {
-      label: `Pendentes há ${LATE_AFTER_DAYS}+ dias`,
-      value: String(m.late),
-      caption: m.perishablePending
-        ? `${m.perishablePending} perecível(is) pendente(s) · devolvidos: ${formatShare(m.returnRate)}`
-        : `Nenhum perecível pendente · devolvidos: ${formatShare(m.returnRate)}`,
+      label: `Conferidos com ${LATE_AFTER_DAYS}+ dias`,
+      value: formatShare(m.returnedLateRate),
+      caption: (
+        <>
+          {m.returnedLate} de {m.timedReturns} conferidos
+          {comparable && (
+            <Change
+              current={m.returnedLateRate}
+              previous={before.returnedLateRate}
+              format={(d) => `${Math.round(d * 100)} p.p.`}
+            />
+          )}
+        </>
+      ),
     },
   ];
   return (
@@ -322,12 +324,12 @@ export function ConferenceMetricsView({
                 header: "Mais antigo",
                 cell: (row) => (row.pending ? formatDays(row.oldestDays) : "—"),
               },
-              { header: "Devolução (mediana)", cell: (row) => formatDays(row.medianReturnDays) },
             ]}
           />
           <p className="text-xs text-muted-foreground">
-            Fora do prazo: devolvido ou ainda pendente {LATE_AFTER_DAYS} dias ou mais após a emissão
-            do pré. A porcentagem só aparece com {MIN_CTCS} CTCs ou mais.
+            Atrasado: CTC pendente {LATE_AFTER_DAYS} dias ou mais após a emissão do pré; sai da
+            conta assim que é conferido. Devolução: dias entre a emissão e a conferência. A
+            porcentagem só aparece com {MIN_CTCS} CTCs ou mais.
           </p>
         </>
       )}

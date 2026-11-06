@@ -258,3 +258,32 @@ it("never auto-retries a failed save or a conflicting refresh", async () => {
   expect(rpc).toHaveBeenCalledTimes(count);
   expect(publish.mock.lastCall![0].conflict).toBe(true);
 });
+it("keeps a quick undo made while the scan is still saving, without a false conflict", async () => {
+  const gate = deferred(),
+    rpc = vi.fn().mockReturnValueOnce(gate.promise),
+    publish = vi.fn<(value: TeamSyncView) => void>();
+  const sync = new TeamSync(team(), rpc, publish);
+  const scanned = receive(state(), 0);
+  sync.change(scanned);
+  // Undone before the first save answers.
+  sync.change(state());
+  // The server stamps its own time and author on the scan it saved.
+  const stamped = structuredClone(scanned);
+  Object.assign(stamped.manifests[0]!.documents[0]!, {
+    receivedAt: "2026-10-13T03:00:02Z",
+    receivedBy: "00000000-0000-4000-8000-0000000000aa",
+    receivedByEmail: "ana@exemplo.com",
+  });
+  rpc.mockImplementation(async (_name: string, args: { next_data: ConferenceState }) => ({
+    data: { revision: 3, data: args.next_data },
+    error: null,
+  }));
+  gate.resolve({ data: { revision: 2, data: stamped }, error: null });
+  await vi.waitFor(() => expect(sync.pending()).toBe(false));
+  const last = publish.mock.lastCall![0];
+  expect(last.error).toBe("");
+  expect(last.conflict).toBe(false);
+  expect(last.state.manifests[0]!.documents[0]).toMatchObject({ received: false });
+  expect(last.state.manifests[0]!.documents[0]).not.toHaveProperty("receivedAt");
+  expect(last.state.manifests[0]!.documents[0]).not.toHaveProperty("receivedBy");
+});

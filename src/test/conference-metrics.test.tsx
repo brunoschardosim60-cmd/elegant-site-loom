@@ -62,11 +62,12 @@ it("computes return rate, late and perishable CTCs, pending value and median ret
     ["ANA", 1, 5],
     ["BETO", 0, 0],
   ]);
-  // Out of time: ANA's pending CTC (5 days) and the one returned after 2 days.
-  // BETO's same-day pending CTC is not decided yet and stays out of the rate.
-  expect(m.outOfTime).toBe(2);
-  expect(m.evaluated).toBe(3);
-  expect(m.outOfTimeRate).toBeCloseTo(2 / 3);
+  // Late now: only ANA's CTC still pending after 5 days. History apart: one of
+  // the two conferred CTCs came back 2 days after the manifest date.
+  expect(m.lateRate).toBe(0.25);
+  expect(m.returnedLate).toBe(1);
+  expect(m.timedReturns).toBe(2);
+  expect(m.returnedLateRate).toBe(0.5);
   expect(m.cities).toEqual([
     {
       city: "GRAVATAI",
@@ -74,9 +75,10 @@ it("computes return rate, late and perishable CTCs, pending value and median ret
       received: 0,
       pending: 2,
       late: 1,
-      outOfTime: 1,
-      evaluated: 1,
+      returnedLate: 0,
+      timedReturns: 0,
       pendingValueCents: 1_250_000,
+      medianReturnDays: undefined,
     },
   ]);
   expect(formatMoney(1_250_000).replace(/\s/g, " ")).toBe("R$ 12.500");
@@ -84,8 +86,9 @@ it("computes return rate, late and perishable CTCs, pending value and median ret
 
 it("renders the indicator tiles and the per-driver table", () => {
   render(<ConferenceMetricsView manifests={manifests} now={now} />);
-  expect(screen.getByText("67%")).toBeInTheDocument();
-  expect(screen.getByText(/2 de 3 CTCs com 2\+ dias/)).toBeInTheDocument();
+  expect(screen.getByText(/25% dos CTCs · pendentes há 2\+ dias/)).toBeInTheDocument();
+  expect(screen.getByText("50%")).toBeInTheDocument();
+  expect(screen.getByText(/1 de 2 conferidos/)).toBeInTheDocument();
   const table = screen.getByRole("region", { name: "Por motorista" });
   expect(within(table).getAllByRole("row")).toHaveLength(3);
   expect(within(table).getByText("ANA")).toBeInTheDocument();

@@ -5,16 +5,17 @@ import { cityKey, cityLevel, placeCities, type CityShapes } from "@/lib/city-map
 import shapes from "@/lib/maps/rs-municipios.json";
 import type { CityMetrics } from "@/lib/conference-metrics";
 
-/** A city whose CTCs are all evaluated; `out` of them out of time. */
-const city = (name: string, ctcs: number, out: number, pending = out): CityMetrics => ({
+/** A city with `late` CTCs pending past the deadline (and `pending` in all). */
+const city = (name: string, ctcs: number, late: number, pending = late): CityMetrics => ({
   city: name,
   ctcs,
   received: ctcs - pending,
   pending,
-  late: pending,
-  outOfTime: out,
-  evaluated: ctcs,
+  late,
+  returnedLate: 0,
+  timedReturns: 0,
   pendingValueCents: 0,
+  medianReturnDays: undefined,
 });
 
 it("matches 108 spellings to IBGE names regardless of accents, apostrophes and state suffix", () => {
@@ -35,13 +36,13 @@ it("covers every Rio Grande do Sul municipality", () => {
   expect(unplaced.map((c) => c.city)).toEqual(["JOINVILLE"]);
 });
 
-it("colours cities by share out of time and marks too little data apart", () => {
-  expect(cityLevel({ evaluated: 10, outOfTime: 0 })).toBe("ok");
-  expect(cityLevel({ evaluated: 10, outOfTime: 1 })).toBe("attention");
-  expect(cityLevel({ evaluated: 10, outOfTime: 2 })).toBe("critical");
+it("colours cities by the share late now and marks too little data apart", () => {
+  expect(cityLevel({ ctcs: 10, late: 0 })).toBe("ok");
+  expect(cityLevel({ ctcs: 10, late: 1 })).toBe("attention");
+  expect(cityLevel({ ctcs: 10, late: 2 })).toBe("critical");
   // One late CTC out of one is not a red city.
-  expect(cityLevel({ evaluated: 1, outOfTime: 1 })).toBe("few");
-  expect(cityLevel({ evaluated: 4, outOfTime: 4 })).toBe("few");
+  expect(cityLevel({ ctcs: 1, late: 1 })).toBe("few");
+  expect(cityLevel({ ctcs: 4, late: 4 })).toBe("few");
 });
 
 it("shows a city's numbers on the first tap and opens its pending CTCs on the second", async () => {
@@ -51,11 +52,11 @@ it("shows a city's numbers on the first tap and opens its pending CTCs on the se
   );
   const pelotas = await screen.findByRole("button", { name: /^Pelotas:/ });
   expect(pelotas).toHaveAttribute("data-level", "critical");
-  expect(pelotas).toHaveAccessibleName("Pelotas: 10 CTCs · 4 pendentes · 3 fora do prazo (30%)");
+  expect(pelotas).toHaveAccessibleName("Pelotas: 10 CTCs · 4 pendentes · 3 atrasados (30%)");
   expect(screen.getByRole("button", { name: /^Rio Grande:/ })).toHaveAttribute("data-level", "few");
   fireEvent.click(pelotas);
   expect(open).not.toHaveBeenCalled();
-  expect(screen.getByText("10 CTCs · 4 pendentes · 3 fora do prazo (30%)")).toBeInTheDocument();
+  expect(screen.getByText("10 CTCs · 4 pendentes · 3 atrasados (30%)")).toBeInTheDocument();
   fireEvent.click(pelotas);
   expect(open).toHaveBeenCalledExactlyOnceWith("PELOTAS");
   // Only cities with CTCs are interactive; the map opens zoomed on them.

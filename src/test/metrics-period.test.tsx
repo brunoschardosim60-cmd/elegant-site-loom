@@ -123,7 +123,7 @@ it("exports the management report for the period shown", async () => {
   await waitFor(() => expect(mocks.pdf).toHaveBeenCalledOnce());
   expect(mocks.pdf.mock.calls[0]![0]).toMatchObject({
     period: { kind: "all" },
-    metrics: { ctcs: 6, outOfTime: 0 },
+    metrics: { ctcs: 6, late: 0 },
   });
 });
 
