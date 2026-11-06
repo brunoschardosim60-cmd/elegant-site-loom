@@ -477,9 +477,8 @@ export function SpreadsheetImportDialog({
             >
               <strong>{remanifestations.length} CTC(s) em novas tentativas de rota</strong>
               <p className="mt-1">
-                É normal o mesmo CTC aparecer em dias e motoristas diferentes. Todas as linhas serão
-                mantidas; a bipagem confere apenas a rota mais recente cadastrada. As anteriores
-                aparecem no rastreamento como remanifestadas.
+                O bipe confere só a rota mais recente. As anteriores ficam no rastreamento como
+                remanifestadas.
               </p>
               <details className="mt-2">
                 <summary className="cursor-pointer font-medium">
@@ -544,8 +543,7 @@ export function SpreadsheetImportDialog({
                       .flatMap((draft) => draft.rows)
                       .filter((row) => row.occurrenceCode || row.occurrenceDescription).length
                   }{" "}
-                  NFs com última ocorrência informada. Esses dados não alteram a conferência do
-                  documento.
+                  NFs com ocorrência informada.
                 </p>
               </div>
               <div
@@ -582,10 +580,7 @@ export function SpreadsheetImportDialog({
                     .
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    Só preenche o que está vazio e mantém a ocorrência mais recente de cada NF, sem
-                    duplicar cadastros nem alterar conferências. Serve para trazer ao mapa e aos
-                    indicadores o que foi importado antes destas informações existirem. Os filtros e
-                    a seleção abaixo valem só para cadastrar manifestos novos.
+                    Só preenche o que está vazio. Não duplica cadastros nem altera conferências.
                   </p>
                   <Button
                     type="button"
@@ -948,10 +943,6 @@ export function SpreadsheetImportDialog({
                   </div>
                 </details>
               )}
-              <p className="text-xs text-muted-foreground">
-                O número e a data são do manifesto exportado, não do dia da importação. O DI do pré
-                não é necessário. NFs do mesmo CTC ficam juntas para uma única conferência.
-              </p>
             </>
           )}
         </div>

@@ -317,8 +317,8 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
         <div className="grid gap-3 text-sm" role="status">
           <strong>Sua conta ainda não tem acesso</strong>
           <p className="text-muted-foreground">
-            O confere. funciona por convite. Peça ao responsável pela sua equipe para incluir o
-            e-mail <strong>{session.user.email}</strong> em Equipe e depois entre de novo.
+            Peça ao responsável pela sua equipe para liberar o e-mail{" "}
+            <strong>{session.user.email}</strong> e depois entre de novo.
           </p>
           <div className="flex flex-wrap gap-2">
             <Button size="sm" onClick={() => window.location.reload()}>

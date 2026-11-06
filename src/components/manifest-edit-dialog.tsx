@@ -50,8 +50,8 @@ export function ManifestEditDialog({
             {isExportManifest(manifest.id) ? "Editar manifesto" : "Editar pré-manifesto"}
           </DialogTitle>
           <DialogDescription>
-            Corrija os dados. As conferências, horários e o histórico são preservados. Para corrigir
-            um CTC recebido, desfaça a conferência primeiro.
+            Conferências e histórico são mantidos. Para mudar um CTC já conferido, desfaça a
+            conferência antes.
           </DialogDescription>
         </DialogHeader>
         <form

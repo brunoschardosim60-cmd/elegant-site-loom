@@ -170,7 +170,7 @@ export function TeamPanel({
       setMessage(
         cancel
           ? "Convite cancelado."
-          : "Acesso preparado. Essa pessoa deve criar e confirmar a conta com esse e-mail e entrar no site.",
+          : "Acesso liberado. A pessoa cria a conta com esse e-mail e entra no site.",
       );
       onRefresh();
     } catch (error) {
@@ -228,9 +228,7 @@ export function TeamPanel({
       <DialogContent className="max-w-2xl max-h-[85dvh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Equipe e histórico</DialogTitle>
-          <DialogDescription>
-            Compartilhe os cadastros com sua equipe. Cada pessoa entra com sua própria conta.
-          </DialogDescription>
+          <DialogDescription>Cada pessoa entra com a própria conta.</DialogDescription>
         </DialogHeader>
         <div className="flex gap-2">
           <Button
@@ -256,12 +254,9 @@ export function TeamPanel({
             {team.invitation && (
               <div className="rounded-lg border bg-accent p-3 text-xs grid gap-2">
                 <strong>Convite de {team.invitation.ownerEmail}</strong>
-                <p>
-                  Ao aceitar, você passará a consultar e alterar os cadastros dessa equipe. Seus
-                  cadastros pessoais anteriores ficam preservados e não são transferidos.
-                </p>
+                <p>Seus cadastros anteriores continuam guardados e não vão para a equipe.</p>
                 <Button size="sm" disabled={busy || !canJoin} onClick={() => void join()}>
-                  Aceitar convite e entrar na equipe
+                  Entrar na equipe
                 </Button>
                 {!canJoin && <span>Conclua o salvamento antes de trocar de equipe.</span>}
               </div>
@@ -359,12 +354,11 @@ export function TeamPanel({
                   />
                 </label>
                 <Button disabled={busy || !email.trim()} type="submit">
-                  {busy ? "Preparando…" : "Liberar acesso à equipe"}
+                  {busy ? "Liberando…" : "Liberar acesso"}
                 </Button>
                 <p className="text-xs text-muted-foreground">
-                  Ao incluir o e-mail, você permite que essa conta consulte e altere os dados da
-                  equipe. Não é enviado e-mail automático; compartilhe o endereço do site com a
-                  pessoa.
+                  O sistema não manda e-mail: passe o endereço do site para a pessoa criar a conta
+                  com esse e-mail.
                 </p>
               </form>
             )}
@@ -377,7 +371,7 @@ export function TeamPanel({
                   void act(
                     "set_conference_settings",
                     { branch_codes: codes(branches), reason_codes: codes(reasons) },
-                    "Configuração da planilha salva. Vale para as próximas importações.",
+                    "Salvo. Vale para as próximas importações.",
                   );
                 }}
               >
@@ -411,22 +405,16 @@ export function TeamPanel({
                   Salvar configuração
                 </Button>
                 <p className="text-xs text-muted-foreground">
-                  A importação usa só as linhas com estas filiais (coluna Filial) e motivos (coluna
-                  Motivo). Separe por vírgula.
+                  Colunas Filial e Motivo da planilha. Separe por vírgula.
                 </p>
               </form>
             )}
             {team.role && (
               <p className="text-xs text-muted-foreground">
-                Papéis: o responsável e os administradores convidam e removem pessoas; conferentes
-                cadastram e conferem; só leitura apenas consulta. Só o responsável muda papéis.
+                Administrador convida e remove pessoas. Conferente cadastra e confere. Só leitura
+                consulta. Só o responsável muda papéis.
               </p>
             )}
-            <p className="text-xs text-muted-foreground">
-              Os registros anteriores do responsável continuam nesta equipe. Dados pessoais de outra
-              conta não são importados automaticamente. O histórico começa nas alterações feitas a
-              partir desta versão.
-            </p>
           </div>
         ) : (
           <div className="grid gap-3">
