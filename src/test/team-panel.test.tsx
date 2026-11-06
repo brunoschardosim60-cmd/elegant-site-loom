@@ -92,13 +92,13 @@ it("prepares a named email invitation only on submit and tells the owner how the
   fireEvent.change(screen.getByRole("textbox", { name: "E-mail da pessoa" }), {
     target: { value: "coworker@example.com" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Liberar acesso à equipe" }));
+  fireEvent.click(screen.getByRole("button", { name: "Liberar acesso" }));
   await waitFor(() =>
     expect(rpc).toHaveBeenCalledExactlyOnceWith("invite_conference_member", {
       member_email: "coworker@example.com",
     }),
   );
-  expect(await screen.findByRole("status")).toHaveTextContent("criar e confirmar a conta");
+  expect(await screen.findByRole("status")).toHaveTextContent("cria a conta com esse e-mail");
   expect(refresh).toHaveBeenCalledOnce();
 });
 it("keeps audit discreet, filters by pre and shows reliable actor and NF changes on demand", async () => {
@@ -144,7 +144,7 @@ it("offers invitations only to owners, without a displayed count or a fixed cap"
       onRefresh={() => {}}
     />,
   );
-  expect(screen.queryByRole("button", { name: "Liberar acesso à equipe" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Liberar acesso" })).not.toBeInTheDocument();
   first.unmount();
   render(
     <TeamPanel
@@ -162,7 +162,7 @@ it("offers invitations only to owners, without a displayed count or a fixed cap"
       onRefresh={() => {}}
     />,
   );
-  expect(screen.getByRole("button", { name: "Liberar acesso à equipe" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Liberar acesso" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Pessoas" })).toBeInTheDocument();
   expect(screen.queryByText(/três pessoas|\/3/)).not.toBeInTheDocument();
   expect(rpc).not.toHaveBeenCalled();
@@ -236,14 +236,14 @@ it("lets an administrator manage conferentes but not roles, other admins or them
   renderPanel(roleTeam("admin"), "00000000-0000-4000-8000-0000000000bb");
   expect(screen.queryByLabelText("Papel de conf@example.com")).not.toBeInTheDocument();
   expect(screen.getAllByRole("button", { name: "Remover" })).toHaveLength(1);
-  expect(screen.getByRole("button", { name: "Liberar acesso à equipe" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Liberar acesso" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Salvar configuração" })).toBeInTheDocument();
 });
 
 it("shows conferentes the roles without any management controls", () => {
   renderPanel(roleTeam("conferente"), "00000000-0000-4000-8000-0000000000cc");
   expect(screen.queryByRole("button", { name: "Remover" })).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "Liberar acesso à equipe" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Liberar acesso" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Salvar configuração" })).not.toBeInTheDocument();
   expect(screen.getAllByText("Administrador").length).toBeGreaterThan(0);
 });
