@@ -22,18 +22,19 @@ export function cityKey(name: string) {
 }
 
 export type CityLevel = "ok" | "attention" | "critical" | "few";
-/** Share of a city's evaluated CTCs out of time from which it turns red. */
+/** Share of a city's CTCs late now from which it turns red. */
 export const CRITICAL_SHARE = 0.2;
 
 /**
- * Green: nothing out of time. Yellow: some. Red: a fifth or more. Cities with
- * fewer than MIN_CTCS evaluated CTCs are marked as having too little data, so
- * one late CTC out of one does not paint a town red.
+ * The situation now: green with nothing late, yellow with some, red when a
+ * fifth or more of the city's CTCs are still pending past the deadline.
+ * Receiving them turns the city green at once. Cities with fewer than
+ * MIN_CTCS CTCs are marked as having too little data.
  */
-export function cityLevel(city: Pick<GroupMetrics, "evaluated" | "outOfTime">): CityLevel {
-  if (city.evaluated < MIN_CTCS) return "few";
-  if (!city.outOfTime) return "ok";
-  return city.outOfTime / city.evaluated >= CRITICAL_SHARE ? "critical" : "attention";
+export function cityLevel(city: Pick<GroupMetrics, "ctcs" | "late">): CityLevel {
+  if (city.ctcs < MIN_CTCS) return "few";
+  if (!city.late) return "ok";
+  return city.late / city.ctcs >= CRITICAL_SHARE ? "critical" : "attention";
 }
 
 const counters = [
@@ -41,8 +42,8 @@ const counters = [
   "received",
   "pending",
   "late",
-  "outOfTime",
-  "evaluated",
+  "returnedLate",
+  "timedReturns",
   "pendingValueCents",
 ] as const;
 

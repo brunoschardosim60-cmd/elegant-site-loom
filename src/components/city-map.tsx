@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { CityMetrics } from "@/lib/conference-metrics";
-import { formatMoney, formatShare, MIN_CTCS, outOfTimeShare } from "@/lib/conference-metrics";
+import { formatMoney, formatShare, lateShare, MIN_CTCS } from "@/lib/conference-metrics";
 import {
   cityLevel,
   CRITICAL_SHARE,
@@ -10,9 +10,9 @@ import {
 } from "@/lib/city-map";
 
 const levelLabels: Record<CityLevel, string> = {
-  ok: "Tudo no prazo",
-  attention: `Até ${Math.round(CRITICAL_SHARE * 100)}% fora do prazo`,
-  critical: `${Math.round(CRITICAL_SHARE * 100)}% ou mais fora do prazo`,
+  ok: "Nada atrasado",
+  attention: `Menos de ${Math.round(CRITICAL_SHARE * 100)}% atrasados`,
+  critical: `${Math.round(CRITICAL_SHARE * 100)}% ou mais atrasados`,
   few: `Poucos dados (menos de ${MIN_CTCS} CTCs)`,
 };
 
@@ -72,8 +72,8 @@ function describe(city: CityMetrics) {
   return [
     plural(city.ctcs, "CTC", "CTCs"),
     plural(city.pending, "pendente", "pendentes"),
-    `${plural(city.outOfTime, "fora do prazo", "fora do prazo")}${
-      city.evaluated >= MIN_CTCS ? ` (${formatShare(outOfTimeShare(city))})` : ""
+    `${plural(city.late, "atrasado", "atrasados")}${
+      city.ctcs >= MIN_CTCS && city.late ? ` (${formatShare(lateShare(city))})` : ""
     }`,
     ...(city.pendingValueCents ? [`${formatMoney(city.pendingValueCents)} pendentes`] : []),
   ].join(" · ");
@@ -170,7 +170,7 @@ export function CityMap({
     <section className="manifest-card city-map" aria-label="Mapa de atrasos por cidade">
       <div className="city-map-head">
         <div>
-          <h3>Fora do prazo por cidade</h3>
+          <h3>CTCs atrasados por cidade</h3>
         </div>
         <ul className="city-map-legend">
           {(Object.keys(levelLabels) as CityLevel[]).map((level) => (
@@ -267,10 +267,7 @@ export function CityMap({
         <p className="city-map-unplaced">
           Fora do mapa do RS:{" "}
           {unplaced
-            .map(
-              (city) =>
-                `${city.city} (${plural(city.outOfTime, "fora do prazo", "fora do prazo")})`,
-            )
+            .map((city) => `${city.city} (${plural(city.late, "atrasado", "atrasados")})`)
             .join(", ")}
           .
         </p>
