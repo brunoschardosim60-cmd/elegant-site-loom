@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import type { CityMetrics } from "@/lib/conference-metrics";
-import { formatMoney, formatShare, lateShare, MIN_CTCS } from "@/lib/conference-metrics";
+import {
+  formatDays,
+  formatMoney,
+  formatShare,
+  lateShare,
+  MIN_CTCS,
+} from "@/lib/conference-metrics";
 import {
   cityLevel,
   CRITICAL_SHARE,
@@ -253,6 +259,15 @@ export function CityMap({
               <>
                 <strong>{shownName}</strong>
                 <span>{describe(shown)}</span>
+                {!!shown.topClients?.length && (
+                  <span>Clientes com pendência: {shown.topClients.join(", ")}</span>
+                )}
+                {!!shown.topDrivers?.length && (
+                  <span>Motoristas: {shown.topDrivers.join(", ")}</span>
+                )}
+                {shown.medianReturnDays !== undefined && (
+                  <span>Devolução (mediana): {formatDays(shown.medianReturnDays)}</span>
+                )}
                 {!!shown.pending && onOpenCity && <span>Clique para ver os pendentes.</span>}
               </>
             ) : (

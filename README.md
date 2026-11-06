@@ -37,6 +37,7 @@ bun run build      # build de produção
    - publique o app;
    - depois aplique `20261030030000_roles_settings_monitoring.sql` e `20261030040000_cargo_details.sql`. A primeira fecha as funções antigas de salvamento, que versões anteriores do app ainda usam.
    - `20261105010000_archive_by_date.sql` pode ser aplicada a qualquer momento. Sem ela, os Indicadores funcionam, mas os períodos não incluem os prés arquivados.
+   - `20261106010000_team_late_days.sql` pode ser aplicada a qualquer momento. Ela libera o prazo de devolução configurável em Equipe; sem ela, o prazo fica em 2 dias.
 2. **Quem pode criar uma equipe nova:** o cadastro agora é só por convite. Quem já tem equipe continua entrando normalmente. Para liberar um novo responsável de equipe, rode no editor SQL:
    ```sql
    insert into public.conference_owner_allowlist(email, note) values ('pessoa@empresa.com.br', 'Filial 06');

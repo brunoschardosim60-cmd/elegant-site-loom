@@ -12,6 +12,8 @@ export type TrackingFilters = {
   status?: TrackingStatus;
   now?: string | number | Date;
   routesPresented?: boolean;
+  /** Deadline in days for the "old" filter. */
+  lateDays?: number;
 };
 
 /** Consult the saved CTCs, including finalized prés, without changing receipt state. */
@@ -23,10 +25,14 @@ export function selectTrackingRows(
     status = "all",
     now = Date.now(),
     routesPresented = false,
+    lateDays = 2,
   }: TrackingFilters = {},
 ): TrackingRow[] {
   return (routesPresented ? manifests : presentRoutes(manifests))
-    .filter((manifest) => filter !== "old" || manifestAgeDays(manifest, now) >= 2)
+    .filter(
+      (manifest) =>
+        (filter !== "old" && filter !== "urgent") || manifestAgeDays(manifest, now) >= lateDays,
+    )
     .slice()
     .sort((a, b) => (filter === "new" ? compareManifestDates(b, a) : compareManifestDates(a, b)))
     .flatMap((manifest) =>

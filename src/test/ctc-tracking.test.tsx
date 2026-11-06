@@ -192,6 +192,7 @@ it("exports the tracking status and search without changing conference state", a
       view: "tracking",
       query: "MARIA",
       filter: "all",
+      lateDays: 2,
       trackingStatus: "received",
     }),
   );

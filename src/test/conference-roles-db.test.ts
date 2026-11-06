@@ -147,6 +147,7 @@ it("stores the team's branch and reason filter, defaulting to 06/DIS, for owners
   expect((await rpc("get_conference_team")).settings).toEqual({
     branches: ["06"],
     reasons: ["DIS"],
+    lateDays: 2,
   });
   expect(
     await rpc("set_conference_settings", [
@@ -161,11 +162,18 @@ it("stores the team's branch and reason filter, defaulting to 06/DIS, for owners
   await expect(rpc("set_conference_settings", [["0'6"], ["DIS"]])).rejects.toThrow(
     "CONFERENCE_INVALID",
   );
+  expect(await rpc<number>("set_conference_late_days", [3])).toBe(3);
+  await expect(rpc("set_conference_late_days", [0])).rejects.toThrow("CONFERENCE_INVALID");
+  await expect(rpc("set_conference_late_days", [31])).rejects.toThrow("CONFERENCE_INVALID");
   await join(2);
-  expect((await rpc("get_conference_team")).settings.reasons).toEqual(["DIS", "TRA"]);
+  expect((await rpc("get_conference_team")).settings).toMatchObject({
+    reasons: ["DIS", "TRA"],
+    lateDays: 3,
+  });
   await expect(rpc("set_conference_settings", [["01"], ["DIS"]])).rejects.toThrow(
     "Somente o responsável",
   );
+  await expect(rpc("set_conference_late_days", [5])).rejects.toThrow("Somente o responsável");
 });
 
 it("records browser errors with size and rate limits, and keeps them unreadable to clients", async () => {

@@ -60,6 +60,7 @@ import {
 import { NfOccurrences } from "./nf-occurrences";
 import { planOccurrenceUpdates } from "@/lib/nf-occurrences";
 import { planDetailUpdates } from "@/lib/manifest-enrich";
+import { isPerishable } from "@/lib/conference-metrics";
 import { documentPageSize } from "./document-pagination";
 import { PendingTable } from "./pending-table";
 import { ConferenceMetricsView, type LoadArchivedByDate } from "./conference-metrics";
@@ -127,6 +128,7 @@ export function ConferenceWorkspace({
   onManageTeam,
   findArchived,
   listArchivedByDate,
+  lateDays = 2,
   readOnly = false,
   importFilter,
 }: {
@@ -143,6 +145,8 @@ export function ConferenceWorkspace({
   onManageTeam?: (() => void) | undefined;
   /** Looks up manifests moved to the archive; absent in standalone use. */
   findArchived?: FindArchived | undefined;
+  /** Days after the manifest date from which a pending CTC is late (team setting). */
+  lateDays?: number | undefined;
   /** Lists archived manifests by date for the indicators; absent in standalone use. */
   listArchivedByDate?: LoadArchivedByDate | undefined;
   /** The account's role only allows reading this team's records. */
@@ -182,6 +186,7 @@ export function ConferenceWorkspace({
   const filtersActive =
     !!query.trim() ||
     filter === "old" ||
+    filter === "urgent" ||
     (view === "missing" && !!city) ||
     (view === "tracking" && trackingStatus !== "all");
   function clearFilters() {
@@ -291,6 +296,7 @@ export function ConferenceWorkspace({
         view,
         query,
         filter,
+        lateDays,
         owner: demandOwner,
         ...(view === "tracking" ? { trackingStatus } : {}),
       });
@@ -631,6 +637,7 @@ export function ConferenceWorkspace({
             filter,
             status: trackingStatus,
             now,
+            lateDays,
             routesPresented: true,
           },
         )
@@ -644,16 +651,19 @@ export function ConferenceWorkspace({
         .map((doc) => ({ manifest, doc, days: age(manifest) })),
     )
     .filter(({ manifest, doc }) => matchesConferenceSearch(manifest, query, doc))
-    .filter(({ days }) => filter !== "old" || days >= 2)
+    .filter(({ days }) => (filter !== "old" && filter !== "urgent") || days >= lateDays)
     .filter(({ doc }) => !city || doc.city === city)
-    .sort((a, b) =>
-      filter === "new"
-        ? compareManifestDates(b.manifest, a.manifest)
-        : compareManifestDates(a.manifest, b.manifest),
+    .sort(
+      (a, b) =>
+        // Attention now: perishable cargo first, then the oldest.
+        (filter === "urgent" ? Number(isPerishable(b.doc)) - Number(isPerishable(a.doc)) : 0) ||
+        (filter === "new"
+          ? compareManifestDates(b.manifest, a.manifest)
+          : compareManifestDates(a.manifest, b.manifest)),
     );
   const visible = (view === "finished" ? finished : pending)
     .filter((item) => matchesConferenceSearch(item, query))
-    .filter((item) => filter !== "old" || age(item) >= 2)
+    .filter((item) => (filter !== "old" && filter !== "urgent") || age(item) >= lateDays)
     .sort((a, b) => (filter === "new" ? compareManifestDates(b, a) : compareManifestDates(a, b)));
   const pendingCities = [
     ...new Set(
@@ -937,10 +947,10 @@ export function ConferenceWorkspace({
                   value: missing.length,
                   caption: `${missing.reduce((sum, doc) => sum + doc.volumes, 0)} volumes · ${
                     pending
-                      .filter((manifest) => age(manifest) >= 2)
+                      .filter((manifest) => age(manifest) >= lateDays)
                       .flatMap((manifest) => manifest.documents)
                       .filter(isPendingDocument).length
-                  } há 2 dias ou mais`,
+                  } há ${lateDays} dias ou mais`,
                   icon: FileText,
                   color: "",
                 },
@@ -1103,7 +1113,10 @@ export function ConferenceWorkspace({
                     >
                       <option value="all">Mais antigos primeiro</option>
                       <option value="new">Mais recentes</option>
-                      <option value="old">Há 2 dias ou mais</option>
+                      <option value="old">Há {lateDays} dias ou mais</option>
+                      {view === "missing" && (
+                        <option value="urgent">Atrasados, perecíveis primeiro</option>
+                      )}
                     </select>
                     {view === "missing" && pendingCities.length > 1 && (
                       <select
@@ -1132,7 +1145,14 @@ export function ConferenceWorkspace({
                     <ConferenceMetricsView
                       manifests={presented}
                       now={now}
+                      lateDays={lateDays}
                       loadArchived={metricsArchive}
+                      onOpenLate={() => {
+                        setQuery("");
+                        setCity("");
+                        setFilter("urgent");
+                        setView("missing");
+                      }}
                       onOpenCity={(name) => {
                         setQuery("");
                         setFilter("all");
@@ -1162,6 +1182,7 @@ export function ConferenceWorkspace({
                         }
                         tableRef={pendingTableRef}
                         now={now}
+                        lateDays={lateDays}
                         readOnly={teamReadOnly}
                         onReceive={(manifest, documentId) =>
                           toggleDocument(manifest, documentId, true)
@@ -1172,7 +1193,7 @@ export function ConferenceWorkspace({
                         <CheckCheck />
                         <h3>{filtersActive ? "Nenhuma pendência encontrada" : "Nada pendente"}</h3>
                         <p className="text-xs mt-2">
-                          {query.trim() || filter === "old" || city
+                          {query.trim() || filter === "old" || filter === "urgent" || city
                             ? "Nenhum resultado para essa busca ou filtro."
                             : presented.length
                               ? "Não há CTCs pendentes nas rotas atuais. Consulte as tentativas anteriores no rastreamento."
@@ -1191,6 +1212,7 @@ export function ConferenceWorkspace({
                       focusedManifest={focusedManifest}
                       age={age}
                       now={now}
+                      lateDays={lateDays}
                       onToggleDocument={toggleDocument}
                       onIssueDateChange={changeIssueDate}
                       onDeleteManifest={requestDelete}
@@ -1214,7 +1236,7 @@ export function ConferenceWorkspace({
                               : "Nenhum manifesto cadastrado"}
                       </h3>
                       <p className="text-xs mt-2">
-                        {query.trim() || filter === "old"
+                        {query.trim() || filter === "old" || filter === "urgent"
                           ? "Nenhum resultado para essa busca ou filtro."
                           : view === "finished"
                             ? "As rotas aparecem aqui quando todos os CTCs forem conferidos ou encaminhados em nova rota."

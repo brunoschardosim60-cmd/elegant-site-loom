@@ -1,32 +1,32 @@
 import type { Manifest } from "./conference";
 import type { ImportDraft } from "./manifest-import";
+import { cityKey } from "./city-map";
 
 /** Comparable recipient name: no accents, case or extra spaces. */
 export const recipientKey = (name: string | undefined) =>
   (name ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/\s+/g, " ").trim();
 
 /**
- * Delivery city most often recorded for each recipient, learned from what is
- * already registered (the 108 export brings the city, photos and manual
- * entries do not). A recipient always delivered in one city keeps it.
+ * The delivery city of each recipient that has only ever been delivered in
+ * one city, learned from what is already registered (the 108 export brings
+ * the city; photos and manual entries do not). A recipient seen in two or
+ * more cities is ambiguous and gets none: a wrong city would mislead the map.
  */
 export function knownCities(manifests: Manifest[]) {
-  const counts = new Map<string, Map<string, number>>();
+  const seen = new Map<string, Map<string, string>>();
   for (const manifest of manifests)
     for (const doc of manifest.documents) {
       const key = recipientKey(doc.recipient);
       const city = doc.city?.trim();
       if (!key || !city) continue;
-      const cities = counts.get(key) ?? new Map<string, number>();
-      cities.set(city, (cities.get(city) ?? 0) + 1);
-      counts.set(key, cities);
+      // "Gravataí" and "GRAVATAI - RS" are one city.
+      const cities = seen.get(key) ?? new Map<string, string>();
+      if (!cities.has(cityKey(city))) cities.set(cityKey(city), city);
+      seen.set(key, cities);
     }
-  return new Map(
-    [...counts].map(([key, cities]) => [
-      key,
-      [...cities].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]![0],
-    ]),
-  );
+  const known = new Map<string, string>();
+  for (const [key, cities] of seen) if (cities.size === 1) known.set(key, [...cities.values()][0]!);
+  return known;
 }
 
 /** Fills the delivery city of CTCs that have none, from their recipient. */

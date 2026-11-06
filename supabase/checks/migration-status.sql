@@ -80,7 +80,10 @@ checks(migration, applied, detail) as (values
     'valor, peso, natureza, cidade e conferente da planilha'),
   ('20261105010000_archive_by_date',
     exists(select 1 from has_fn where name = 'list_archived_conference_manifests(date,date)'),
-    'prés arquivados por data, para os indicadores')
+    'prés arquivados por data, para os indicadores'),
+  ('20261106010000_team_late_days',
+    exists(select 1 from has_fn where name = 'set_conference_late_days(integer)'),
+    'prazo de devolução configurável por equipe')
 )
 select migration as "migração",
   case when applied then 'aplicada' else 'FALTANDO' end as "situação",

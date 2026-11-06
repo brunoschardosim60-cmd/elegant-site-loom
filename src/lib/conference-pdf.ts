@@ -22,6 +22,8 @@ export type ConferencePdfInput = {
   view: ReportView;
   query?: string;
   filter?: string;
+  /** Deadline in days for the "old" filter. */
+  lateDays?: number;
   trackingStatus?: TrackingStatus;
   generatedAt?: Date;
   owner?: DemandOwner | undefined;
@@ -93,7 +95,11 @@ export function selectConferenceReport(input: ConferencePdfInput) {
               ? Boolean(manifest.finishedAt || manifest.routeResolved)
               : !manifest.finishedAt && !manifest.routeResolved,
           )
-          .filter((manifest) => input.filter !== "old" || manifestAgeDays(manifest, now) >= 2)
+          .filter(
+            (manifest) =>
+              (input.filter !== "old" && input.filter !== "urgent") ||
+              manifestAgeDays(manifest, now) >= (input.lateDays ?? 2),
+          )
           .flatMap((manifest) => {
             if (input.view === "missing") {
               const documents = manifest.documents.filter(
@@ -209,7 +215,7 @@ export function createConferencePdf(input: ConferencePdfInput) {
     input.owner ? `Cadastros de: ${clean(input.owner.email)}` : "",
     input.view !== "issues" && clean(input.query) ? `Busca: ${clean(input.query)}` : "",
     input.view !== "issues" && input.filter === "old"
-      ? "Há 2 dias ou mais pela emissão; sem emissão, pelo cadastro"
+      ? `Há ${input.lateDays ?? 2} dias ou mais pela emissão; sem emissão, pelo cadastro`
       : "",
     input.view === "tracking" && input.trackingStatus && input.trackingStatus !== "all"
       ? `Status: ${input.trackingStatus === "received" ? "Conferidos" : input.trackingStatus === "rerouted" ? "Remanifestados" : "Pendentes"}`

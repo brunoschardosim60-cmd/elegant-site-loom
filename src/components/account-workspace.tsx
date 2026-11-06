@@ -422,6 +422,7 @@ function SavedWorkspace({ client, session }: { client: SupabaseClient; session: 
           listArchivedByDate={archivedByDate}
           readOnly={isReadOnlyMember(view.team)}
           importFilter={view.team.settings}
+          lateDays={view.team.settings?.lateDays}
         />
       </div>
       <TeamPanel

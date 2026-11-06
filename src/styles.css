@@ -1005,3 +1005,6 @@ h1 { font-size: 22px; }
 .metrics-more:hover { background: var(--secondary); }
 .metrics-table tbody tr:not(.received-row) td:first-child { box-shadow: none; }
 .metrics-table tbody tr[data-late="true"] td:first-child { box-shadow: inset 3px 0 var(--warning); }
+.metric-link { display: flex; flex-direction: column; justify-content: flex-start; align-items: stretch; text-align: left; cursor: pointer; font: inherit; color: inherit; }
+.metric-link:hover { border-color: var(--primary); }
+.metric-link:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
