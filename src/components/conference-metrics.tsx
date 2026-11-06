@@ -211,7 +211,9 @@ export function ConferenceMetricsView({
     },
     {
       label: "Mercadoria com CTC pendente",
-      value: formatMoney(m.pendingValueCents),
+      // Without any value from the 108, "R$ 0" would read as nothing pending.
+      value:
+        m.pending && m.pendingWithoutValue === m.pending ? "—" : formatMoney(m.pendingValueCents),
       caption: m.pendingWithoutValue
         ? `${m.pending} CTCs pendentes · ${m.pendingWithoutValue} sem valor informado`
         : `${m.pending} CTCs pendentes`,

@@ -1008,3 +1008,5 @@ h1 { font-size: 22px; }
 .metric-link { display: flex; flex-direction: column; justify-content: flex-start; align-items: stretch; text-align: left; cursor: pointer; font: inherit; color: inherit; }
 .metric-link:hover { border-color: var(--primary); }
 .metric-link:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+/* On a phone the menu already says where you are; the breadcrumb bar only takes room. */
+@media (max-width: 760px) { .workspace .topbar { display: none; } }

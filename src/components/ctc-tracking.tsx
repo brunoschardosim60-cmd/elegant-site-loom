@@ -57,10 +57,6 @@ export function CtcTracking({
         </label>
         <p role="status">
           {rows.length} CTC{rows.length === 1 ? "" : "s"} encontrado{rows.length === 1 ? "" : "s"}
-          <span>
-            Horários de Brasília ·{" "}
-            {personal ? "consulta dos seus cadastros" : "consulta dos cadastros da equipe"}
-          </span>
         </p>
       </div>
       {visible.length ? (
