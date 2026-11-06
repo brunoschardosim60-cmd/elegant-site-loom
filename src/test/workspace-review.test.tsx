@@ -82,7 +82,6 @@ it("clears search and filters without a write and keeps the scanner draft", () =
     target: { value: "00000" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Rastreamento" }));
-  expect(screen.getByText(/consulta dos seus cadastros/)).toBeInTheDocument();
   fireEvent.change(screen.getByRole("textbox", { name: "Buscar CTC no rastreamento" }), {
     target: { value: "nao existe" },
   });

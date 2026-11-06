@@ -933,7 +933,8 @@ export function ConferenceWorkspace({
                 )}
               </div>
             </div>
-            <div className="metric-grid">
+            {/* Indicadores has its own numbers; these would only repeat above them. */}
+            <div className="metric-grid" hidden={view === "metrics"}>
               {[
                 {
                   label: "Manifestos em aberto",
@@ -1004,9 +1005,11 @@ export function ConferenceWorkspace({
                 />
               </section>
             )}
-            <div className={`content-grid ${view === "tracking" ? "content-grid-tracking" : ""}`}>
+            <div
+              className={`content-grid ${view === "tracking" || view === "metrics" ? "content-grid-tracking" : ""}`}
+            >
               <section>
-                <div className="section-heading">
+                <div className="section-heading" hidden={view === "metrics"}>
                   <h2 className="mr-auto">
                     {view === "pending"
                       ? "Manifestos em aberto"
