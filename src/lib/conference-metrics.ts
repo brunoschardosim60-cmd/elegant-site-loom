@@ -2,7 +2,7 @@ import type { DocumentItem, Manifest } from "./conference";
 import { isPendingDocument } from "./conference-routes";
 import { manifestAgeDays } from "./manifest-date";
 
-/** A CTC still pending this many days after the manifest date is late (same as the "old" filter). */
+/** Default deadline: a CTC still pending this many days after the manifest date is late. Each team can change it. */
 export const LATE_AFTER_DAYS = 2;
 /** Below this many CTCs a city, client or driver has too little data to colour or rank. */
 export const MIN_CTCS = 5;
@@ -25,13 +25,23 @@ export type GroupMetrics = {
   late: number;
   /** Received LATE_AFTER_DAYS or more after the manifest date. */
   returnedLate: number;
-  /** Received CTCs with a known receipt time (the base of returnedLate). */
+  /** Received CTCs with a reliable receipt time (the base of returnedLate). */
   timedReturns: number;
+  /**
+   * Received CTCs whose pre was registered only after the deadline had passed:
+   * the scan time says when it was entered, not when it came back.
+   */
+  untimedReturns: number;
   pendingValueCents: number;
   medianReturnDays: number | undefined;
 };
 export type DriverMetrics = GroupMetrics & { driver: string; oldestDays: number };
-export type CityMetrics = GroupMetrics & { city: string };
+export type CityMetrics = GroupMetrics & {
+  city: string;
+  /** Clients and drivers with the most CTCs pending in the city (up to three each). */
+  topClients?: string[] | undefined;
+  topDrivers?: string[] | undefined;
+};
 export type ClientMetrics = GroupMetrics & { client: string };
 export type ConferenceMetrics = GroupMetrics & {
   /** Share of CTCs returned, 0–1; undefined with no CTCs. */
@@ -57,6 +67,7 @@ const emptyGroup = (): Counting => ({
   late: 0,
   returnedLate: 0,
   timedReturns: 0,
+  untimedReturns: 0,
   pendingValueCents: 0,
   medianReturnDays: undefined,
   returns: [],
@@ -72,6 +83,13 @@ function median(values: number[]): number | undefined {
   const middle = Math.floor(sorted.length / 2);
   return sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2;
 }
+
+/** Up to three names with the most pending CTCs. */
+const top = (counts: Map<string, number>) =>
+  [...counts]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "pt-BR"))
+    .slice(0, 3)
+    .map(([name]) => name);
 
 /** Drops the working list and fills the median. */
 function settle<T extends Counting>({ returns, ...group }: T): Omit<T, "returns"> {
@@ -102,9 +120,15 @@ function byLate<T extends GroupMetrics>(name: (item: T) => string) {
 export function conferenceMetrics(
   manifests: Manifest[],
   now: string | number | Date = Date.now(),
+  lateDays = LATE_AFTER_DAYS,
 ): ConferenceMetrics {
   const drivers = new Map<string, Counting & { driver: string; oldestDays: number }>();
-  const cities = new Map<string, Counting & { city: string }>();
+  type CityCounting = Counting & {
+    city: string;
+    clientPending: Map<string, number>;
+    driverPending: Map<string, number>;
+  };
+  const cities = new Map<string, CityCounting>();
   const clients = new Map<string, Counting & { client: string }>();
   const total = emptyGroup();
   const extra = { pendingWithoutValue: 0, pendingWeightGrams: 0, perishablePending: 0 };
@@ -113,12 +137,19 @@ export function conferenceMetrics(
     const driver = drivers.get(name) ?? { ...emptyGroup(), driver: name, oldestDays: 0 };
     drivers.set(name, driver);
     const age = manifestAgeDays(manifest, now);
+    // Registered (manifest.date) only after the deadline: receipt times are not return times.
+    const reliableTiming = manifestAgeDays(manifest, manifest.date) < lateDays;
     for (const doc of manifest.documents as DocumentItem[]) {
       if (doc.reroutedTo) continue;
       const cityName = doc.city?.trim();
       const clientName = doc.client?.trim();
       const city = cityName
-        ? (cities.get(cityName) ?? { ...emptyGroup(), city: cityName })
+        ? (cities.get(cityName) ?? {
+            ...emptyGroup(),
+            city: cityName,
+            clientPending: new Map<string, number>(),
+            driverPending: new Map<string, number>(),
+          })
         : undefined;
       if (city) cities.set(city.city, city);
       const client = clientName
@@ -134,18 +165,25 @@ export function conferenceMetrics(
       add("ctcs");
       if (doc.received) {
         add("received");
-        if (doc.receivedAt) {
-          const days = manifestAgeDays(manifest, doc.receivedAt);
-          add("timedReturns");
-          for (const group of groups) group.returns.push(days);
-          if (days >= LATE_AFTER_DAYS) add("returnedLate");
+        if (!doc.receivedAt || !reliableTiming) {
+          add("untimedReturns");
+          continue;
         }
+        const days = manifestAgeDays(manifest, doc.receivedAt);
+        add("timedReturns");
+        for (const group of groups) group.returns.push(days);
+        if (days >= lateDays) add("returnedLate");
         continue;
       }
       if (!isPendingDocument(doc)) continue;
       add("pending");
       driver.oldestDays = Math.max(driver.oldestDays, age);
-      if (age >= LATE_AFTER_DAYS) add("late");
+      if (age >= lateDays) add("late");
+      if (city) {
+        if (clientName)
+          city.clientPending.set(clientName, (city.clientPending.get(clientName) ?? 0) + 1);
+        city.driverPending.set(name, (city.driverPending.get(name) ?? 0) + 1);
+      }
       if (doc.cargoValueCents === undefined) extra.pendingWithoutValue++;
       else add("pendingValueCents", doc.cargoValueCents);
       extra.pendingWeightGrams += doc.weightGrams ?? 0;
@@ -163,7 +201,13 @@ export function conferenceMetrics(
       .map(settle)
       .filter((driver) => driver.pending || driver.received)
       .sort(byLate((driver) => driver.driver)),
-    cities: [...cities.values()].map(settle).sort(byLate((city) => city.city)),
+    cities: [...cities.values()]
+      .map(({ clientPending, driverPending, ...city }) => ({
+        ...settle(city),
+        topClients: top(clientPending),
+        topDrivers: top(driverPending),
+      }))
+      .sort(byLate((city) => city.city)),
     clients: [...clients.values()].map(settle).sort(byLate((client) => client.client)),
   };
 }

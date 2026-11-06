@@ -247,3 +247,19 @@ it("shows conferentes the roles without any management controls", () => {
   expect(screen.queryByRole("button", { name: "Salvar configuração" })).not.toBeInTheDocument();
   expect(screen.getAllByText("Administrador").length).toBeGreaterThan(0);
 });
+
+it("lets owners set the team's return deadline once the database supports it", async () => {
+  const { rpc } = renderPanel(
+    { ...roleTeam("owner"), settings: { branches: ["06"], reasons: ["DIS"], lateDays: 2 } },
+    ownerId,
+  );
+  const save = screen.getByRole("button", { name: "Salvar prazo" });
+  expect(save).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("Prazo de devolução (dias)"), { target: { value: "3" } });
+  fireEvent.click(save);
+  await waitFor(() => expect(rpc).toHaveBeenCalledWith("set_conference_late_days", { days: 3 }));
+  cleanup();
+  // Without the migration the setting is not offered.
+  renderPanel(roleTeam("owner"), ownerId);
+  expect(screen.queryByLabelText("Prazo de devolução (dias)")).not.toBeInTheDocument();
+});

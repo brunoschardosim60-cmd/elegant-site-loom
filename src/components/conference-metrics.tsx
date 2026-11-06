@@ -132,12 +132,18 @@ export function ConferenceMetricsView({
   manifests,
   now,
   onOpenCity,
+  onOpenLate,
   loadArchived,
+  lateDays = LATE_AFTER_DAYS,
 }: {
   manifests: Manifest[];
   now: string;
   onOpenCity?: ((city: string) => void) | undefined;
   loadArchived?: LoadArchivedByDate | undefined;
+  /** Opens the late pending CTCs, perishable first. */
+  onOpenLate?: (() => void) | undefined;
+  /** Team deadline in days. */
+  lateDays?: number | undefined;
 }) {
   const [kind, setKind] = useState<PeriodKind>("all");
   const period = useMemo(() => metricsPeriod(kind, now || Date.now()), [kind, now]);
@@ -175,9 +181,9 @@ export function ConferenceMetricsView({
   const archived = archive.key === spanKey ? archive.manifests : [];
   const loading = !!loadArchived && !!spanKey && archive.key !== spanKey;
   const all = withKnownCities(merge(manifests, archived));
-  const m = conferenceMetrics(inRange(all, period.range), now);
+  const m = conferenceMetrics(inRange(all, period.range), now, lateDays);
   const before: ConferenceMetrics | undefined = period.previous
-    ? conferenceMetrics(inRange(all, period.previous), now)
+    ? conferenceMetrics(inRange(all, period.previous), now, lateDays)
     : undefined;
   const comparable = !!before && before.timedReturns >= MIN_CTCS;
   const [pdfBusy, setPdfBusy] = useState(false);
@@ -185,7 +191,12 @@ export function ConferenceMetricsView({
     setPdfBusy(true);
     try {
       const { exportMetricsPdf } = await import("@/lib/metrics-pdf");
-      await exportMetricsPdf({ metrics: m, previous: comparable ? before : undefined, period });
+      await exportMetricsPdf({
+        metrics: m,
+        previous: comparable ? before : undefined,
+        period,
+        lateDays,
+      });
     } finally {
       setPdfBusy(false);
     }
@@ -194,7 +205,7 @@ export function ConferenceMetricsView({
     {
       label: "CTCs atrasados agora",
       value: String(m.late),
-      caption: `${m.late ? `${formatShare(m.lateRate)} dos CTCs · ` : ""}pendentes há ${LATE_AFTER_DAYS}+ dias${
+      caption: `${m.late ? `${formatShare(m.lateRate)} dos CTCs · ` : ""}pendentes há ${lateDays}+ dias${
         m.perishablePending ? ` · ${m.perishablePending} perecível(is) pendente(s)` : ""
       }`,
     },
@@ -222,11 +233,16 @@ export function ConferenceMetricsView({
       ),
     },
     {
-      label: `Conferidos com ${LATE_AFTER_DAYS}+ dias`,
+      label: `Conferidos com ${lateDays}+ dias`,
       value: formatShare(m.returnedLateRate),
       caption: (
         <>
           {m.returnedLate} de {m.timedReturns} conferidos
+          {!!m.untimedReturns && (
+            <span className="metric-change">
+              {m.untimedReturns} sem horário confiável (pré cadastrado com atraso)
+            </span>
+          )}
           {comparable && (
             <Change
               current={m.returnedLateRate}
@@ -293,13 +309,31 @@ export function ConferenceMetricsView({
       ) : (
         <>
           <div className="metric-grid metrics-tiles">
-            {tiles.map((tile) => (
-              <div className="metric" key={tile.label}>
-                <div className="metric-label">{tile.label}</div>
-                <div className="metric-value">{tile.value}</div>
-                <div className="metric-caption">{tile.caption}</div>
-              </div>
-            ))}
+            {tiles.map((tile, index) => {
+              const body = (
+                <>
+                  <div className="metric-label">{tile.label}</div>
+                  <div className="metric-value">{tile.value}</div>
+                  <div className="metric-caption">{tile.caption}</div>
+                </>
+              );
+              // The late tile leads to the CTCs behind the number.
+              return index === 0 && onOpenLate && m.late ? (
+                <button
+                  type="button"
+                  className="metric metric-link"
+                  key={tile.label}
+                  onClick={onOpenLate}
+                  title="Ver os atrasados, perecíveis primeiro"
+                >
+                  {body}
+                </button>
+              ) : (
+                <div className="metric" key={tile.label}>
+                  {body}
+                </div>
+              );
+            })}
           </div>
           {!!m.cities.length && <CityMap cities={m.cities} onOpenCity={onOpenCity} />}
           <GroupTable
@@ -327,9 +361,10 @@ export function ConferenceMetricsView({
             ]}
           />
           <p className="text-xs text-muted-foreground">
-            Atrasado: CTC pendente {LATE_AFTER_DAYS} dias ou mais após a emissão do pré; sai da
-            conta assim que é conferido. Devolução: dias entre a emissão e a conferência. A
-            porcentagem só aparece com {MIN_CTCS} CTCs ou mais.
+            Atrasado: CTC pendente {lateDays} {lateDays === 1 ? "dia" : "dias"} ou mais após a
+            emissão do pré; sai da conta assim que é conferido. Devolução: dias entre a emissão e a
+            conferência, sem contar prés cadastrados depois do prazo. A porcentagem só aparece com{" "}
+            {MIN_CTCS} CTCs ou mais.
           </p>
         </>
       )}

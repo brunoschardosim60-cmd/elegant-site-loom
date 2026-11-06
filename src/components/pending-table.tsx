@@ -22,6 +22,7 @@ export function PendingTable({
   onPageChange,
   tableRef,
   now,
+  lateDays = 2,
   readOnly,
   onReceive,
 }: {
@@ -31,6 +32,8 @@ export function PendingTable({
   onPageChange: (page: number) => void;
   tableRef: RefObject<HTMLDivElement | null>;
   now: string;
+  /** Days from which a pending CTC is late (team setting). */
+  lateDays?: number;
   readOnly: boolean;
   onReceive: (manifest: Manifest, documentId: string) => void;
 }) {
@@ -87,7 +90,9 @@ export function PendingTable({
                 </td>
                 <td data-label="Volumes">{doc.volumes}</td>
                 <td data-label="Status">
-                  <span className={`status-badge ${days >= 2 ? "badge-warning" : "badge-pending"}`}>
+                  <span
+                    className={`status-badge ${days >= lateDays ? "badge-warning" : "badge-pending"}`}
+                  >
                     <Clock3 size={10} />
                     Pendente
                   </span>

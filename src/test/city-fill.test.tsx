@@ -25,7 +25,7 @@ const manifest = (id: string, docs: Manifest["documents"]): Manifest => ({
   documents: docs,
 });
 
-it("learns each recipient's usual city and fills only CTCs without one", () => {
+it("learns a recipient's city only when it is unambiguous and fills only CTCs without one", () => {
   const known = knownCities([
     manifest("26180001", [
       doc("0000000001", { recipient: "Hospital São Lucas", city: "PORTO ALEGRE" }),
@@ -34,8 +34,18 @@ it("learns each recipient's usual city and fills only CTCs without one", () => {
       doc("0000000004", { recipient: "FARMACIA X" }),
     ]),
   ]);
-  expect(known.get("HOSPITAL SAO LUCAS")).toBe("PORTO ALEGRE");
+  // Seen in Porto Alegre and Canoas: ambiguous, so no city is guessed.
+  expect(known.has("HOSPITAL SAO LUCAS")).toBe(false);
   expect(known.has("FARMACIA X")).toBe(false);
+  // Different spellings of one city are not ambiguity.
+  expect(
+    knownCities([
+      manifest("26180003", [
+        doc("0000000011", { recipient: "CLINICA B", city: "Gravataí" }),
+        doc("0000000012", { recipient: "clinica b", city: "GRAVATAI - RS" }),
+      ]),
+    ]).get("CLINICA B"),
+  ).toBe("Gravataí");
   const [filled] = fillCities(
     [
       {

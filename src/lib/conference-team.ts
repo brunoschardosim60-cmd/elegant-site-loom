@@ -25,7 +25,12 @@ export const teamSchema = z.object({
   role: memberRoleSchema.optional(),
   /** Which rows of the 108 export belong to this team. */
   settings: z
-    .object({ branches: z.array(z.string()).min(1), reasons: z.array(z.string()).min(1) })
+    .object({
+      branches: z.array(z.string()).min(1),
+      reasons: z.array(z.string()).min(1),
+      /** Days after the manifest date from which a pending CTC is late; absent before the migration. */
+      lateDays: z.number().int().min(1).max(30).optional(),
+    })
     .optional(),
 });
 export type MemberRole = z.infer<typeof memberRoleSchema>;

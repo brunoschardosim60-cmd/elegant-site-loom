@@ -37,6 +37,8 @@ type Props = {
   focusedManifest: { id: string } | null;
   age: (manifest: Manifest) => number;
   now?: string;
+  /** Days from which a pending pre is late (team setting). */
+  lateDays?: number;
   onToggleDocument: (manifest: Manifest, id: string, received: boolean) => void;
   onIssueDateChange?: (manifestId: string, issueDate: string | undefined) => void;
   onDeleteManifest?: (id: string) => void;
@@ -72,6 +74,7 @@ export function DriverManifestList({
   focusedManifest,
   age,
   now,
+  lateDays = 2,
   onToggleDocument,
   onIssueDateChange,
   onDeleteManifest,
@@ -271,7 +274,7 @@ export function DriverManifestList({
                         </div>
                         <div className="driver-manifest-summary">
                           <span
-                            className={`status-badge ${manifest.finishedAt || manifest.routeResolved ? "badge-success" : days >= 2 ? "badge-warning" : "badge-pending"}`}
+                            className={`status-badge ${manifest.finishedAt || manifest.routeResolved ? "badge-success" : days >= lateDays ? "badge-warning" : "badge-pending"}`}
                           >
                             {manifest.finishedAt || manifest.routeResolved ? (
                               <Check size={11} />

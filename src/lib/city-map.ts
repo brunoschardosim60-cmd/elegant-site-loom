@@ -44,6 +44,7 @@ const counters = [
   "late",
   "returnedLate",
   "timedReturns",
+  "untimedReturns",
   "pendingValueCents",
 ] as const;
 

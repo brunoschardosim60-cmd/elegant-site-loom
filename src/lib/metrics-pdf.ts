@@ -19,6 +19,8 @@ export type MetricsPdfInput = {
   previous?: ConferenceMetrics | undefined;
   period: Period;
   shapes: CityShapes;
+  /** Team deadline in days. */
+  lateDays?: number | undefined;
   generatedAt?: Date;
 };
 
@@ -107,6 +109,7 @@ function drawMap(
 /** One A4 report: headline indicators, the map and the worst cities, clients and drivers. */
 export function createMetricsPdf(input: MetricsPdfInput) {
   const { metrics: m, previous, period } = input;
+  const lateDays = input.lateDays ?? LATE_AFTER_DAYS;
   const generatedAt = input.generatedAt ?? new Date();
   const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4", compress: true });
   pdf.setProperties({
@@ -153,7 +156,7 @@ export function createMetricsPdf(input: MetricsPdfInput) {
     [
       "CTCS ATRASADOS AGORA",
       String(m.late),
-      `${m.late ? `${formatShare(m.lateRate)} dos CTCs, ` : ""}pendentes há ${LATE_AFTER_DAYS}+ dias`,
+      `${m.late ? `${formatShare(m.lateRate)} dos CTCs, ` : ""}pendentes há ${lateDays}+ dias`,
     ],
     [
       "MERCADORIA COM CTC PENDENTE",
@@ -166,9 +169,9 @@ export function createMetricsPdf(input: MetricsPdfInput) {
       `Mediana. ${change(m.medianReturnDays, previous?.medianReturnDays, formatDays)}`,
     ],
     [
-      `CONFERIDOS COM ${LATE_AFTER_DAYS}+ DIAS`,
+      `CONFERIDOS COM ${lateDays}+ DIAS`,
       formatShare(m.returnedLateRate),
-      `${m.returnedLate} de ${m.timedReturns}. ${change(m.returnedLateRate, previous?.returnedLateRate, (d) => `${Math.round(d * 100)} p.p.`)}`,
+      `${m.returnedLate} de ${m.timedReturns}${m.untimedReturns ? ` (${m.untimedReturns} sem horário confiável)` : ""}. ${change(m.returnedLateRate, previous?.returnedLateRate, (d) => `${Math.round(d * 100)} p.p.`)}`,
     ],
   ];
   const tileWidth = (available - 3 * 4) / 4;
@@ -307,7 +310,7 @@ export function createMetricsPdf(input: MetricsPdfInput) {
     pdf.text(
       pdf.splitTextToSize(
         plain(
-          `Atrasado: CTC pendente ${LATE_AFTER_DAYS} dias ou mais após a emissão do pré. Devolução: dias entre a emissão e a conferência (mediana). Porcentagens só com ${MIN_CTCS} ou mais CTCs. Dados da planilha 108.`,
+          `Atrasado: CTC pendente ${lateDays} dias ou mais após a emissão do pré. Devolução: dias entre a emissão e a conferência (mediana), sem prés cadastrados depois do prazo. Porcentagens só com ${MIN_CTCS} ou mais CTCs. Dados da planilha 108.`,
         ),
         available - 20,
       ) as string[],

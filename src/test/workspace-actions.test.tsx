@@ -240,6 +240,7 @@ it("passes the active view, search and ordering filter to the PDF report", async
       view: "missing",
       query: "123-1",
       filter: "old",
+      lateDays: 2,
     }),
   );
   expect(await screen.findByRole("button", { name: "PDF" })).toBeEnabled();

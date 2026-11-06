@@ -189,8 +189,10 @@ export function TeamPanel({
   const manage = canManageTeam(team);
   const [branches, setBranches] = useState("");
   const [reasons, setReasons] = useState("");
+  const [lateDays, setLateDays] = useState("");
   useEffect(() => {
     if (!open) return;
+    setLateDays(String(team.settings?.lateDays ?? 2));
     setBranches((team.settings?.branches ?? ["06"]).join(", "));
     setReasons((team.settings?.reasons ?? ["DIS"]).join(", "));
   }, [open, team.settings]);
@@ -406,6 +408,49 @@ export function TeamPanel({
                 </Button>
                 <p className="text-xs text-muted-foreground">
                   Colunas Filial e Motivo da planilha. Separe por vírgula.
+                </p>
+              </form>
+            )}
+            {manage && team.settings?.lateDays !== undefined && (
+              <form
+                className="grid gap-2 rounded-lg border p-3"
+                aria-label="Prazo de devolução"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void act(
+                    "set_conference_late_days",
+                    { days: Number(lateDays) },
+                    "Prazo salvo. Vale para filtros, indicadores e mapa.",
+                  );
+                }}
+              >
+                <label className="form-field max-w-48">
+                  Prazo de devolução (dias)
+                  <input
+                    type="number"
+                    min={1}
+                    max={30}
+                    value={lateDays}
+                    onChange={(e) => setLateDays(e.target.value)}
+                    disabled={busy}
+                  />
+                </label>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="justify-self-start"
+                  disabled={
+                    busy ||
+                    !/^\d+$/.test(lateDays) ||
+                    Number(lateDays) < 1 ||
+                    Number(lateDays) > 30 ||
+                    Number(lateDays) === team.settings.lateDays
+                  }
+                >
+                  Salvar prazo
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  CTC pendente há esse número de dias ou mais conta como atrasado.
                 </p>
               </form>
             )}

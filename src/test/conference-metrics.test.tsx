@@ -77,8 +77,11 @@ it("computes return rate, late and perishable CTCs, pending value and median ret
       late: 1,
       returnedLate: 0,
       timedReturns: 0,
+      untimedReturns: 0,
       pendingValueCents: 1_250_000,
       medianReturnDays: undefined,
+      topClients: [],
+      topDrivers: ["ANA", "BETO"],
     },
   ]);
   expect(formatMoney(1_250_000).replace(/\s/g, " ")).toBe("R$ 12.500");

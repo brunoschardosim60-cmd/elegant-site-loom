@@ -14,6 +14,7 @@ const city = (name: string, ctcs: number, late: number, pending = late): CityMet
   late,
   returnedLate: 0,
   timedReturns: 0,
+  untimedReturns: 0,
   pendingValueCents: 0,
   medianReturnDays: undefined,
 });
@@ -48,7 +49,13 @@ it("colours cities by the share late now and marks too little data apart", () =>
 it("shows a city's numbers on the first tap and opens its pending CTCs on the second", async () => {
   const open = vi.fn();
   render(
-    <CityMap cities={[city("PELOTAS", 10, 3, 4), city("RIO GRANDE", 2, 1)]} onOpenCity={open} />,
+    <CityMap
+      cities={[
+        { ...city("PELOTAS", 10, 3, 4), topClients: ["DIMED"], topDrivers: ["ANA", "BETO"] },
+        city("RIO GRANDE", 2, 1),
+      ]}
+      onOpenCity={open}
+    />,
   );
   const pelotas = await screen.findByRole("button", { name: /^Pelotas:/ });
   expect(pelotas).toHaveAttribute("data-level", "critical");
@@ -56,6 +63,8 @@ it("shows a city's numbers on the first tap and opens its pending CTCs on the se
   expect(screen.getByRole("button", { name: /^Rio Grande:/ })).toHaveAttribute("data-level", "few");
   fireEvent.click(pelotas);
   expect(open).not.toHaveBeenCalled();
+  expect(screen.getByText("Clientes com pendência: DIMED")).toBeInTheDocument();
+  expect(screen.getByText("Motoristas: ANA, BETO")).toBeInTheDocument();
   expect(screen.getByText("10 CTCs · 4 pendentes · 3 atrasados (30%)")).toBeInTheDocument();
   fireEvent.click(pelotas);
   expect(open).toHaveBeenCalledExactlyOnceWith("PELOTAS");
